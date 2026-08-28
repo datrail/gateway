@@ -57,13 +57,16 @@ nothing would report:
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from fastmcp import FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.exceptions import ToolError
 from fastmcp.server import create_proxy
+from fastmcp.server.middleware import Middleware
 from fastmcp.server.providers.proxy import ProxyClient
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
@@ -114,8 +117,15 @@ def port() -> int:
 def build_gateway(upstream_url: str | None = None) -> FastMCP:
     """The proxy that forwards to the upstream, plus a liveness route."""
     url = upstream_url or _required("RAIL_GATEWAY_UPSTREAM_URL")
+    if not urlsplit(url).hostname:
+        # `http://` and `http://user:pw@` both parse, and a gateway built on
+        # either starts and answers /health while able to forward nothing.
+        raise RuntimeError(
+            f"RAIL_GATEWAY_UPSTREAM_URL names no host: {_safe_to_log(url)}"
+        )
 
-    transport = StreamableHttpTransport(url=url)
+    clean_url, auth_headers = _split_credential(url)
+    transport = StreamableHttpTransport(url=clean_url, headers=auth_headers)
     backend = ProxyClient(
         transport,
         # See the module docstring: relayed upstream-to-caller, refused
@@ -125,6 +135,7 @@ def build_gateway(upstream_url: str | None = None) -> FastMCP:
         elicitation_handler=None,
     )
     gateway = create_proxy(backend, name="datrail-gateway")
+    gateway.add_middleware(_UpstreamErrorBoundary())
 
     # Last, and it has to be: see the module docstring. Both `create_proxy` and
     # `ProxyClient.__init__` set this True, so an assignment above either one is
@@ -144,7 +155,7 @@ def build_gateway(upstream_url: str | None = None) -> FastMCP:
         """
         return JSONResponse({"status": "ok"})
 
-    log.info("forwarding to %s", _redacted(url))
+    log.info("forwarding to %s", _safe_to_log(url))
     return gateway
 
 
@@ -153,20 +164,70 @@ def build_app(upstream_url: str | None = None) -> ASGIApp:
     return build_gateway(upstream_url).http_app(transport="streamable-http")
 
 
-def _redacted(url: str) -> str:
-    """A URL with any credential in its authority replaced.
+def _split_credential(url: str) -> tuple[str, dict[str, str]]:
+    """Move any `user:password@` out of the URL and into an Authorization header.
 
-    `RAIL_GATEWAY_UPSTREAM_URL` can legitimately carry `user:password@`, and the
-    line naming it is written at INFO on every start — so without this the
-    credential lands in stdout, and from there in whatever collects it.
+    Not cosmetic. httpx names the URL it called in its error text — `Client
+    error '401 Unauthorized' for url '<url>'` — and fastmcp puts that string
+    into the JSON-RPC error it returns to the caller. With the credential in
+    the URL, an ordinary upstream 401 hands it to an unauthenticated agent, and
+    a stale upstream key turns every call into a disclosure of it. The error
+    boundary below cannot reach this one: the failure happens while the proxy
+    is opening its session, before any message it wraps.
+
+    The credential still travels, on the same request, in the header where a
+    credential belongs.
     """
     parsed = urlsplit(url)
     if not parsed.username and not parsed.password:
-        return url
-    host = parsed.hostname or ""
-    if parsed.port:
-        host = f"{host}:{parsed.port}"
-    return urlunsplit(parsed._replace(netloc=f"***@{host}"))
+        return url, {}
+    credential = f"{unquote(parsed.username or '')}:{unquote(parsed.password or '')}"
+    encoded = base64.b64encode(credential.encode()).decode()
+    host = parsed.netloc.rsplit("@", 1)[-1]
+    return (
+        urlunsplit(parsed._replace(netloc=host)),
+        {"Authorization": f"Basic {encoded}"},
+    )
+
+
+class _UpstreamErrorBoundary(Middleware):
+    """Answer for the upstream rather than relaying what it said.
+
+    httpx raises `Client error '401 Unauthorized' for url '<the upstream URL>'`,
+    and fastmcp puts that string in the JSON-RPC error it returns — so an
+    unauthenticated caller reading an ordinary failure is handed the upstream's
+    address and, when the URL carries one, its credential. A stale upstream key
+    turns every call into a disclosure of it.
+
+    The detail is not lost; it goes to the log, which is on this side of the
+    boundary. What crosses is that the upstream could not be reached.
+    """
+
+    async def on_message(self, context, call_next):
+        try:
+            return await call_next(context)
+        except Exception as exc:  # noqa: BLE001 - a boundary catches everything
+            log.warning("upstream call failed: %s: %s", type(exc).__name__, exc)
+            raise ToolError("the upstream service could not be reached") from None
+
+
+def _safe_to_log(url: str) -> str:
+    """Where the gateway points, with every part that can carry a secret gone.
+
+    `RAIL_GATEWAY_UPSTREAM_URL` can legitimately carry `user:password@`, and a
+    hosted MCP endpoint commonly carries `?api_key=`. The line naming it is
+    written on every start, so both would reach stdout and whatever collects it.
+
+    Rebuilt rather than selectively rewritten. Clearing the authority alone left
+    the query untouched; reassembling from `hostname` and `port` dropped the
+    brackets an IPv6 literal needs and raised on a port that is not a number —
+    a redaction helper crashing on the value it was handed being the worst
+    shape available. Scheme, host and path are what an operator is reading for.
+    """
+    parsed = urlsplit(url)
+    netloc = parsed.netloc.rsplit("@", 1)[-1]
+    suffix = " (query omitted)" if parsed.query or parsed.fragment else ""
+    return urlunsplit((parsed.scheme, netloc, parsed.path, "", "")) + suffix
 
 
 def _configure_logging() -> None:
@@ -185,12 +246,16 @@ def _configure_logging() -> None:
             f"RAIL_GATEWAY_LOG_LEVEL must be one of "
             f"{', '.join(sorted(LOG_LEVELS))}, got: {raw}"
         )
+    log.setLevel(level)
+    if log.handlers:
+        # Called twice — by `main()` and by a test — this would otherwise add a
+        # second handler and print every line twice.
+        return
     handler = logging.StreamHandler()
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     )
     log.addHandler(handler)
-    log.setLevel(level)
 
 
 def main() -> None:
@@ -205,7 +270,16 @@ def main() -> None:
     import uvicorn
 
     _configure_logging()
-    uvicorn.run(build_app(), host="0.0.0.0", port=port())
+    uvicorn.run(
+        build_app(),
+        host="0.0.0.0",
+        port=port(),
+        # A call in flight when SIGTERM lands otherwise gets no answer at all —
+        # its response travels on a stream uvicorn's connection wait does not
+        # cover, so the agent sees a hang rather than a failure. This bounds the
+        # drain instead of skipping it.
+        timeout_graceful_shutdown=25,
+    )
 
 
 if __name__ == "__main__":

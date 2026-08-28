@@ -104,3 +104,10 @@ async def gateway_url(upstream):
     port = _free_port()
     async with serve(build_app(upstream), port):
         yield f"http://127.0.0.1:{port}"
+
+
+@pytest.fixture
+def upstream_free_url() -> str:
+    """`build_gateway` constructs without connecting, so a test that only wants
+    the startup line does not need a server behind it."""
+    return "http://unused.invalid/mcp"

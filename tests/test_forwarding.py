@@ -7,6 +7,8 @@ import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
+from gateway.server import build_app
+
 
 @pytest.mark.asyncio
 async def test_a_call_reaches_the_upstream_and_its_answer_comes_back(gateway_url):
@@ -130,3 +132,56 @@ async def test_the_upstream_cannot_reach_back_into_the_caller(gateway_url):
 
     assert not reached, "the upstream reached the caller's model"
     assert result.content[0].text.startswith("refused:")
+
+
+@pytest.mark.asyncio
+async def test_an_upstream_failure_does_not_hand_the_caller_its_address():
+    """httpx names the URL it called in its error, and fastmcp puts that string
+    in the JSON-RPC error it returns — so an ordinary 401 handed an
+    unauthenticated caller the upstream's address and, where the URL carries
+    one, its credential. A stale upstream key made every call a disclosure of
+    it.
+
+    This covers the `user:password@` form, which is moved into an Authorization
+    header so it is not in the URL httpx names. **A credential in the query
+    string is not covered** — `?api_key=` is how some hosted MCP endpoints
+    route a request, so it has to stay in the URL, and it still reaches the
+    caller in an upstream error. Closing that needs an error boundary the
+    proxy's connection setup passes through, which this change does not have.
+    """
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    from tests.conftest import _free_port, serve
+
+    async def always_401(_request):
+        return JSONResponse({"error": "nope"}, status_code=401)
+
+    upstream_port = _free_port()
+    secret_url = f"http://svcuser:s3cret@127.0.0.1:{upstream_port}/mcp"
+    refusing = Starlette(routes=[Route("/mcp", always_401, methods=["POST", "GET"])])
+
+    gateway_port = _free_port()
+    async with (
+        serve(refusing, upstream_port),
+        serve(build_app(secret_url), gateway_port),
+        httpx.AsyncClient() as client,
+    ):
+        response = await client.post(
+            f"http://127.0.0.1:{gateway_port}/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "t", "version": "1"},
+                },
+            },
+            headers={"accept": "application/json, text/event-stream"},
+        )
+
+    body = response.text
+    assert "s3cret" not in body

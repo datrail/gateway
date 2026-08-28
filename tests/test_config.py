@@ -51,3 +51,12 @@ def test_a_port_outside_the_range_is_refused(monkeypatch, raw):
     monkeypatch.setenv("RAIL_GATEWAY_PORT", raw)
     with pytest.raises(RuntimeError, match="between 1 and 65535"):
         port()
+
+
+@pytest.mark.parametrize("url", ["http://", "http://user:pw@", "https://"])
+def test_an_upstream_url_with_no_host_refuses_to_start(url):
+    """Both parse, and a gateway built on either starts and answers /health
+    while able to forward nothing — the condition the required-variable check
+    exists to prevent, reached by a different door."""
+    with pytest.raises(RuntimeError, match="names no host"):
+        build_gateway(url)

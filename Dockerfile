@@ -26,6 +26,7 @@ EXPOSE 8080
 # RAIL_GATEWAY_PORT reaches the socket. Naming the port here instead would have
 # it validated and then ignored.
 #
-# Exec form: python is PID 1 and receives SIGTERM directly, so a stop is a
-# graceful shutdown rather than a ten-second wait and a kill.
+# Exec form: python is PID 1 and receives SIGTERM directly rather than waiting
+# out docker's ten seconds. The drain itself is bounded in `main()` — the exec
+# form only gets the signal there.
 CMD ["python", "-m", "gateway.server"]
