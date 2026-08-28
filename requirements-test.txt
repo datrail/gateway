@@ -1,0 +1,8 @@
+# The test environment: the runtime plus what exercises it. Kept separate from
+# requirements-dev.txt, which holds the linter alone — CI installs one or the
+# other depending on the job, and neither reaches the image.
+-r requirements.txt
+
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1
