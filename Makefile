@@ -1,0 +1,12 @@
+.PHONY: lint
+
+# The gate is defined here rather than in .github/workflows/ci.yml, so the command
+# CI runs is the one you can run before opening a pull request.
+#
+# The two halves cover different files. `ruff check` reads Python; `ruff format`
+# also reads Python fenced in Markdown. And ruff honours git's global excludes
+# file, which a runner does not have: a path you exclude globally is linted in
+# CI and skipped locally.
+lint:
+	ruff check .
+	ruff format --check .

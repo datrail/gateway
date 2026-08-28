@@ -1,0 +1,44 @@
+# Python virtual envs
+.venv/
+venv/
+**/.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs and runtime state
+/logs/
+*.log
+*.pid
+
+# Local config with secrets
+.env
+.env.local
+
+# Build and packaging artefacts
+build/
+dist/
+*.egg-info/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Backup files (created during dev)
+**/*.bak
+**/*.bak.*
