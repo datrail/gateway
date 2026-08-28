@@ -31,7 +31,7 @@ async def test_tool_names_are_not_rewritten(gateway_url):
     async with Client(StreamableHttpTransport(url=f"{gateway_url}/mcp")) as client:
         names = sorted(tool.name for tool in await client.list_tools())
 
-    assert names == ["scan_batch", "track_package"]
+    assert names == ["reach_into_the_caller", "scan_batch", "track_package"]
 
 
 @pytest.mark.asyncio
@@ -99,3 +99,34 @@ async def test_progress_notifications_survive_the_hop(gateway_url):
 
     assert result.content[0].text == "scanned"
     assert seen == [(1.0, 2.0), (2.0, 2.0)]
+
+
+@pytest.mark.asyncio
+async def test_the_upstream_cannot_reach_back_into_the_caller(gateway_url):
+    """The second channel is relayed one way only.
+
+    `ProxyClient` installs handlers for roots, sampling and elicitation as well
+    as progress and logs. Those three are requests travelling *into* the
+    caller: with them on, the service behind this gateway can enumerate the
+    caller's roots, drive its model with a prompt of its choosing, and put a
+    question in front of its human. The header boundary does not cover that
+    direction, so the handlers are refused explicitly and this is what says so.
+    """
+    reached = []
+
+    async def sampling_handler(messages, params, ctx):
+        # A caller that *can* answer. Without this the call fails because this
+        # client declared no sampling capability, and the test would pass
+        # whether or not the gateway relayed — which is the shape of an
+        # assertion that proves nothing.
+        reached.append(messages)
+        return "the caller's model answered"
+
+    async with Client(
+        StreamableHttpTransport(url=f"{gateway_url}/mcp"),
+        sampling_handler=sampling_handler,
+    ) as client:
+        result = await client.call_tool("reach_into_the_caller", {})
+
+    assert not reached, "the upstream reached the caller's model"
+    assert result.content[0].text.startswith("refused:")

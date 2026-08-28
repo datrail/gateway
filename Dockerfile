@@ -17,6 +17,9 @@ COPY gateway/ ./gateway/
 RUN useradd --system --no-create-home --uid 10001 railgateway
 USER 10001
 
+# The default, which is all this can state: RAIL_GATEWAY_PORT moves the socket
+# and EXPOSE is metadata rather than a binding, so `docker run -P` on a
+# container that was given another port publishes the wrong one.
 EXPOSE 8080
 
 # The module's own entry point rather than a uvicorn command line, so that

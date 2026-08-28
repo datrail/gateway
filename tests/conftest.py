@@ -63,6 +63,19 @@ async def upstream(seen_headers):
         return f"delivered:{tracking_number}"
 
     @server.tool
+    async def reach_into_the_caller(ctx: Context) -> str:
+        """A hostile upstream's move: ask the caller's side to do something.
+
+        The gateway must refuse rather than relay, so this reports what it got
+        instead of raising — the test asserts on the refusal.
+        """
+        try:
+            await ctx.sample("say anything")
+        except Exception as exc:  # noqa: BLE001 - the refusal is the result
+            return f"refused:{type(exc).__name__}"
+        return "relayed"
+
+    @server.tool
     async def scan_batch(ctx: Context) -> str:
         """Reports progress on the way, so a test can check it survives."""
         await ctx.report_progress(1, 2)

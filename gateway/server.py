@@ -7,13 +7,22 @@ arrives is forwarded.
 Four choices here are not obvious, and each has a way of being wrong that
 nothing would report:
 
-  * **The backend is a `ProxyClient`, not a plain `Client`.** Only `ProxyClient`
-    installs the handlers that relay a session's second channel — progress,
-    log messages, sampling and elicitation. With a plain `Client` a long tool
-    call still returns its result, so nothing looks broken, while every
-    progress notification and log line it emitted was dropped on the way back
-    and `ctx.sample()` fails outright. A component that claims to forward
-    unchanged has to carry those too.
+  * **The backend is a `ProxyClient` with three of its five handlers refused.**
+    Only `ProxyClient` relays a session's second channel; with a plain `Client`
+    a long tool call still returns its result, so nothing looks broken, while
+    every progress notification and log line it emitted is dropped on the way
+    back.
+
+    But its five defaults are not one thing. Progress and log messages travel
+    *upstream to caller* and are what "forward unchanged" means. Roots,
+    sampling and elicitation are requests travelling *upstream into the
+    caller*: with them installed, the service behind this gateway can enumerate
+    the caller's roots, drive the caller's model with a prompt of its choosing,
+    and put a question of its own in front of the caller's human. That is a
+    trust edge pointing the wrong way through an enforcement point, and it is
+    not one the header boundary covers, so those three are passed `None`
+    explicitly — `ProxyClient` installs a default only for a key absent from
+    its kwargs.
 
   * **The proxy is served directly, never mounted.** `FastMCP.mount` re-exposes
     an upstream's tools under a namespace when it is given one, and an
@@ -32,6 +41,13 @@ nothing would report:
     appropriate for proxy clients, where the caller's credentials should be
     propagated", which is the opposite of what an enforcement point needs.
 
+    **This closes the header channel and not every channel.** A caller's
+    `params._meta` on a `tools/call` is copied to the upstream verbatim, so a
+    key named `x-rail` in there does cross. Nothing reads it — this component
+    takes identity from the header alone, and so does the contract — but an
+    upstream that invented its own convention could be fed by a caller, and the
+    guarantee to state is "no caller header crosses", not "nothing does".
+
   * **Enforcement belongs above the MCP layer, not inside it.** A refusal is an
     HTTP status: 403 for a call that was judged and denied, 503 for one that
     could not be judged at all. Inside an MCP server a refusal is a JSON-RPC
@@ -43,6 +59,7 @@ from __future__ import annotations
 
 import logging
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 from fastmcp import FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
@@ -54,6 +71,11 @@ from starlette.types import ASGIApp
 log = logging.getLogger("gateway")
 
 DEFAULT_PORT = 8080
+
+#: Checked against by name rather than through `logging.getLevelName`, whose
+#: return type is the contract: an integer for a known name and the string
+#: "Level <n>" for anything else, so a typo would set a level nobody chose.
+LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
 
 
 def _required(name: str) -> str:
@@ -94,7 +116,15 @@ def build_gateway(upstream_url: str | None = None) -> FastMCP:
     url = upstream_url or _required("RAIL_GATEWAY_UPSTREAM_URL")
 
     transport = StreamableHttpTransport(url=url)
-    gateway = create_proxy(ProxyClient(transport), name="datrail-gateway")
+    backend = ProxyClient(
+        transport,
+        # See the module docstring: relayed upstream-to-caller, refused
+        # upstream-into-caller.
+        roots=None,
+        sampling_handler=None,
+        elicitation_handler=None,
+    )
+    gateway = create_proxy(backend, name="datrail-gateway")
 
     # Last, and it has to be: see the module docstring. Both `create_proxy` and
     # `ProxyClient.__init__` set this True, so an assignment above either one is
@@ -114,13 +144,53 @@ def build_gateway(upstream_url: str | None = None) -> FastMCP:
         """
         return JSONResponse({"status": "ok"})
 
-    log.info("forwarding to %s", url)
+    log.info("forwarding to %s", _redacted(url))
     return gateway
 
 
 def build_app(upstream_url: str | None = None) -> ASGIApp:
     """The ASGI application uvicorn serves."""
     return build_gateway(upstream_url).http_app(transport="streamable-http")
+
+
+def _redacted(url: str) -> str:
+    """A URL with any credential in its authority replaced.
+
+    `RAIL_GATEWAY_UPSTREAM_URL` can legitimately carry `user:password@`, and the
+    line naming it is written at INFO on every start — so without this the
+    credential lands in stdout, and from there in whatever collects it.
+    """
+    parsed = urlsplit(url)
+    if not parsed.username and not parsed.password:
+        return url
+    host = parsed.hostname or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    return urlunsplit(parsed._replace(netloc=f"***@{host}"))
+
+
+def _configure_logging() -> None:
+    """Give this component's logger a handler, and nothing else one.
+
+    uvicorn configures only `uvicorn*`, and `logging.lastResort` drops anything
+    below WARNING — so without a handler here the line naming the upstream is
+    discarded. `basicConfig` would do it by configuring the *root* logger, which
+    also turns on INFO for httpx and every mcp module and buys around thirty
+    lines per forwarded call.
+    """
+    raw = (os.environ.get("RAIL_GATEWAY_LOG_LEVEL") or "").strip() or "INFO"
+    level = raw.upper()
+    if level not in LOG_LEVELS:
+        raise RuntimeError(
+            f"RAIL_GATEWAY_LOG_LEVEL must be one of "
+            f"{', '.join(sorted(LOG_LEVELS))}, got: {raw}"
+        )
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    log.addHandler(handler)
+    log.setLevel(level)
 
 
 def main() -> None:
@@ -134,13 +204,7 @@ def main() -> None:
     """
     import uvicorn
 
-    # uvicorn configures its own loggers and leaves everything else to
-    # `logging.lastResort`, which drops anything below WARNING — so without this
-    # the only line stating where this gateway points is discarded.
-    logging.basicConfig(
-        level=os.environ.get("RAIL_GATEWAY_LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    _configure_logging()
     uvicorn.run(build_app(), host="0.0.0.0", port=port())
 
 
