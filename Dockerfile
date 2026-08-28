@@ -27,6 +27,6 @@ EXPOSE 8080
 # it validated and then ignored.
 #
 # Exec form: python is PID 1 and receives SIGTERM directly rather than waiting
-# out docker's ten seconds. The drain itself is bounded in `main()` — the exec
-# form only gets the signal there.
+# out docker's ten seconds. What happens next is uvicorn's default and not
+# something this image sets — `main()` says why the drain is not bounded there.
 CMD ["python", "-m", "gateway.server"]

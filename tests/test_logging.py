@@ -13,8 +13,8 @@ from gateway.server import _configure_logging, _safe_to_log, build_gateway, log
     ("url", "expected"),
     [
         ("http://gateway:8080/mcp", "http://gateway:8080/mcp"),
-        ("https://user:s3cret@internal:9443/mcp", "https://internal:9443/mcp"),
-        ("https://user@internal/mcp", "https://internal/mcp"),
+        ("https://user:s3cret@host.invalid:9443/mcp", "https://host.invalid:9443/mcp"),
+        ("https://user@host.invalid/mcp", "https://host.invalid/mcp"),
         # A hosted MCP endpoint commonly carries its credential here, which
         # clearing the authority alone left untouched.
         ("https://host/mcp?api_key=SECRET", "https://host/mcp (query omitted)"),
@@ -33,7 +33,7 @@ def test_the_startup_line_itself_is_safe(caplog):
     """The helper being correct is not the property that matters — the call
     site using it is. Asserting only on `_safe_to_log` leaves a mutation that
     logs the raw URL passing the whole suite."""
-    secret_url = "https://svcuser:s3cret@internal:9443/mcp?api_key=TOKEN"
+    secret_url = "https://svcuser:s3cret@host.invalid:9443/mcp?api_key=TOKEN"
     with caplog.at_level(logging.INFO, logger="gateway"):
         build_gateway(secret_url)
 
