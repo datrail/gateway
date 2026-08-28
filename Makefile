@@ -1,4 +1,4 @@
-.PHONY: lint
+.PHONY: lint test
 
 # The gate is defined here rather than in .github/workflows/ci.yml, so the command
 # CI runs is the one you can run before opening a pull request.
@@ -10,3 +10,9 @@
 lint:
 	ruff check .
 	ruff format --check .
+
+# The suite stands up a real upstream and a real gateway on ephemeral ports:
+# the gateway reaches its upstream as an MCP client, so an in-process transport
+# would exercise a shape no deployment has.
+test:
+	python -m pytest -q

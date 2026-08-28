@@ -1,0 +1,12 @@
+# The test environment: the runtime plus what exercises it. Kept separate from
+# requirements-dev.txt, which holds the linter alone — CI installs one or the
+# other depending on the job, and neither reaches the image.
+-r requirements.txt
+
+# pytest 9 or newer, and not by preference. Under 8.x an async test missing
+# its marker is skipped with a warning and the run still exits 0 — so the one
+# place the strictness in pytest.ini matters, the CI job that gates the
+# release, is the one place it would not have held.
+pytest==9.1.1
+pytest-asyncio==1.4.0
+httpx==0.28.1
