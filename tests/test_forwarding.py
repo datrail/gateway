@@ -6,6 +6,7 @@ import httpx
 import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.exceptions import ToolError
 
 from gateway.server import build_app
 
@@ -114,28 +115,36 @@ async def test_the_upstream_cannot_reach_back_into_the_caller(gateway_url):
     question in front of its human. The header boundary does not cover that
     direction, so the handlers are refused explicitly and this is what says so.
     """
-    reached = []
+    reached: list[str] = []
 
+    # A caller that *can* answer all three. Without every one of these the
+    # corresponding attempt fails for this client's own lack of capability, and
+    # the assertion holds whether or not the gateway relayed — which is an
+    # assertion that proves nothing, and was twice written that way here.
     async def sampling_handler(messages, params, ctx):
-        # A caller that *can* answer. Without this the call fails because this
-        # client declared no sampling capability, and the test would pass
-        # whether or not the gateway relayed — which is the shape of an
-        # assertion that proves nothing.
-        reached.append(messages)
+        reached.append("sampling")
         return "the caller's model answered"
+
+    async def elicitation_handler(message, response_type, params, ctx):
+        reached.append("elicitation")
+        return "sk-CALLER-SECRET"
 
     async with Client(
         StreamableHttpTransport(url=f"{gateway_url}/mcp"),
         sampling_handler=sampling_handler,
+        elicitation_handler=elicitation_handler,
+        roots=["file:///caller/private"],
     ) as client:
         result = await client.call_tool("reach_into_the_caller", {})
 
     assert not reached, "the upstream reached the caller's model"
-    assert result.content[0].text.startswith("refused:")
+    # All three, not only the one with a handler on this side: deleting
+    # roots=None or elicitation_handler=None otherwise leaves the suite green.
+    assert result.content[0].text == "refused:all"
 
 
 @pytest.mark.asyncio
-async def test_an_upstream_failure_does_not_hand_the_caller_its_address():
+async def test_an_upstream_failure_does_not_hand_the_caller_its_credential():
     """httpx names the URL it called in its error, and fastmcp puts that string
     in the JSON-RPC error it returns — so an ordinary 401 handed an
     unauthenticated caller the upstream's address and, where the URL carries
@@ -185,3 +194,43 @@ async def test_an_upstream_failure_does_not_hand_the_caller_its_address():
 
     body = response.text
     assert "s3cret" not in body
+
+
+@pytest.mark.asyncio
+async def test_the_upstream_credential_still_travels(upstream, seen_headers):
+    """`_split_credential` takes `user:password@` out of the URL so httpx cannot
+    name it in an error. The credential still has to reach the upstream, on the
+    same request — dropping it entirely would silently 401 every credentialed
+    deployment, and nothing else here would notice.
+    """
+    from tests.conftest import _free_port, serve
+
+    scheme, rest = upstream.split("://", 1)
+    credentialed = f"{scheme}://svcuser:s3cret@{rest}"
+
+    port = _free_port()
+    async with (
+        serve(build_app(credentialed), port),
+        Client(StreamableHttpTransport(url=f"http://127.0.0.1:{port}/mcp")) as c,
+    ):
+        await c.call_tool("track_package", {"tracking_number": "77123"})
+
+    sent = [h.get("authorization") for h in seen_headers if "authorization" in h]
+    assert sent, "no Authorization header reached the upstream"
+    assert all(v == "Basic c3ZjdXNlcjpzM2NyZXQ=" for v in sent)
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_tool_reports_itself_not_an_outage(gateway_url):
+    """The error boundary must not swallow the upstream's own answers.
+
+    Catching every exception rather than the transport ones turned `Unknown
+    tool: 'no_such_tool'` into "the upstream service could not be reached", so
+    a caller's typo read as an outage and the real answer never arrived.
+    """
+    async with Client(StreamableHttpTransport(url=f"{gateway_url}/mcp")) as client:
+        with pytest.raises(ToolError) as caught:
+            await client.call_tool("no_such_tool", {})
+
+    assert "no_such_tool" in str(caught.value)
+    assert "could not be reached" not in str(caught.value)

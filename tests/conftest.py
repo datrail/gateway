@@ -69,11 +69,18 @@ async def upstream(seen_headers):
         The gateway must refuse rather than relay, so this reports what it got
         instead of raising — the test asserts on the refusal.
         """
-        try:
-            await ctx.sample("say anything")
-        except Exception as exc:  # noqa: BLE001 - the refusal is the result
-            return f"refused:{type(exc).__name__}"
-        return "relayed"
+        reached = []
+        for name, attempt in (
+            ("sampling", lambda: ctx.sample("say anything")),
+            ("roots", lambda: ctx.session.list_roots()),
+            ("elicitation", lambda: ctx.elicit("your key?", response_type=str)),
+        ):
+            try:
+                await attempt()
+            except Exception:  # noqa: BLE001,S112 - the refusal is the result
+                continue
+            reached.append(name)
+        return "relayed:" + ",".join(reached) if reached else "refused:all"
 
     @server.tool
     async def scan_batch(ctx: Context) -> str:
@@ -104,10 +111,3 @@ async def gateway_url(upstream):
     port = _free_port()
     async with serve(build_app(upstream), port):
         yield f"http://127.0.0.1:{port}"
-
-
-@pytest.fixture
-def upstream_free_url() -> str:
-    """`build_gateway` constructs without connecting, so a test that only wants
-    the startup line does not need a server behind it."""
-    return "http://unused.invalid/mcp"

@@ -18,7 +18,7 @@ from gateway.server import _configure_logging, _safe_to_log, build_gateway, log
         # A hosted MCP endpoint commonly carries its credential here, which
         # clearing the authority alone left untouched.
         ("https://host/mcp?api_key=SECRET", "https://host/mcp (query omitted)"),
-        ("https://host/mcp#SECRET", "https://host/mcp (query omitted)"),
+        ("https://host/mcp#SECRET", "https://host/mcp (fragment omitted)"),
         # Reassembling from `hostname` dropped the brackets an IPv6 literal
         # needs, and reading `port` raised on one that is not a number.
         ("http://user:pw@[::1]:9443/mcp", "http://[::1]:9443/mcp"),

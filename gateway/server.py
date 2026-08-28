@@ -62,6 +62,7 @@ import logging
 import os
 from urllib.parse import unquote, urlsplit, urlunsplit
 
+import httpx
 from fastmcp import FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ToolError
@@ -117,7 +118,15 @@ def port() -> int:
 def build_gateway(upstream_url: str | None = None) -> FastMCP:
     """The proxy that forwards to the upstream, plus a liveness route."""
     url = upstream_url or _required("RAIL_GATEWAY_UPSTREAM_URL")
-    if not urlsplit(url).hostname:
+    try:
+        hostname = urlsplit(url).hostname
+    except ValueError as exc:
+        # An unclosed IPv6 bracket raises here, before the host check below —
+        # a bare traceback that never names the variable the operator set.
+        raise RuntimeError(
+            f"RAIL_GATEWAY_UPSTREAM_URL is not a URL that can be parsed: {exc}"
+        ) from None
+    if not hostname:
         # `http://` and `http://user:pw@` both parse, and a gateway built on
         # either starts and answers /health while able to forward nothing.
         raise RuntimeError(
@@ -193,20 +202,26 @@ def _split_credential(url: str) -> tuple[str, dict[str, str]]:
 class _UpstreamErrorBoundary(Middleware):
     """Answer for the upstream rather than relaying what it said.
 
-    httpx raises `Client error '401 Unauthorized' for url '<the upstream URL>'`,
-    and fastmcp puts that string in the JSON-RPC error it returns — so an
-    unauthenticated caller reading an ordinary failure is handed the upstream's
-    address and, when the URL carries one, its credential. A stale upstream key
-    turns every call into a disclosure of it.
+    An upstream that fails *mid-session* raises through here, and its error text
+    names the URL it called — so without this the caller reads the upstream's
+    address off an ordinary failure. The detail is not lost; it goes to the log,
+    which is on this side of the boundary.
 
-    The detail is not lost; it goes to the log, which is on this side of the
-    boundary. What crosses is that the upstream could not be reached.
+    **It does not cover the session opening.** fastmcp turns a connection-setup
+    failure into a JSON-RPC error it returns rather than one it raises, so
+    nothing passes through here and the caller does see that text. Keeping the
+    credential out of the URL (`_split_credential`) is what limits what such a
+    message can say.
     """
 
     async def on_message(self, context, call_next):
         try:
             return await call_next(context)
-        except Exception as exc:  # noqa: BLE001 - a boundary catches everything
+        except (httpx.HTTPError, ConnectionError, OSError) as exc:
+            # Transport failures only. Catching everything turned `Unknown
+            # tool: 'no_such_tol'` into "the upstream service could not be
+            # reached", so a caller's typo read as an outage and the real
+            # answer never arrived.
             log.warning("upstream call failed: %s: %s", type(exc).__name__, exc)
             raise ToolError("the upstream service could not be reached") from None
 
@@ -226,7 +241,10 @@ def _safe_to_log(url: str) -> str:
     """
     parsed = urlsplit(url)
     netloc = parsed.netloc.rsplit("@", 1)[-1]
-    suffix = " (query omitted)" if parsed.query or parsed.fragment else ""
+    dropped = [
+        n for n, v in (("query", parsed.query), ("fragment", parsed.fragment)) if v
+    ]
+    suffix = f" ({' and '.join(dropped)} omitted)" if dropped else ""
     return urlunsplit((parsed.scheme, netloc, parsed.path, "", "")) + suffix
 
 
@@ -270,16 +288,15 @@ def main() -> None:
     import uvicorn
 
     _configure_logging()
-    uvicorn.run(
-        build_app(),
-        host="0.0.0.0",
-        port=port(),
-        # A call in flight when SIGTERM lands otherwise gets no answer at all —
-        # its response travels on a stream uvicorn's connection wait does not
-        # cover, so the agent sees a hang rather than a failure. This bounds the
-        # drain instead of skipping it.
-        timeout_graceful_shutdown=25,
-    )
+    # No `timeout_graceful_shutdown`: it was tried and does not do the job.
+    # A tool call's answer travels on a streamable-http stream that uvicorn's
+    # connection wait does not cover, so SIGTERM abandons a call in flight
+    # whatever the timeout says — measured, the process exits in under a second
+    # and the caller hangs to its own limit with no response. A value longer
+    # than `docker stop`'s ten seconds would be SIGKILLed before it helped.
+    # Draining this properly needs the ASGI app to hold the shutdown until its
+    # streams finish, which this change does not build.
+    uvicorn.run(build_app(), host="0.0.0.0", port=port())
 
 
 if __name__ == "__main__":
