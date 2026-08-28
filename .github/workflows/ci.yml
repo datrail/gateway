@@ -70,3 +70,26 @@ jobs:
       - run: pip install -r requirements-test.txt
 
       - run: make test
+
+  # Build-only, amd64 only. The question here is "does the image still build",
+  # which the arm64 leg answers no differently — it would just spend minutes
+  # doing it under emulation. Without this job the Dockerfile is first built by
+  # container-release.yml, on a tag, after the gate has already passed.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The scope the release build reads from. A literal name rather than
+      # `github.workflow`: inside a called run that resolves to the caller's
+      # name, so the cache this warms would be invisible to the release.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,mode=max,scope=image

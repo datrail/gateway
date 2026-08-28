@@ -28,14 +28,22 @@ def test_port_defaults(monkeypatch):
     assert port() == DEFAULT_PORT
 
 
-@pytest.mark.parametrize("raw", ["nope", "8080.5", ""])
+@pytest.mark.parametrize("raw", ["nope", "8080.5"])
 def test_a_non_integer_port_is_refused(monkeypatch, raw):
     monkeypatch.setenv("RAIL_GATEWAY_PORT", raw)
-    if raw == "":
-        assert port() == DEFAULT_PORT
-        return
     with pytest.raises(RuntimeError, match="must be an integer"):
         port()
+
+
+@pytest.mark.parametrize("raw", ["", "   "])
+def test_an_empty_or_blank_port_means_the_default(monkeypatch, raw):
+    """Read the same way `_required` reads a blank: as unset, not as a value.
+
+    Without stripping first, whitespace reaches `int()` and the error names an
+    empty string back at the operator who set spaces.
+    """
+    monkeypatch.setenv("RAIL_GATEWAY_PORT", raw)
+    assert port() == DEFAULT_PORT
 
 
 @pytest.mark.parametrize("raw", ["0", "65536", "-1"])

@@ -19,6 +19,10 @@ USER 10001
 
 EXPOSE 8080
 
-# Exec form: uvicorn is PID 1 and receives SIGTERM directly, so a stop is a
+# The module's own entry point rather than a uvicorn command line, so that
+# RAIL_GATEWAY_PORT reaches the socket. Naming the port here instead would have
+# it validated and then ignored.
+#
+# Exec form: python is PID 1 and receives SIGTERM directly, so a stop is a
 # graceful shutdown rather than a ten-second wait and a kill.
-CMD ["python", "-m", "uvicorn", "--factory", "gateway.server:build_app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "gateway.server"]

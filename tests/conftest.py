@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 import pytest
 import pytest_asyncio
 import uvicorn
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 
 from gateway.server import build_app
 
@@ -34,6 +34,12 @@ async def serve(app, port: int):
     task = asyncio.create_task(server.serve())
     try:
         while not server.started:
+            # `server.started` never turns true if the bind failed — uvicorn
+            # exits inside the task — so waiting on it alone spins until the CI
+            # runner's own limit. The task is what reports the failure.
+            if task.done():
+                await task
+                raise RuntimeError("the server exited before it started serving")
             await asyncio.sleep(0.02)
         yield
     finally:
@@ -55,6 +61,13 @@ async def upstream(seen_headers):
     @server.tool
     def track_package(tracking_number: str) -> str:
         return f"delivered:{tracking_number}"
+
+    @server.tool
+    async def scan_batch(ctx: Context) -> str:
+        """Reports progress on the way, so a test can check it survives."""
+        await ctx.report_progress(1, 2)
+        await ctx.report_progress(2, 2)
+        return "scanned"
 
     class Record:
         def __init__(self, app):
