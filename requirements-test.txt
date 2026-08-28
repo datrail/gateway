@@ -3,10 +3,17 @@
 # other depending on the job, and neither reaches the image.
 -r requirements.txt
 
-# pytest 9 or newer, and not by preference. Under 8.x an async test missing
-# its marker is skipped with a warning and the run still exits 0 — so the one
-# place the strictness in pytest.ini matters, the CI job that gates the
-# release, is the one place it would not have held.
+# 8.4.0 or newer is the floor, and not by preference: through 8.3.x an async
+# test missing its marker is skipped with a warning and the run still exits 0,
+# so the one place the strictness in pytest.ini matters — the CI job gating the
+# release — is the one place it would not have held. 8.4.0 replaced that skip
+# with a failure. The exact version below is for reproducibility, as everywhere
+# else in these files, not because 8.4 or 8.5 would be wrong.
 pytest==9.1.1
 pytest-asyncio==1.4.0
 httpx==0.28.1
+
+# Turns a hung test into a failure that names itself. Without it a test that
+# never returns is indistinguishable from a slow one until the job's own limit
+# fires, and the log says only that the job was cancelled.
+pytest-timeout==2.3.1

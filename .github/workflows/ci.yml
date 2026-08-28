@@ -28,9 +28,24 @@ on:
 permissions:
   contents: read
 
+# Two pinning regimes, deliberately. Python packages are pinned exactly, because
+# they are what the image ships and what a bug report is written against. The
+# actions below are pinned to a major tag, which floats: they build nothing that
+# is released, and a workflow that cannot pick up a runner-compatibility fix
+# without a commit is a workflow that breaks on GitHub's schedule rather than
+# this repository's. The trade is `contents: read` above, plus the actions cache
+# these jobs necessarily reach — and that one is not bounded by the ref: cache
+# writes are per-ref, but a run restores from its own branch *and* the default
+# branch, so anything written here on main is reachable from every later pull
+# request. Nothing secret goes there, and nothing here closes it: pip reuses a
+# cached wheel under its pinned version without checking it, so the exact pins
+# two files over do not help, and requirements.txt says itself that most of what
+# lands in that cache is unpinned anyway. Closing it wants hashes.
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,8 +64,14 @@ jobs:
       # `ruff check` plus `ruff format --check`, per the Makefile.
       - run: make lint
 
+  # Bounded because the default is six hours, and a stuck job holds a runner for
+  # an afternoon. Ten minutes rather than one: `pytest.ini` already fails an
+  # individual test at thirty seconds, so this is the ceiling on everything
+  # around the suite — checkout, the interpreter, a cold pip cache — none of
+  # which the suite's own five seconds predicts.
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,13 +84,28 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-test.txt
+          # Both files, because requirements-test.txt only `-r`s the other one:
+          # keyed on the including file alone, a runtime pin could move and the
+          # cache would not rotate.
+          cache-dependency-path: |
+            requirements-test.txt
+            requirements.txt
 
       # requirements-test.txt includes requirements.txt, so the suite runs
       # against the exact pins the image installs.
       - run: pip install -r requirements-test.txt
 
+      # Unbuffered and verbose. `-q` to a pipe is block-buffered, so a run that
+      # hangs prints nothing at all and the log cannot say which test it
+      # stopped in — which is exactly what happened, for fifty-four minutes.
       - run: make test
+        env:
+          PYTHONUNBUFFERED: "1"
+          # -vv, not -v. Verbosity is additive and ADDOPTS is prepended, so
+          # -v against the Makefile's -q nets zero and prints dots, which is
+          # the state this was meant to fix.
+          PYTEST_ADDOPTS: "-vv"
+
 
   # Build-only, amd64 only. The question here is "does the image still build",
   # which the arm64 leg answers no differently — it would just spend minutes
@@ -77,6 +113,7 @@ jobs:
   # container-release.yml, on a tag, after the gate has already passed.
   image:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
