@@ -16,8 +16,10 @@ reported the failure honestly, which is the bug this file exists to catch.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import logging
+import tracemalloc
 from typing import Any
 
 import httpx
@@ -64,6 +66,26 @@ def responder(*responses: httpx.Response | Exception):
         return answer
 
     return httpx.MockTransport(handle)
+
+
+def streamed(body: bytes, encoding: str | None = None) -> httpx.Response:
+    """A response httpx has not already read, which is what a socket hands over.
+
+    A `Response` built from bytes is read at construction and `read()` applies
+    `Content-Encoding`, so an encoded body built that way reaches the holder
+    already decoded — a shape no deployment has. Arriving in chunks, it reaches
+    the holder as it left the responder.
+    """
+
+    async def chunks():
+        for start in range(0, len(body), 16 * 1024):
+            yield body[start : start + 16 * 1024]
+
+    return httpx.Response(
+        200,
+        content=chunks(),
+        headers={"content-encoding": encoding} if encoding else {},
+    )
 
 
 def holder(*responses: httpx.Response | Exception, **kwargs: Any) -> BundleHolder:
@@ -350,6 +372,81 @@ async def test_a_bundle_of_exactly_the_bound_is_read() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_compressed_bundle_is_read() -> None:
+    """Compression is not refused, and this is why it cannot be.
+
+    `RAIL_CENTER_URL` points at a Cloud Run service whose frontend may gzip a
+    response of its own accord. A gateway that refused every encoded bundle
+    would refuse every bundle, which is a worse failure than the one the bound
+    exists for.
+    """
+    body = gzip.compress(json.dumps(bundle("v1")).encode())
+
+    h = holder(streamed(body, "gzip"))
+    outcome = await h.refresh()
+
+    assert outcome.kind == "replaced"
+    assert h.current().version == "v1"
+
+
+@pytest.mark.asyncio
+async def test_a_compressed_body_is_bounded_where_it_decodes() -> None:
+    """The bound is on what arrives, not on what the wire carried.
+
+    Decoding is transparent, so a running total over already-decoded chunks
+    bounds what is *accumulated* and not what one chunk costs: a body a
+    fraction of the bound on the wire expands by whatever ratio the responder
+    chose, and is allocated whole before anything counts it. Measured rather
+    than asserted through the outcome, because the refusal reads the same
+    either way — what changes is how much was committed to reach it.
+    """
+    size = 32 * 1024 * 1024
+    body = gzip.compress(b'{"padding":"' + b"A" * size + b'"}')
+    limit = 256 * 1024
+    assert len(body) < limit, "the wire size has to walk past the bound on its own"
+
+    h = holder(
+        httpx.Response(200, json=bundle("v1")),
+        streamed(body, "gzip"),
+        max_bytes=limit,
+    )
+    await h.refresh()
+
+    tracemalloc.start()
+    try:
+        outcome = await h.refresh()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert outcome.kind == "unreachable"
+    assert f"decodes past the {limit}" in outcome.reason
+    assert h.current().version == "v1"
+    assert peak < size // 8
+
+
+@pytest.mark.asyncio
+async def test_an_encoding_this_gateway_did_not_offer_is_refused() -> None:
+    """The offer and the decoder have to agree.
+
+    The bound only holds over a body this holder decodes itself, so an encoding
+    it cannot decode is a failed fetch rather than a body handed to somebody
+    else to expand.
+    """
+    h = holder(
+        httpx.Response(200, json=bundle("v1")),
+        streamed(b"\x1b\x2a", "br"),
+    )
+    await h.refresh()
+
+    outcome = await h.refresh()
+
+    assert outcome.kind == "unreachable"
+    assert "br-encoded" in outcome.reason
+    assert h.current().version == "v1"
+
+
+@pytest.mark.asyncio
 async def test_a_body_that_never_ends_is_bounded_by_the_deadline() -> None:
     """A drip is not a silence, and only the deadline tells them apart.
 
@@ -554,6 +651,9 @@ async def test_the_credential_and_the_route_travel_with_the_request() -> None:
     assert str(seen[0].url) == f"http://rail-center.test{BUNDLE_PATH}"
     assert seen[0].headers["authorization"] == "Bearer t0ken"
     assert seen[0].headers["accept"] == "application/json"
+    # What is offered is what this holder can decode under its own bound, so
+    # httpx is not left to offer the encodings it can decode and this cannot.
+    assert seen[0].headers["accept-encoding"] == "gzip, identity"
 
 
 @pytest.mark.parametrize(
@@ -605,6 +705,34 @@ async def test_a_proxy_in_the_environment_does_not_redirect_the_fetch(
     assert outcome.kind == "unreachable"
     # A proxy httpx took from the environment arrives as a mount on the client.
     assert len(built) == 1 and not built[0]._mounts
+
+
+@pytest.mark.asyncio
+async def test_the_socket_timeout_reaches_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What it bounds is a silence, and only this wires it to one.
+
+    httpx applies this per socket read, so it is what a control plane that has
+    stopped answering without closing the connection costs. Unwired, such a
+    peer holds the refresh lock — and every refresh queued behind it — for the
+    whole of `FETCH_DEADLINE_SECONDS` rather than for this.
+    """
+    built: list[httpx.AsyncClient] = []
+    real = httpx.AsyncClient
+
+    def record(**kwargs: Any) -> httpx.AsyncClient:
+        client = real(**kwargs)
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(httpx, "AsyncClient", record)
+
+    h = holder(httpx.Response(200, json=bundle("v1")), timeout_seconds=1.5)
+    outcome = await h.refresh()
+
+    assert outcome.kind == "replaced"
+    assert len(built) == 1 and built[0].timeout == httpx.Timeout(1.5)
 
 
 # --- the refresh loop -----------------------------------------------------
@@ -706,6 +834,38 @@ async def test_stopping_is_safe_before_starting_and_twice() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_stopped_holder_starts_again() -> None:
+    """`stop()` ends the loop it was called on, not every loop after it.
+
+    The two halves of the lifecycle are each observed alone — a stop landing
+    during a first fetch, and a second start leaving one loop — and a restart
+    is where they meet. A shutdown that outlived its own call would leave a
+    gateway with no refresh loop at all: still enforcing whatever it last held,
+    never learning of a newer bundle, for the life of the process. Silent, and
+    green.
+    """
+
+    async def never(_seconds: float) -> None:
+        # The loop parks here, so no start's fetch is ever the loop's.
+        await asyncio.Event().wait()
+
+    h = holder(
+        httpx.Response(200, json=bundle("v1")),
+        httpx.Response(200, json=bundle("v1")),
+        sleep=never,
+    )
+    await h.start()
+    await h.stop()
+    assert h._task is None
+
+    await h.start()
+
+    assert h._task is not None
+    assert not h._task.done()
+    await h.stop()
+
+
+@pytest.mark.asyncio
 async def test_a_stop_during_the_first_fetch_leaves_no_loop_behind() -> None:
     """`start()` has no task to cancel until its first fetch resolves.
 
@@ -735,6 +895,52 @@ async def test_a_stop_during_the_first_fetch_leaves_no_loop_behind() -> None:
     assert outcome.kind == "replaced"
     assert h.current().version == "v1"
     assert h._task is None
+
+
+@pytest.mark.asyncio
+async def test_a_concurrent_start_cannot_erase_a_stop_that_landed() -> None:
+    """Two `start()`s and a `stop()` are each documented as legitimate.
+
+    So a shutdown can land between them, and the state that carries it has to
+    survive the next caller. One flag shared by everybody does not: the second
+    `start()` clears it on the way in, and the first is then free to create the
+    loop the stop had already called off — a background refresh outliving an
+    explicit, fully-awaited shutdown. An epoch belongs to the call that
+    captured it, so only the start issued after the stop can start anything.
+    """
+    reached = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+    seen = 0
+
+    async def handle(_request: httpx.Request) -> httpx.Response:
+        nonlocal seen
+        n = seen
+        seen += 1
+        reached[n].set()
+        await release[n].wait()
+        return httpx.Response(200, json=bundle("v1"))
+
+    h = BundleHolder("http://rc.test", {}, transport=httpx.MockTransport(handle))
+    first = asyncio.create_task(h.start())
+    await reached[0].wait()
+
+    await h.stop()
+    # Entering while the first start's fetch is still in flight, which is the
+    # window the stop has no task to act on.
+    second = asyncio.create_task(h.start())
+    release[0].set()
+    await first
+
+    # The second start is still inside its own fetch, so a loop here could only
+    # be the first one's — the one the stop called off.
+    assert h._task is None
+
+    release[1].set()
+    await second
+
+    # And the start issued after the stop is unaffected: it owns the loop.
+    assert h._task is not None
+    await h.stop()
 
 
 @pytest.mark.asyncio

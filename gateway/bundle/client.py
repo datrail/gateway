@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import re
+import zlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -91,6 +92,22 @@ FETCH_DEADLINE_SECONDS = 30.0
 #: small enough that a body past it is a fault rather than a big customer. One
 #: past it is treated as unreachable, so the last bundle held stays in force.
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
+
+#: What this gateway offers to decode, and the whole of what it accepts back.
+#:
+#: Compression is not refused. `RAIL_CENTER_URL` points at a Cloud Run service
+#: whose frontend may gzip a response of its own accord, and a gateway that
+#: refused every encoded bundle would refuse every bundle — a worse failure than
+#: the one `MAX_BUNDLE_BYTES` is here for.
+#:
+#: What is refused is an encoding this holder did not offer, because the offer
+#: and the decoder have to agree: the bound can only hold over a body this file
+#: decodes itself.
+_ACCEPT_ENCODING = "gzip, identity"
+
+#: `zlib` reads a bare deflate stream by default; this asks for the gzip wrapper
+#: that `Content-Encoding: gzip` names.
+_GZIP_WINDOW = 16 + zlib.MAX_WBITS
 
 #: What may not appear in a header value this holder sends.
 #:
@@ -212,7 +229,16 @@ class BundleHolder:
         sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._url = rail_center_url.rstrip("/") + BUNDLE_PATH
-        self._headers = _sendable({"Accept": "application/json", **headers})
+        self._headers = _sendable(
+            {
+                "Accept": "application/json",
+                **headers,
+                # Last, so it is not the caller's to change: the bound on the
+                # body is applied by the decoder that reads it, so what is
+                # offered has to stay what this holder can count as it decodes.
+                "Accept-Encoding": _ACCEPT_ENCODING,
+            }
+        )
         self._interval = interval_seconds
         self._timeout = timeout_seconds
         self._deadline = deadline_seconds
@@ -222,7 +248,10 @@ class BundleHolder:
 
         self._held: UsableBundle | None = None
         self._task: asyncio.Task[None] | None = None
-        self._stopping = False
+        # Bumped by `stop()`. `start()` captures it on entry and creates the
+        # loop only if it is still current, which is what makes a stop landing
+        # during a first fetch stick.
+        self._epoch = 0
         self._lock = asyncio.Lock()
 
     def current(self) -> UsableBundle | None:
@@ -243,7 +272,7 @@ class BundleHolder:
         caller asking for a refresh wants a fresh answer, and handing it the
         result of an attempt that started before it asked is a subtly different
         promise. The cost is that a manual refresh waits behind a scheduled one,
-        which is bounded by the timeout.
+        which is bounded by the deadline.
         """
         async with self._lock:
             return await self._refresh_once()
@@ -263,20 +292,28 @@ class BundleHolder:
         contending for the lock and doubling the load on the control plane.
 
         A `stop()` landing while the first fetch is still in flight is honoured
-        rather than lost. There is no task for it to cancel yet, so it records
-        the request and this returns without starting a loop — otherwise a
-        shutdown racing a slow first fetch leaves a loop behind that has already
-        been told to stop and that nothing holds a handle to.
+        rather than lost. There is no task for it to cancel yet, so what it does
+        instead is retire the epoch this call captured on entry, and the loop is
+        created only while that epoch is still current — otherwise a shutdown
+        racing a slow first fetch leaves a loop behind that has already been
+        told to stop and that nothing holds a handle to.
+
+        An epoch rather than a flag, because a flag is one bit shared by every
+        caller: both calls above are documented as legitimate, so a second
+        `start()` entering that same window clears it and erases a `stop()` that
+        has already landed and already returned. An epoch belongs to the call
+        that captured it, so no other call can hand this one back a shutdown
+        that was called off.
         """
-        self._stopping = False
+        epoch = self._epoch
         outcome = await self.refresh()
-        if not self._stopping and (self._task is None or self._task.done()):
+        if epoch == self._epoch and (self._task is None or self._task.done()):
             self._task = asyncio.create_task(self._loop())
         return outcome
 
     async def stop(self) -> None:
         """Stop refreshing. Safe to call twice, and safe with one in flight."""
-        self._stopping = True
+        self._epoch += 1
         task, self._task = self._task, None
         if task is None:
             return
@@ -356,80 +393,30 @@ class BundleHolder:
     async def _fetch(self) -> Any:
         """The parsed body, or `_Unreachable` for every way of not getting one."""
         try:
-            # Streamed, so that the bound below bounds memory rather than only
-            # the verdict. A non-streaming `get()` reads the whole body before
-            # it returns, which would leave a responder free to commit whatever
-            # it can send inside the deadline no matter what `max_bytes` says
-            # afterwards.
+            # Bounded, because the client's own timeout is httpx's and httpx
+            # applies it per socket read: the timer restarts on every byte that
+            # arrives, so it bounds a silence and not an attempt. This bounds
+            # the attempt, and with it the lock `refresh()` is holding while it
+            # runs.
             #
-            # Wrapped in a deadline because the client's own timeout is
-            # httpx's, and httpx applies it per socket read: the timer
-            # restarts on every byte that arrives, so it bounds a silence and
-            # not an attempt. `asyncio.timeout` bounds the attempt, and with
-            # it the lock `refresh()` is holding while it runs.
-            async with (
-                asyncio.timeout(self._deadline),
-                httpx.AsyncClient(
-                    timeout=self._timeout,
-                    transport=self._transport,
-                    # `RAIL_CENTER_URL` is the whole of where this call may go.
-                    # Left at its default, httpx reads `HTTP_PROXY` and
-                    # `ALL_PROXY` out of the process environment, so whatever
-                    # can set a variable in this container — a base image, a
-                    # sidecar, an orchestrator — chooses the host that answers
-                    # with the ruleset this gateway then enforces, and against
-                    # an `http://` control plane sees the bearer token on the
-                    # way past.
-                    trust_env=False,
-                ) as client,
-                client.stream("GET", self._url, headers=self._headers) as response,
-            ):
-                if response.status_code in (401, 403):
-                    # The credential was produced and Rail Center refused it.
-                    # Every later refresh fails the same way until the
-                    # configuration changes, so name it distinctly from a
-                    # control plane having a bad minute.
-                    raise _Unreachable(
-                        f"Rail Center rejected the credential ({response.status_code}); "
-                        "every refresh fails this way until RAIL_AUTH_MODE and its "
-                        "token are fixed"
-                    )
-                if response.status_code >= 400:
-                    raise _Unreachable(f"Rail Center responded {response.status_code}")
-
-                # The status and the headers arrive before the body, so a
-                # declared length past the bound is refused without reading
-                # anything at all. The header is the responder's claim
-                # though, and a responder that under-declares or sends no
-                # length is bounded by the running total below, which stops
-                # reading the moment it is past.
-                declared = response.headers.get("content-length")
-                if (
-                    declared is not None
-                    and declared.isdigit()
-                    and int(declared) > self._max_bytes
-                ):
-                    raise _Unreachable(
-                        f"policy bundle declares {declared} bytes, "
-                        f"past the {self._max_bytes} this gateway reads"
-                    )
-
-                chunks: list[bytes] = []
-                read = 0
-                async for chunk in response.aiter_bytes():
-                    read += len(chunk)
-                    if read > self._max_bytes:
-                        raise _Unreachable(
-                            "policy bundle is past the "
-                            f"{self._max_bytes} bytes this gateway reads"
-                        )
-                    chunks.append(chunk)
-                return json.loads(b"".join(chunks))
+            # `wait_for` rather than an `asyncio.timeout` block, which reads
+            # better and arrived in 3.11: `ruff.toml` declares 3.10 as the
+            # lowest interpreter this project supports, and there the attribute
+            # does not exist at all. The `except Exception` below would turn
+            # that `AttributeError` into an ordinary `unreachable` on every
+            # attempt — a gateway that never holds a bundle and refuses every
+            # request, reported in the log as a control-plane outage. Ruff's
+            # target version gates syntax, not stdlib attributes, and CI runs
+            # one interpreter, so nothing else here would catch it.
+            return await asyncio.wait_for(self._attempt(), self._deadline)
         except _Unreachable:
             raise
-        except TimeoutError as error:
+        except asyncio.TimeoutError as error:
             # The deadline, not the socket: `str(TimeoutError())` is empty, so
             # the generic branch below would log the fault without naming it.
+            # Spelled `asyncio.TimeoutError` because that is only the builtin
+            # from 3.11 on; on 3.10 it is a separate class, and catching the
+            # builtin there would leave the deadline unnamed.
             raise _Unreachable(
                 f"policy bundle fetch ran past {self._deadline} seconds"
             ) from error
@@ -440,6 +427,100 @@ class BundleHolder:
             # bundle held stays in force. The type is named so the log line is
             # worth reading.
             raise _Unreachable(f"{type(error).__name__}: {error}") from error
+
+    async def _attempt(self) -> Any:
+        """One request and its body. Unbounded in time — `_fetch` bounds that."""
+        # Streamed, so that the bound below bounds memory rather than only the
+        # verdict. A non-streaming `get()` reads the whole body before it
+        # returns, which would leave a responder free to commit whatever it can
+        # send inside the deadline no matter what `max_bytes` says afterwards.
+        async with (
+            httpx.AsyncClient(
+                timeout=self._timeout,
+                transport=self._transport,
+                # `RAIL_CENTER_URL` is the whole of where this call may go.
+                # Left at its default, httpx reads `HTTP_PROXY` and `ALL_PROXY`
+                # out of the process environment, so whatever can set a variable
+                # in this container — a base image, a sidecar, an orchestrator —
+                # chooses the host that answers with the ruleset this gateway
+                # then enforces, and against an `http://` control plane sees the
+                # bearer token on the way past.
+                trust_env=False,
+            ) as client,
+            client.stream("GET", self._url, headers=self._headers) as response,
+        ):
+            if response.status_code in (401, 403):
+                # The credential was produced and Rail Center refused it. Every
+                # later refresh fails the same way until the configuration
+                # changes, so name it distinctly from a control plane having a
+                # bad minute.
+                raise _Unreachable(
+                    f"Rail Center rejected the credential ({response.status_code}); "
+                    "every refresh fails this way until RAIL_AUTH_MODE and its "
+                    "token are fixed"
+                )
+            if response.status_code >= 400:
+                raise _Unreachable(f"Rail Center responded {response.status_code}")
+
+            # The status and the headers arrive before the body, so a declared
+            # length past the bound is refused without reading anything at all.
+            # The header is the responder's claim though, and a responder that
+            # under-declares or sends no length is bounded by the running total
+            # below, which stops reading the moment it is past.
+            declared = response.headers.get("content-length")
+            if (
+                declared is not None
+                and declared.isdigit()
+                and int(declared) > self._max_bytes
+            ):
+                raise _Unreachable(
+                    f"policy bundle declares {declared} bytes, "
+                    f"past the {self._max_bytes} this gateway reads"
+                )
+
+            # Decoded here, and taken off the response so that httpx does not
+            # decode it first. Left to httpx, a running total bounds what is
+            # *accumulated* and not what one chunk costs: each socket read is
+            # expanded by whatever ratio the responder chose and handed over
+            # already whole, so a body an eighth of the bound on the wire
+            # allocates hundreds of megabytes inside a fetch this file believes
+            # it has bounded at four. Decoded here, the wire is bounded on the
+            # way in and the decoder is held to a `max_length`, so neither side
+            # of the encoding can commit more than the bound.
+            encoding = response.headers.pop("content-encoding", "").strip().lower()
+            if encoding in ("", "identity"):
+                decoder = None
+            elif encoding == "gzip":
+                decoder = zlib.decompressobj(_GZIP_WINDOW)
+            else:
+                raise _Unreachable(
+                    f"policy bundle is {safe_for_log(encoding)}-encoded, which "
+                    f"this gateway did not offer to read ({_ACCEPT_ENCODING})"
+                )
+
+            chunks: list[bytes] = []
+            read = 0
+            decoded = 0
+            async for chunk in response.aiter_bytes():
+                read += len(chunk)
+                if read > self._max_bytes:
+                    raise _Unreachable(
+                        "policy bundle is past the "
+                        f"{self._max_bytes} bytes this gateway reads"
+                    )
+                if decoder is not None:
+                    # One byte past the budget is enough to know it is past it,
+                    # and is all that is allocated: the rest stays in the
+                    # decompressor's tail, which nothing here ever asks for.
+                    chunk = decoder.decompress(chunk, self._max_bytes - decoded + 1)
+                decoded += len(chunk)
+                if decoded > self._max_bytes:
+                    raise _Unreachable(
+                        "policy bundle decodes past the "
+                        f"{self._max_bytes} bytes this gateway reads"
+                    )
+                chunks.append(chunk)
+            return json.loads(b"".join(chunks))
 
     def _unreachable(self, reason: str, held: str | None) -> RefreshOutcome:
         # Both halves are filtered, and both need to be. `held` is a version off
