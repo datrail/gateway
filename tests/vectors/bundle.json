@@ -1,0 +1,3652 @@
+{
+  "_comment": "Conformance vectors for the policy bundle validator, written as data so a reimplementation in another language is answerable to the same cases. They come from rail-center's docs/policy-evaluation-contract.md, which specifies what makes a bundle unusable and what a usable one resolves to.\n\nEach case carries `bundle` and `usable`. A usable case also carries the `chain` it resolves to, as canonical ids in evaluation order; the `bindings` it indexes, keyed by endpoint with policy_ids as a sorted list; and `rejected_count`. An unusable case carries none of those — the refusal is the whole assertion, and the message that comes with it is an operator's text rather than a contract.\n\nA usable case also carries `chain_priorities`, the priorities the chain orders by; `chain_conditions` and `chain_actions`, the two values this module carries unread and the walk decides on; and `chain_names`: what an operator would read for each policy, which is the policy's name where it has a readable one and its id where it does not. A denial report carries neither — it names the policy id and Rail Center resolves the rest.\n\n`note` says why a case exists where its name does not.\n\nWhat these do NOT cover. Whether a condition is evaluable: that refusal is lazy by design, taken where the walk reaches it, so an earlier policy which already denied still answers cleanly. Conditions travel through this validator unread.",
+  "cases": [
+    {
+      "name": "the contract's worked example",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P1 — Deny critical-tier agents",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "finretail.orders",
+            "mode": "gated",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-0000000000a1"
+            ]
+          },
+          {
+            "endpoint_key": "finretail.health",
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        {
+          "field": "posture_score",
+          "operator": "lt",
+          "value": 40
+        }
+      ],
+      "chain_actions": [
+        "block"
+      ],
+      "chain_names": [
+        "P1 — Deny critical-tier agents"
+      ],
+      "bindings": {
+        "finretail.orders": {
+          "mode": "gated",
+          "policy_ids": [
+            "5c8f1e42-0000-4000-8000-0000000000a1"
+          ]
+        },
+        "finretail.health": {
+          "mode": "open",
+          "policy_ids": []
+        }
+      },
+      "rejected_count": 0,
+      "note": "Byte for byte the bundle in policy-evaluation-contract.md, so the case named after it is that bundle rather than one shaped like it."
+    },
+    {
+      "name": "an empty bindings list narrows nothing, so the whole chain applies",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "name": "P-a2",
+            "priority": 2
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1",
+        "5c8f1e42-0000-4000-8000-0000000000a2"
+      ],
+      "chain_priorities": [
+        1,
+        2
+      ],
+      "chain_conditions": [
+        null,
+        null
+      ],
+      "chain_actions": [
+        null,
+        null
+      ],
+      "chain_names": [
+        "P-a1",
+        "P-a2"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "The rule read the other way round is a total loss of enforcement, which is why the contract states it twice."
+    },
+    {
+      "name": "a disabled policy is not in the chain",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1,
+            "enabled": false
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "name": "P-a2",
+            "priority": 2
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a2"
+      ],
+      "chain_priorities": [
+        2
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a2"
+      ],
+      "bindings": {},
+      "rejected_count": 0
+    },
+    {
+      "name": "switching one of two policies sharing an id off is a working remedy",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5C8F1E42-0000-4000-8000-0000000000A1",
+            "name": "P-A1",
+            "priority": 1,
+            "enabled": false
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 2
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        2
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "The duplicate-id refusal is the one this module's ordering exists for: `enabled` is settled before anything is compared, so the disabled entry never reaches the set of ids seen. Recording it there would refuse the bundle the documented remedy produces."
+    },
+    {
+      "name": "a policy carrying no enabled key is enabled",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "A rule nobody switched off is one an operator expects to be running."
+    },
+    {
+      "name": "enabled is settled before anything is validated",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          },
+          {
+            "id": "not-a-uuid",
+            "priority": "also not one",
+            "enabled": false
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "The remedy for a bundle this reader cannot parse is to switch the offending policy off. That only works if disabling happens first."
+    },
+    {
+      "name": "the chain orders by priority ascending, not as listed",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a3",
+            "name": "P-a3",
+            "priority": 10
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 2
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "name": "P-a2",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a2",
+        "5c8f1e42-0000-4000-8000-0000000000a1",
+        "5c8f1e42-0000-4000-8000-0000000000a3"
+      ],
+      "chain_priorities": [
+        1,
+        2,
+        10
+      ],
+      "chain_conditions": [
+        null,
+        null,
+        null
+      ],
+      "chain_actions": [
+        null,
+        null,
+        null
+      ],
+      "chain_names": [
+        "P-a2",
+        "P-a1",
+        "P-a3"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "Numerically. A string comparison puts 10 before 2."
+    },
+    {
+      "name": "a tie breaks by the canonical id, not by the spelling that arrived",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "{5C8F1E42-0000-4000-8000-0000000000A9}",
+            "name": "zeta",
+            "priority": 1
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000b1",
+            "name": "alpha",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a9",
+        "5c8f1e42-0000-4000-8000-0000000000b1"
+      ],
+      "chain_priorities": [
+        1,
+        1
+      ],
+      "chain_conditions": [
+        null,
+        null
+      ],
+      "chain_actions": [
+        null,
+        null
+      ],
+      "chain_names": [
+        "zeta",
+        "alpha"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "Three orderings come apart here: canonical puts a9 first, the raw spelling puts b1 first, and the names put alpha first. An order that depends on how a bundle happened to spell an id, or on what an operator called a rule, is one two implementations will disagree about."
+    },
+    {
+      "name": "a tie breaks by canonical id, not by position",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a3",
+            "name": "P-a3",
+            "priority": 5
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 5
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "name": "P-a2",
+            "priority": 5
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1",
+        "5c8f1e42-0000-4000-8000-0000000000a2",
+        "5c8f1e42-0000-4000-8000-0000000000a3"
+      ],
+      "chain_priorities": [
+        5,
+        5,
+        5
+      ],
+      "chain_conditions": [
+        null,
+        null,
+        null
+      ],
+      "chain_actions": [
+        null,
+        null,
+        null
+      ],
+      "chain_names": [
+        "P-a1",
+        "P-a2",
+        "P-a3"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "Two policies at one priority are never ordered by however the bundle happened to list them."
+    },
+    {
+      "name": "a priority written as a whole float is that integer",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1.0
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "JSON has no integer type, so a reader on doubles cannot tell 1.0 from 1."
+    },
+    {
+      "name": "a negative priority orders ahead of a positive one",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "name": "P-a2",
+            "priority": -5
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a2",
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        -5,
+        1
+      ],
+      "chain_conditions": [
+        null,
+        null
+      ],
+      "chain_actions": [
+        null,
+        null
+      ],
+      "chain_names": [
+        "P-a2",
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0
+    },
+    {
+      "name": "every accepted id spelling normalises to the same policy",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "{5C8F1E42-0000-4000-8000-0000000000A1}",
+            "name": "P-1}",
+            "priority": 1
+          },
+          {
+            "id": "urn:uuid:5c8f1e42-0000-4000-8000-0000000000A2",
+            "name": "P-A2",
+            "priority": 2
+          },
+          {
+            "id": "5c8f1e420000400080000000000000a3",
+            "name": "P-a3",
+            "priority": 3
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a4",
+            "name": "P-a4",
+            "priority": 4
+          },
+          {
+            "id": "5C8F1E42-0000-4000-8000-0000000000A5",
+            "name": "P-A5",
+            "priority": 5
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": [
+              "5C8F1E42-0000-4000-8000-0000000000A1",
+              "urn:uuid:5c8f1e42-0000-4000-8000-0000000000a2",
+              "{5c8f1e42-0000-4000-8000-0000000000a3}"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1",
+        "5c8f1e42-0000-4000-8000-0000000000a2",
+        "5c8f1e42-0000-4000-8000-0000000000a3",
+        "5c8f1e42-0000-4000-8000-0000000000a4",
+        "5c8f1e42-0000-4000-8000-0000000000a5"
+      ],
+      "chain_priorities": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "chain_conditions": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "chain_actions": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "chain_names": [
+        "P-1}",
+        "P-A2",
+        "P-a3",
+        "P-a4",
+        "P-A5"
+      ],
+      "bindings": {
+        "e": {
+          "mode": "gated",
+          "policy_ids": [
+            "5c8f1e42-0000-4000-8000-0000000000a1",
+            "5c8f1e42-0000-4000-8000-0000000000a2",
+            "5c8f1e42-0000-4000-8000-0000000000a3"
+          ]
+        }
+      },
+      "rejected_count": 0,
+      "note": "Braced, URN and undashed on the policy side; uppercase, URN and braced on the binding side. A raw comparison matches none of them, and an endpoint matching no policy is gated by nothing."
+    },
+    {
+      "name": "a bound id naming no policy binds nothing, and is not an error",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-0000000000a2"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {
+        "e": {
+          "mode": "gated",
+          "policy_ids": [
+            "5c8f1e42-0000-4000-8000-0000000000a2"
+          ]
+        }
+      },
+      "rejected_count": 0,
+      "note": "The narrowed chain is empty and an empty chain allows. Falling back to the whole chain here is the tempting mistake and makes the two implementations disagree."
+    },
+    {
+      "name": "a bound id naming a disabled policy binds nothing either",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1,
+            "enabled": false
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "name": "P-a2",
+            "priority": 2
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-0000000000a1"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a2"
+      ],
+      "chain_priorities": [
+        2
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a2"
+      ],
+      "bindings": {
+        "e": {
+          "mode": "gated",
+          "policy_ids": [
+            "5c8f1e42-0000-4000-8000-0000000000a1"
+          ]
+        }
+      },
+      "rejected_count": 0
+    },
+    {
+      "name": "a policy with no readable name is named by its id",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": null,
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "A name is what an operator reads, not something a decision turns on. Refusing the bundle would take enforcement down for a cosmetic fault. It is still what an operator reads, so it has to be something."
+    },
+    {
+      "name": "a policy with no name key is named by its id",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "Absent rather than unreadable. A default of the empty string would name it nothing at all."
+    },
+    {
+      "name": "a policy named with the empty string keeps that name",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        ""
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "The boundary between the rule this file states -- a name is used when it is a string -- and the falsy test that reads the same on every other input. An operator who names a rule nothing gets nothing, not the id."
+    },
+    {
+      "name": "a policy whose name is a number is named by its id too",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": 42,
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0
+    },
+    {
+      "name": "a policy enabled with a value that is falsy in one language only",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1,
+            "enabled": []
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "name": "P-a2",
+            "priority": 2,
+            "enabled": {}
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1",
+        "5c8f1e42-0000-4000-8000-0000000000a2"
+      ],
+      "chain_priorities": [
+        1,
+        2
+      ],
+      "chain_conditions": [
+        null,
+        null
+      ],
+      "chain_actions": [
+        null,
+        null
+      ],
+      "chain_names": [
+        "P-a1",
+        "P-a2"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "`enabled` is skipped when it is exactly false, never merely falsy. An empty list and an empty object are falsy in Python and truthy in JavaScript, so a truthiness test here makes the two chains differ."
+    },
+    {
+      "name": "hyphens are counted nowhere, so an oddly grouped id still names its policy",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c-8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "Stripped rather than checked by position, which is what lets the undashed spelling and the canonical one share one code path. Rail Center's uuid.UUID does the same, so accepting it keeps the two sides agreeing on a bundle assembled elsewhere."
+    },
+    {
+      "name": "a policy enabled with zero is still enabled",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1,
+            "enabled": 0
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "`0 != False` is false in Python and `0 !== false` is true in JavaScript, so an inequality test disables this policy on one side and not the other. Exactly false is the rule, and nothing else is."
+    },
+    {
+      "name": "a priority at the largest value a double separates",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 9007199254740991
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "name": "P-a2",
+            "priority": -9007199254740991
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a2",
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        -9007199254740991,
+        9007199254740991
+      ],
+      "chain_conditions": [
+        null,
+        null
+      ],
+      "chain_actions": [
+        null,
+        null
+      ],
+      "chain_names": [
+        "P-a2",
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "The bound itself is admitted; one past it is not. Both ends, because an absolute value is easy to leave out."
+    },
+    {
+      "name": "an endpoint key is carried exactly as it arrived",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "  FinRetail.Orders  ",
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {
+        "  FinRetail.Orders  ": {
+          "mode": "open",
+          "policy_ids": []
+        }
+      },
+      "rejected_count": 0,
+      "note": "Matched exactly: no case folding and no trimming. Folding it would let a bundle binding FinRetail.Orders as open disarm a request resolving to finretail.orders, which is the dangerous direction."
+    },
+    {
+      "name": "an endpoint key is not normalised either",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "café.orders",
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {
+        "café.orders": {
+          "mode": "open",
+          "policy_ids": []
+        }
+      },
+      "rejected_count": 0,
+      "note": "Decomposed, and carried decomposed. The contract calls normalising both sides to NFC the more tempting of the two mistakes and says to compare the code points as they arrive: an endpoint registers under one form, and a rule written against the other must not match it."
+    },
+    {
+      "name": "an endpoint key may carry what a version may not",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "real\nforged: line",
+            "mode": "open",
+            "policy_ids": []
+          },
+          {
+            "endpoint_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+            "mode": "open",
+            "policy_ids": []
+          },
+          {
+            "endpoint_key": "",
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {
+        "real\nforged: line": {
+          "mode": "open",
+          "policy_ids": []
+        },
+        "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk": {
+          "mode": "open",
+          "policy_ids": []
+        },
+        "": {
+          "mode": "open",
+          "policy_ids": []
+        }
+      },
+      "rejected_count": 0,
+      "note": "The asymmetry is deliberate and Rail Center shares it. A version is refused for a character no log line can hold, for being empty and for being over-long; an endpoint key gets none of those checks, because a key is composed by the control plane from a name that is close to free text, and refusing one here would make an endpoint that registers cleanly impossible to bind. Copying the version's rules onto keys is the reimplementation this case exists to catch."
+    },
+    {
+      "name": "a version is carried exactly as it arrived",
+      "bundle": {
+        "version": " A3F1c09E⁵b2D4485 ",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "A reader re-fetches on a timer and re-parses only when this changes, so a version normalised on the way through would either re-parse on every fetch or never notice a change at all. Mixed case because folding it is the normalisation most easily reached for."
+    },
+    {
+      "name": "a version of exactly the length an endpoint key may be",
+      "bundle": {
+        "version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0
+    },
+    {
+      "name": "the URN prefix is matched whatever its case",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "URN:UUID:5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "Rail Center refuses this one: uuid.UUID strips its `urn:` prefix case-sensitively. The contract says all five spellings parse in any mixture of case, so this file follows the contract."
+    },
+    {
+      "name": "a braced URN is both spellings at once",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "{urn:uuid:5c8f1e42-0000-4000-8000-0000000000a1}",
+            "name": "P-1}",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-1}"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "Braces are stripped before the prefix is looked for, so the two compose. Rail Center reads it too."
+    },
+    {
+      "name": "an upper-case URN prefix on an undashed id",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "URN:UUID:5c8f1e420000400080000000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "The two spellings the contract lists separately, together. Refused by Rail Center for the prefix's case."
+    },
+    {
+      "name": "a minus in front of a whole id is stripped like any other hyphen",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "-5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "Thirty-two digits survive the strip, so it parses here and in Rail Center. The refused case is a minus standing in for a digit."
+    },
+    {
+      "name": "rejected entries are carried, not dropped",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "reason": "condition not evaluable"
+          }
+        ]
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {},
+      "rejected_count": 1,
+      "note": "How an operator sees a rule is not in force rather than inferring it from an absence."
+    },
+    {
+      "name": "unrecognised keys are accepted rather than refused",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1,
+            "future_field": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "open",
+            "policy_ids": [],
+            "future": true
+          }
+        ],
+        "rejected": [],
+        "future_top_level": "x"
+      },
+      "usable": true,
+      "chain": [
+        "5c8f1e42-0000-4000-8000-0000000000a1"
+      ],
+      "chain_priorities": [
+        1
+      ],
+      "chain_conditions": [
+        null
+      ],
+      "chain_actions": [
+        null
+      ],
+      "chain_names": [
+        "P-a1"
+      ],
+      "bindings": {
+        "e": {
+          "mode": "open",
+          "policy_ids": []
+        }
+      },
+      "rejected_count": 0,
+      "note": "Dropped rather than carried — nothing downstream reads them, and this validator returns a fixed shape. What matters is that they do not refuse the bundle: refusing would make adding a field to the grammar a flag day across two independently released implementations."
+    },
+    {
+      "name": "a bundle with no policies at all is usable and allows",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": true,
+      "chain": [],
+      "chain_priorities": [],
+      "chain_conditions": [],
+      "chain_actions": [],
+      "chain_names": [],
+      "bindings": {},
+      "rejected_count": 0,
+      "note": "Distinct from a fetch that failed, which is not an empty bundle."
+    },
+    {
+      "name": "a response that is not an object",
+      "bundle": [],
+      "usable": false
+    },
+    {
+      "name": "no policies key at all",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Absent, not merely wrong-shaped. Read as an empty list it is a bundle that allows everything."
+    },
+    {
+      "name": "no bindings key at all",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Always present, so a reader can tell 'no endpoint is narrowed' from 'this bundle does not describe bindings' without a special case. Defaulting it to empty erases that distinction."
+    },
+    {
+      "name": "no rejected key at all",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": false,
+      "note": "Read as 'nothing was rejected' it is the silent narrowing this field exists to prevent."
+    },
+    {
+      "name": "a response that is a JSON scalar",
+      "bundle": "nope",
+      "usable": false
+    },
+    {
+      "name": "no version to cache on",
+      "bundle": {
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "an empty version",
+      "bundle": {
+        "version": "",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a version that is not a string",
+      "bundle": {
+        "version": 17,
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a version carrying a newline",
+      "bundle": {
+        "version": "a3f1\nc09e",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "This reader's rule rather than the contract's, which says nothing about a version's shape. Earned because the value is held for as long as the bundle is and re-echoed on every failed refresh, so one accepted once keeps arriving in an operator's log until somebody notices."
+    },
+    {
+      "name": "a version carrying a zero-width space",
+      "bundle": {
+        "version": "a3f1​c09e",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a version carrying a line separator",
+      "bundle": {
+        "version": "a3f1 c09e",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "U+2028 is category Zl, so a rule written for the control and format categories misses it, and it splits a line exactly like a newline. U+2029 is the same in category Zp."
+    },
+    {
+      "name": "a version carrying a paragraph separator",
+      "bundle": {
+        "version": "a3f1 c09e",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a version past the length an endpoint key may be",
+      "bundle": {
+        "version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "two bindings for one endpoint whose key carries a newline",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e\nforged: line",
+            "mode": "open",
+            "policy_ids": []
+          },
+          {
+            "endpoint_key": "e\nforged: line",
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The duplicate refusal names the key, and this one is chosen by whoever produced the bundle."
+    },
+    {
+      "name": "a binding whose key carries a newline and whose id cannot be compared",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e\nforged: line",
+            "mode": "gated",
+            "policy_ids": [
+              "nope"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "an endpoint_key that is a long list",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": [
+              "k0",
+              "k1",
+              "k2",
+              "k3",
+              "k4",
+              "k5",
+              "k6",
+              "k7",
+              "k8",
+              "k9",
+              "k10",
+              "k11",
+              "k12",
+              "k13",
+              "k14",
+              "k15",
+              "k16",
+              "k17",
+              "k18",
+              "k19",
+              "k20",
+              "k21",
+              "k22",
+              "k23",
+              "k24",
+              "k25",
+              "k26",
+              "k27",
+              "k28",
+              "k29",
+              "k30",
+              "k31",
+              "k32",
+              "k33",
+              "k34",
+              "k35",
+              "k36",
+              "k37",
+              "k38",
+              "k39",
+              "k40",
+              "k41",
+              "k42",
+              "k43",
+              "k44",
+              "k45",
+              "k46",
+              "k47",
+              "k48",
+              "k49",
+              "k50",
+              "k51",
+              "k52",
+              "k53",
+              "k54",
+              "k55",
+              "k56",
+              "k57",
+              "k58",
+              "k59",
+              "k60",
+              "k61",
+              "k62",
+              "k63",
+              "k64",
+              "k65",
+              "k66",
+              "k67",
+              "k68",
+              "k69",
+              "k70",
+              "k71",
+              "k72",
+              "k73",
+              "k74",
+              "k75",
+              "k76",
+              "k77",
+              "k78",
+              "k79",
+              "k80",
+              "k81",
+              "k82",
+              "k83",
+              "k84",
+              "k85",
+              "k86",
+              "k87",
+              "k88",
+              "k89",
+              "k90",
+              "k91",
+              "k92",
+              "k93",
+              "k94",
+              "k95",
+              "k96",
+              "k97",
+              "k98",
+              "k99",
+              "k100",
+              "k101",
+              "k102",
+              "k103",
+              "k104",
+              "k105",
+              "k106",
+              "k107",
+              "k108",
+              "k109",
+              "k110",
+              "k111",
+              "k112",
+              "k113",
+              "k114",
+              "k115",
+              "k116",
+              "k117",
+              "k118",
+              "k119",
+              "k120",
+              "k121",
+              "k122",
+              "k123",
+              "k124",
+              "k125",
+              "k126",
+              "k127",
+              "k128",
+              "k129",
+              "k130",
+              "k131",
+              "k132",
+              "k133",
+              "k134",
+              "k135",
+              "k136",
+              "k137",
+              "k138",
+              "k139",
+              "k140",
+              "k141",
+              "k142",
+              "k143",
+              "k144",
+              "k145",
+              "k146",
+              "k147",
+              "k148",
+              "k149",
+              "k150",
+              "k151",
+              "k152",
+              "k153",
+              "k154",
+              "k155",
+              "k156",
+              "k157",
+              "k158",
+              "k159",
+              "k160",
+              "k161",
+              "k162",
+              "k163",
+              "k164",
+              "k165",
+              "k166",
+              "k167",
+              "k168",
+              "k169",
+              "k170",
+              "k171",
+              "k172",
+              "k173",
+              "k174",
+              "k175",
+              "k176",
+              "k177",
+              "k178",
+              "k179",
+              "k180",
+              "k181",
+              "k182",
+              "k183",
+              "k184",
+              "k185",
+              "k186",
+              "k187",
+              "k188",
+              "k189",
+              "k190",
+              "k191",
+              "k192",
+              "k193",
+              "k194",
+              "k195",
+              "k196",
+              "k197",
+              "k198",
+              "k199",
+              "k200",
+              "k201",
+              "k202",
+              "k203",
+              "k204",
+              "k205",
+              "k206",
+              "k207",
+              "k208",
+              "k209",
+              "k210",
+              "k211",
+              "k212",
+              "k213",
+              "k214",
+              "k215",
+              "k216",
+              "k217",
+              "k218",
+              "k219",
+              "k220",
+              "k221",
+              "k222",
+              "k223",
+              "k224",
+              "k225",
+              "k226",
+              "k227",
+              "k228",
+              "k229",
+              "k230",
+              "k231",
+              "k232",
+              "k233",
+              "k234",
+              "k235",
+              "k236",
+              "k237",
+              "k238",
+              "k239",
+              "k240",
+              "k241",
+              "k242",
+              "k243",
+              "k244",
+              "k245",
+              "k246",
+              "k247",
+              "k248",
+              "k249",
+              "k250",
+              "k251",
+              "k252",
+              "k253",
+              "k254",
+              "k255",
+              "k256",
+              "k257",
+              "k258",
+              "k259",
+              "k260",
+              "k261",
+              "k262",
+              "k263",
+              "k264",
+              "k265",
+              "k266",
+              "k267",
+              "k268",
+              "k269",
+              "k270",
+              "k271",
+              "k272",
+              "k273",
+              "k274",
+              "k275",
+              "k276",
+              "k277",
+              "k278",
+              "k279",
+              "k280",
+              "k281",
+              "k282",
+              "k283",
+              "k284",
+              "k285",
+              "k286",
+              "k287",
+              "k288",
+              "k289",
+              "k290",
+              "k291",
+              "k292",
+              "k293",
+              "k294",
+              "k295",
+              "k296",
+              "k297",
+              "k298",
+              "k299",
+              "k300",
+              "k301",
+              "k302",
+              "k303",
+              "k304",
+              "k305",
+              "k306",
+              "k307",
+              "k308",
+              "k309",
+              "k310",
+              "k311",
+              "k312",
+              "k313",
+              "k314",
+              "k315",
+              "k316",
+              "k317",
+              "k318",
+              "k319",
+              "k320",
+              "k321",
+              "k322",
+              "k323",
+              "k324",
+              "k325",
+              "k326",
+              "k327",
+              "k328",
+              "k329",
+              "k330",
+              "k331",
+              "k332",
+              "k333",
+              "k334",
+              "k335",
+              "k336",
+              "k337",
+              "k338",
+              "k339",
+              "k340",
+              "k341",
+              "k342",
+              "k343",
+              "k344",
+              "k345",
+              "k346",
+              "k347",
+              "k348",
+              "k349",
+              "k350",
+              "k351",
+              "k352",
+              "k353",
+              "k354",
+              "k355",
+              "k356",
+              "k357",
+              "k358",
+              "k359",
+              "k360",
+              "k361",
+              "k362",
+              "k363",
+              "k364",
+              "k365",
+              "k366",
+              "k367",
+              "k368",
+              "k369",
+              "k370",
+              "k371",
+              "k372",
+              "k373",
+              "k374",
+              "k375",
+              "k376",
+              "k377",
+              "k378",
+              "k379",
+              "k380",
+              "k381",
+              "k382",
+              "k383",
+              "k384",
+              "k385",
+              "k386",
+              "k387",
+              "k388",
+              "k389",
+              "k390",
+              "k391",
+              "k392",
+              "k393",
+              "k394",
+              "k395",
+              "k396",
+              "k397",
+              "k398",
+              "k399",
+              "k400",
+              "k401",
+              "k402",
+              "k403",
+              "k404",
+              "k405",
+              "k406",
+              "k407",
+              "k408",
+              "k409",
+              "k410",
+              "k411",
+              "k412",
+              "k413",
+              "k414",
+              "k415",
+              "k416",
+              "k417",
+              "k418",
+              "k419",
+              "k420",
+              "k421",
+              "k422",
+              "k423",
+              "k424",
+              "k425",
+              "k426",
+              "k427",
+              "k428",
+              "k429",
+              "k430",
+              "k431",
+              "k432",
+              "k433",
+              "k434",
+              "k435",
+              "k436",
+              "k437",
+              "k438",
+              "k439",
+              "k440",
+              "k441",
+              "k442",
+              "k443",
+              "k444",
+              "k445",
+              "k446",
+              "k447",
+              "k448",
+              "k449",
+              "k450",
+              "k451",
+              "k452",
+              "k453",
+              "k454",
+              "k455",
+              "k456",
+              "k457",
+              "k458",
+              "k459",
+              "k460",
+              "k461",
+              "k462",
+              "k463",
+              "k464",
+              "k465",
+              "k466",
+              "k467",
+              "k468",
+              "k469",
+              "k470",
+              "k471",
+              "k472",
+              "k473",
+              "k474",
+              "k475",
+              "k476",
+              "k477",
+              "k478",
+              "k479",
+              "k480",
+              "k481",
+              "k482",
+              "k483",
+              "k484",
+              "k485",
+              "k486",
+              "k487",
+              "k488",
+              "k489",
+              "k490",
+              "k491",
+              "k492",
+              "k493",
+              "k494",
+              "k495",
+              "k496",
+              "k497",
+              "k498",
+              "k499"
+            ],
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Reported by its kind, never by its content. Interpolating it puts the whole array in the log, and its length is whoever produced the bundle's to choose."
+    },
+    {
+      "name": "an endpoint_key that is a list carrying a newline",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": [
+              "real\nforged: line"
+            ],
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Not a string, so it is reported by its kind — which is the point: interpolating it directly would put its contents in the log."
+    },
+    {
+      "name": "a refusal naming an endpoint_key that carries an escape sequence",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e\u001b[31m",
+            "mode": "gated",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Refused for its empty gated ids, not for the escape sequence — there is no character rule on an endpoint key, and there must not be, since the control plane accepts any string of 1 to 255. What this pins is the refusal *message*, which names the key and would otherwise recolour an operator's terminal."
+    },
+    {
+      "name": "a refusal naming an endpoint_key that carries a newline",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "real\nforged: line",
+            "mode": "gated",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Refused for its empty gated ids. The mode is deliberately valid here, so the mode guard is not what answers and the message is reached with the newline in the key."
+    },
+    {
+      "name": "a refusal naming both an unreadable mode and an unreadable key",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "real\u001b[31mforged",
+            "mode": "clo\u001b[31msed",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "One message interpolates two wire values, and each needs its own guard — pinning the mode leaves the key beside it unpinned."
+    },
+    {
+      "name": "a binding whose mode carries a bidi override",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated‮open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a binding naming an id that carries a null byte",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": [
+              "a\u0000b"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a policy id carrying an escape sequence",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "\u001b[31mnope",
+            "name": "P-pe",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "policies is not a list",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": {},
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "bindings is not a list",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": {},
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "rejected is not a list",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "rejected": "none"
+      },
+      "usable": false,
+      "note": "Read as 'nothing was rejected' it is exactly the silent narrowing this field exists to prevent."
+    },
+    {
+      "name": "a policy that is not an object",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          "not a policy"
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a refusal naming a policy entry that is a string with a newline",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          "real\nforged: line"
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The entry itself is interpolated, and here it is whoever produced the bundle's text rather than a shape."
+    },
+    {
+      "name": "a refusal naming a priority that carries a newline",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": "one\nforged: line"
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "A priority that is not a number is named in the refusal, and a string is what the wire can put there."
+    },
+    {
+      "name": "a refusal naming a priority four thousand digits long",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Python's integers are unbounded, so without a cap the refusal carries all four thousand digits into the log on every failed refresh. The reference got this for nothing: every JSON number there is a double."
+    },
+    {
+      "name": "a policy id that cannot be compared",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "not-a-uuid",
+            "name": "P-id",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a policy with no id at all",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "name": "P",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a policy whose id is null",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": null,
+            "name": "P-??",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a policy id that is not a string",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": 12345,
+            "name": "P-??",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a policy id that is thirty-two digits and not a string",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": 12345678901234567890123456789012,
+            "name": "P-??",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The length and alphabet checks both pass once it is stringified, so only the type check refuses it. A shorter number is refused by its length and pins nothing."
+    },
+    {
+      "name": "a policy id one hex digit short",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a",
+            "name": "P-0a",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Thirty-one digits. The count is checked after hyphens are stripped, so a spelling cannot make it up."
+    },
+    {
+      "name": "a policy id one hex digit long",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1a",
+            "name": "P-1a",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Thirty-three. Refused for the same reason, and by Rail Center too."
+    },
+    {
+      "name": "a policy id padded with spaces",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "  5c8f1e42-0000-4000-8000-0000000000a1  ",
+            "name": "P-  ",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Whitespace is not stripped before the count and alphabet are checked, so the spaces are two characters that are not hex. Rail Center's uuid.UUID raises on it too; the TypeScript gateway being replaced trimmed first and read it, which is the divergence."
+    },
+    {
+      "name": "a policy id padded with a tab and a newline",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "\t5c8f1e42-0000-4000-8000-0000000000a1\n",
+            "name": "P-1\n",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Whitespace is not trimmed here. The TypeScript gateway trims and would read this; Rail Center does not and refuses it."
+    },
+    {
+      "name": "a policy id padded on the left only",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "  5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "One side, because a partial trim is the reimplementation to catch and every other padded case pads both."
+    },
+    {
+      "name": "a policy id padded on the right only",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1  ",
+            "name": "P-  ",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a braced id padded inside its braces",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "{ 5c8f1e42-0000-4000-8000-0000000000a1 }",
+            "name": "P- }",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Stripping after the braces come off is the other half of the same reimplementation."
+    },
+    {
+      "name": "a binding naming an id padded with spaces",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": [
+              "  5c8f1e42-0000-4000-8000-0000000000a1  "
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The rule holds on a bound id as well as on a policy's own."
+    },
+    {
+      "name": "an id opened with a brace and not closed",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "{5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Both ends or neither: one brace alone leaves the other end unstripped and a brace among the digits."
+    },
+    {
+      "name": "an id closed with a brace and not opened",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1}",
+            "name": "P-1}",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The same from the other side. Rail Center reads both, its strip taking any number from either end."
+    },
+    {
+      "name": "doubled braces around an id",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "{{5c8f1e42-0000-4000-8000-0000000000a1}}",
+            "name": "P-}}",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Exactly one pair is stripped here, so the inner pair is still there and the count is 34 rather than 32 — it is the length check that answers, before the alphabet is looked at. uuid.UUID strips braces from both ends however many there are, so Rail Center reads this."
+    },
+    {
+      "name": "an id carrying an interior urn:uuid: prefix",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42urn:uuid:0000400080000000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The whole prefix, in the middle. Replacing it wherever it appears rather than stripping it from the front reads a policy id out of this; the shorter interior `uuid:` case below does not reach that."
+    },
+    {
+      "name": "an id carrying an interior uuid: prefix",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42uuid:0000400080000000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "uuid.UUID replaces `uuid:` anywhere in the string, not only at the front, so Rail Center reads a policy id out of this."
+    },
+    {
+      "name": "an id of thirty-three characters carrying an underscore",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42_0000400080000000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Only hyphens are stripped. Stripping underscores too would leave thirty-two hex digits here and read a policy id out of it — and Rail Center refuses this one for its length, so the two would then disagree in the other direction as well."
+    },
+    {
+      "name": "an id carrying an underscore in place of a digit",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e4_0000400080000000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Thirty-two characters, so uuid.UUID's length check passes and int(x, 16) then reads the underscore as a digit separator. A thirty-three-character form with an underscore added rather than substituted is refused there for its length and would demonstrate nothing."
+    },
+    {
+      "name": "an id carrying a leading plus",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "P-aa",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "int(x, 16) accepts a leading sign."
+    },
+    {
+      "name": "an id written in Arabic-Indic digits",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠",
+            "name": "P-٠٠",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "int(x, 16) accepts any Unicode decimal digit, so Rail Center reads an id here. The contract says hex, and hex is ASCII."
+    },
+    {
+      "name": "an id padded after its URN prefix",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "urn:uuid:  5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The headline rule is that whitespace is not trimmed, and the padding that tests it has to sit where a prefix strip would otherwise absorb it."
+    },
+    {
+      "name": "a leading minus in place of a digit",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "P-aa",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Refused in Rail Center too — uuid.UUID strips hyphens, leaving 31 digits — which is what separates it from the leading plus above, where int(x, 16) reads the sign."
+    },
+    {
+      "name": "an opening brace in front of thirty-three hex digits",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "{aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "P-aa",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Stripping a leading brace without requiring its closer takes a character off the far end too, and thirty-three digits leaves thirty-two behind — a policy id read out of a value that is not one."
+    },
+    {
+      "name": "thirty-three hex digits with a closing brace behind them",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
+            "name": "P-a}",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The same shape from the other side, for a reader that strips on either brace rather than on both."
+    },
+    {
+      "name": "an undashed id closed with a brace but not opened",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e420000400080000000000000a1}",
+            "name": "P-1}",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Thirty-two hex digits and a stray brace. Stripping a closing brace without requiring its opener reads a policy id out of this."
+    },
+    {
+      "name": "a policy id of the right length that is not hex",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "name": "P-zz",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Thirty-two characters and none of them a hex digit, so only the alphabet check answers."
+    },
+    {
+      "name": "a policy id whose last digit is not hex",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "0000000000000000000000000000000z",
+            "name": "P-0z",
+            "priority": 1
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Thirty-two characters, hex up to the last one. A prefix match accepts it and reads a policy id out of a value that is not one."
+    },
+    {
+      "name": "one policy id appearing twice",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 2
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Two entries sharing an id are two claims about the same rule, and nothing in a bundle says which is current. Refused at any priorities, not only equal ones."
+    },
+    {
+      "name": "one policy id appearing twice in different spellings",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          },
+          {
+            "id": "5C8F1E42-0000-4000-8000-0000000000A1",
+            "name": "P-A1",
+            "priority": 2
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Canonicalised before the duplicate check, so two spellings of one id are one id."
+    },
+    {
+      "name": "a policy with no priority",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P"
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Indistinguishable from an explicit null once read — `get` returns None for both — so there is one case rather than two."
+    },
+    {
+      "name": "a fractional priority",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1.5
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a boolean priority",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "isinstance(True, int) is true in Python and typeof true is 'boolean' in TypeScript. Unsaid, the two sides disagree."
+    },
+    {
+      "name": "a priority past what a double separates",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 9007199254740992
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a priority past the negative end of what a double separates",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": -9007199254740992
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Bounded on both sides. Comparing without an absolute value leaves the negative end unbounded, and Rail Center pins this case too."
+    },
+    {
+      "name": "a priority written as a string",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": "1"
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a binding that is not an object",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          "nope"
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a binding that is a list",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          []
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a refusal naming a binding entry that is a string with a newline",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          "real\nforged: line"
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The binding half of the policy case above. Both interpolate the entry, so both need the escaping."
+    },
+    {
+      "name": "a binding whose endpoint_key is not a string",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": 123,
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "A language that coerces it narrows a request whose resolved key is the string \"123\"."
+    },
+    {
+      "name": "two bindings for one endpoint",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "open",
+            "policy_ids": []
+          },
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-0000000000a1"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a mode in the wrong case",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "GATED",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-0000000000a1"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Exact, not folded. Folding turns an unreadable mode into a live narrowing; Rail Center refuses this too."
+    },
+    {
+      "name": "a mode with surrounding whitespace",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": " gated ",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-0000000000a1"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a mode outside gated and open",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "closed",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The two guesses are 'the listed policies apply' and 'none do', which is the widest disagreement available."
+    },
+    {
+      "name": "a missing mode",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a refusal naming a key with a newline whose policy_ids is not a list",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "real\nforged: line",
+            "mode": "gated",
+            "policy_ids": "abc"
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "One of two branches where the key is interpolated and no case paired it with an unsafe key."
+    },
+    {
+      "name": "a refusal naming a key with a newline on an open binding that names policies",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "real\nforged: line",
+            "mode": "open",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-0000000000a1"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The other."
+    },
+    {
+      "name": "an open binding whose policy_ids is an empty string",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "open",
+            "policy_ids": ""
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Empty and falsy, so the open branch's check passes and nothing else looks at it. Only the type test refuses this."
+    },
+    {
+      "name": "policy_ids given as an object",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": {
+              "5c8f1e42-0000-4000-8000-0000000000a1": true
+            }
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "An object iterates as its keys, so a reader that does not check the type binds the endpoint to whatever those happen to be."
+    },
+    {
+      "name": "policy_ids given as a string",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": "5c8f1e42-0000-4000-8000-0000000000a1"
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Refused by its type. Under `gated` the bound-id check would refuse it anyway, one character at a time; the case pinning the type check itself is the open one above, where nothing else looks at it."
+    },
+    {
+      "name": "an open binding that still names policies",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "open",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-0000000000a1"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a gated binding naming no policy",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Read literally it disarms the endpoint completely — no threshold, and not even the rule denying a request that presents no ticket — without anyone having written open."
+    },
+    {
+      "name": "a binding naming an id that cannot be compared",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": [
+              "nope"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a binding naming a null id",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "e",
+            "mode": "gated",
+            "policy_ids": [
+              null
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false
+    },
+    {
+      "name": "a bad binding is refused even when an earlier one is fine",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "ok",
+            "mode": "open",
+            "policy_ids": []
+          },
+          {
+            "endpoint_key": "bad",
+            "mode": "gated",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "The whole set is checked, not only the entry a request needs. A lazy check surfaces the fault on whichever endpoint is called first."
+    },
+    {
+      "name": "a bundle whose ninth policy cannot be ordered is refused whole",
+      "bundle": {
+        "version": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+            "name": "P-a1",
+            "priority": 1,
+            "action": "block",
+            "condition": {
+              "field": "x_rail_header",
+              "operator": "present"
+            }
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000003",
+            "name": "P-03",
+            "priority": 3
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000004",
+            "name": "P-04",
+            "priority": 4
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000005",
+            "name": "P-05",
+            "priority": 5
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000006",
+            "name": "P-06",
+            "priority": 6
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000007",
+            "name": "P-07",
+            "priority": 7
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000008",
+            "name": "P-08",
+            "priority": 8
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000a2",
+            "name": "P-a2",
+            "priority": "nine"
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "usable": false,
+      "note": "Refused eagerly, whatever the walk would have answered: a block at priority 1 would have denied first and the bundle is still unusable."
+    }
+  ]
+}

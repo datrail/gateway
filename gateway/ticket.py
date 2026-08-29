@@ -20,8 +20,9 @@ and one is a rule the reference has not caught up with.
    admits an `agent_id` with a replacement character in it.
 2. Invalid UTF-8 in a *key* is `undecodable` here and `malformed` there, for the
    same reason — the substituted key is not `agent_id`, so the reference gets
-   as far as looking for one and not finding it. Both refuse; they disagree on
-   which state, and the state is what a denial report carries.
+   as far as looking for one and not finding it. Both refuse, and they disagree
+   on which state — which matters to whatever eventually reports the refusal,
+   not to whether the request is admitted.
 3. Nesting past `MAX_NESTING_DEPTH` is `undecodable` here and parses there. The
    contract expects this one and bounds it: implementations' limits differ, so
    what it requires is that the limit sit above anything the mint can issue,
@@ -42,6 +43,8 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any, Literal
+
+from gateway.json_wire import MAX_SAFE_INTEGER
 
 #: How a ticket classified. **Only `valid` is usable**, and every claim of
 #: anything else resolves to absent however readable the payload is.
@@ -80,12 +83,6 @@ TicketState = Literal["absent", "undecodable", "malformed", "expired", "valid"]
 #: Named and exported so the value is a choice a reader can find, not an absence
 #: they have to infer.
 CLOCK_SKEW_TOLERANCE_SEC = 0
-
-#: JSON has no integer type, so ``exp`` arrives as a double and past 2^53 − 1 a
-#: double cannot separate adjacent integers. Python's own ints are unbounded, so
-#: the limit has to be stated here or the two implementations would disagree
-#: about a value one of them cannot represent.
-MAX_SAFE_INTEGER = 2**53 - 1
 
 #: The base64 alphabet, standard and URL-safe both. Enforced rather than left to
 #: the decoder, which discards anything outside it — `binascii` and Node's

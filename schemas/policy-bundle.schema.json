@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/datrail/gateway/schemas/policy-bundle.schema.json",
+  "title": "Policy bundle",
+  "description": "The body of `GET /v1/policy-bundle` — the ruleset an enforcement point caches and evaluates every request against.\n\nWhat this schema can express is shape. Three of the bundle's rules are about meaning and are stated here in prose because no schema carries them:\n\n1. **An endpoint with no binding entry is subject to every policy in `policies`.** An empty `bindings` list means nothing is narrowed, not that nothing applies. Read the other way round it is a total loss of enforcement.\n2. **A failed fetch is not an empty bundle.** An empty chain allows, so a reader that treats an unreachable control plane as a bundle with no rules converts an outage of Rail Center into an outage of enforcement. Keep serving the last bundle held; refuse traffic if none was ever held.\n3. **A bundle valid against this schema can still be unusable.** Four classes: a policy id or a bound id in a spelling the contract does not name; a `version` carrying a character no log line can hold; a duplicate policy id; and two bindings for one endpoint. Three of the four are beyond what this file can say. Uniqueness across a list has no keyword at all. The version's character rule is defined by Unicode general category. `pattern` is ECMA-262, which can say that with `\\p{...}` under the `u` flag — but a reader validating with Python's `jsonschema` cannot, because it compiles patterns with `re`, and enumerating the code points instead would be a snapshot that a later Unicode revision silently invalidates. A rule half the readers of this file cannot evaluate is worse than one stated in prose. The id grammar *is* expressible as a `pattern`, and is deliberately not written as one: it would be a second copy of a rule that already lives in code and in vectors, and the loop that produced this file kept finding second copies that had stopped agreeing with the first. The `gated`/`open` arity rules are the one case where a schema rule is both expressible and cheap to keep true, so they are stated below.\n\nA reader is therefore not conformant by validating against this file. It is conformant by passing the vectors that accompany it.",
+  "type": "object",
+  "required": [
+    "version",
+    "policies",
+    "bindings",
+    "rejected"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "A content hash of the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy, and a version over the policies alone would let a reader hold a stale narrowing indefinitely.\n\nBounded, and refused if it carries a character no log line can hold — a control, a format character, a line or paragraph separator, or a lone surrogate: it is held for as long as the bundle is and re-echoed on every failed refresh after that, so one accepted once keeps arriving in an operator's log."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When Rail Center assembled this bundle. Informational — a reader caches on `version`, never on this. `format` is an annotation in draft 2020-12 and most validators do not check it; nothing turns on this value here."
+    },
+    "policies": {
+      "type": "array",
+      "description": "The tenant's chain apart from the entries under `rejected`, unpaginated, and including disabled ones. Never truncated for length: a reader that received part of a chain would enforce part of a chain and have no way to tell.",
+      "items": {
+        "$ref": "#/$defs/policy"
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "description": "Which policies reach which endpoint. A binding narrows. The key is always present, so a reader can tell \"no endpoint is narrowed\" from \"this bundle does not describe bindings\" without a special case.",
+      "items": {
+        "$ref": "#/$defs/binding"
+      }
+    },
+    "rejected": {
+      "type": "array",
+      "description": "Policies Rail Center excluded because their condition is not evaluable, or is evaluable but cannot be re-published faithfully. A reader does not act on it; it is there so an operator sees that a rule is not in force rather than inferring it from an absence. Required, and refused rather than read as empty when it is the wrong shape: 'nothing was rejected' is precisely the silent narrowing this field exists to prevent.",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "$defs": {
+    "policy": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A UUID. Five spellings must parse — canonical, uppercase, braced, URN and undashed — and are compared in the canonical lowercase-hyphenated form. Rail Center emits the canonical one; the others arise in a bundle assembled elsewhere, and refusing them makes the bundle unusable, which refuses traffic."
+        },
+        "name": {
+          "type": "string",
+          "description": "What an operator reads. A policy with no readable name is named by its id rather than refused: no decision turns on it, and refusing the bundle would take enforcement down for a cosmetic fault."
+        },
+        "condition": {
+          "description": "Left unconstrained on purpose. A condition that cannot be interpreted is refused *lazily*, where the walk reaches it, so that an earlier policy which already denied still gives that request a clean answer. Validating conditions here would make that refusal eager and change which requests get an answer."
+        },
+        "action": {
+          "description": "What a match does. Any action other than `alert` denies. Unconstrained for the same reason as `condition`."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Skipped when exactly `false`, never merely falsy — the falsy sets do not agree across languages. A policy carrying no `enabled` key is enabled: a rule nobody switched off is one an operator expects to be running. Settled before anything else is validated, so that switching a policy off is a working remedy for a bundle this reader cannot parse. A policy carrying `enabled: false` is exempt from the priority rule in `allOf` below, because refusing a disabled policy's priority would refuse exactly the bundle that switching one off produces — which is the remedy this ordering exists to keep working."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": false
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {},
+          "else": {
+            "required": [
+              "priority"
+            ],
+            "properties": {
+              "priority": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Ascending: 1 is evaluated before 2. A whole number within ±(2^53 − 1), because a priority arrives as a double and past that bound two values one reader sees as distinct another sees as a tie — and the chains then order differently. `1.0` is the integer 1; `1.5` is not a priority, and `true` is not one either."
+              }
+            }
+          }
+        }
+      ]
+    },
+    "binding": {
+      "type": "object",
+      "required": [
+        "endpoint_key",
+        "mode",
+        "policy_ids"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "endpoint_key": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "The endpoint this narrows — the *resolved* key, matched after any ingress rewrite, never the raw path. A rule written against a raw path is a rule a rewrite silently disarms. Must be a string: a language that coerces `123` narrows a request whose resolved key is the string \"123\"."
+        },
+        "mode": {
+          "enum": [
+            "gated",
+            "open"
+          ],
+          "description": "`gated` — only the policies in `policy_ids` apply. `open` — no policy applies to this endpoint, so nothing can deny and the request is allowed. Note *allowed*, not *skipped*: the bundle is still validated and the chain still ordered, because an unusable bundle is refused whatever any one endpoint's binding says. Anything else is refused, because the two guesses are \"the listed policies apply\" and \"none do\", which is the widest disagreement available."
+        },
+        "policy_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "UUIDs naming policies in `policies`, in any of the five spellings, normalised before comparison — a raw comparison against a non-canonical id matches no policy, and an endpoint matching no policy is gated by nothing. Non-empty when `mode` is `gated`, empty when it is `open`; a gated entry naming nothing is refused, since \"subject to nothing\" is spelled `open` and \"subject to everything\" is spelled by carrying no entry.\n\nAn id naming no policy, or a disabled one, binds nothing and is not an error. A binding whose every id resolves to nothing leaves an empty chain, and an empty chain allows — do not fall back to the whole chain when narrowing empties it."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "gated"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "policy_ids": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "open"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "policy_ids": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "version": "a3f1c09e7b2d4485",
+      "generated_at": "2026-07-28T20:41:07.512247Z",
+      "policies": [
+        {
+          "id": "5c8f1e42-0000-4000-8000-0000000000a1",
+          "name": "P1 — Deny critical-tier agents",
+          "priority": 1,
+          "condition": {
+            "field": "posture_score",
+            "operator": "lt",
+            "value": 40
+          },
+          "action": "block",
+          "enabled": true
+        }
+      ],
+      "bindings": [
+        {
+          "endpoint_key": "finretail.orders",
+          "mode": "gated",
+          "policy_ids": [
+            "5c8f1e42-0000-4000-8000-0000000000a1"
+          ]
+        },
+        {
+          "endpoint_key": "finretail.health",
+          "mode": "open",
+          "policy_ids": []
+        }
+      ],
+      "rejected": []
+    }
+  ]
+}
