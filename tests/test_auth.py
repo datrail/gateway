@@ -17,6 +17,7 @@ SECRET = "s3cr3t-token-nobody-should-see"
 def test_an_unset_mode_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
     """The platform's default, and the one a fresh deployment starts on."""
     monkeypatch.delenv("RAIL_AUTH_MODE", raising=False)
+    monkeypatch.delenv("RAIL_AUTH_TOKEN", raising=False)
     assert auth_headers() == {}
 
 
@@ -25,6 +26,7 @@ def test_none_is_read_whatever_its_case(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
     monkeypatch.setenv("RAIL_AUTH_MODE", value)
+    monkeypatch.delenv("RAIL_AUTH_TOKEN", raising=False)
     assert auth_headers() == {}
 
 
@@ -137,15 +139,43 @@ def test_no_refusal_ever_carries_the_token(monkeypatch: pytest.MonkeyPatch) -> N
         assert SECRET not in str(caught.value)
 
 
-def test_a_token_is_only_read_when_the_mode_needs_one(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("mode", ["none", None])
+def test_a_token_beside_none_stops_the_process(
+    monkeypatch: pytest.MonkeyPatch, mode: str | None
 ) -> None:
-    """An unusable token under `none` is not an error.
+    """The one door the unknown-mode branch does not cover.
 
-    A deployment moving from bearer back to none leaves the old variable set,
-    and refusing to start over a credential nothing will present would make
-    turning authentication off harder than turning it on.
+    A misspelled `RAIL_AUTH_MODE` resolves to `none` like an unset one, and a
+    `none` that ignores the token calls anonymously a control plane the operator
+    plainly meant to authenticate to. Both halves of the mistake are visible
+    here — the credential is set, the mode is not — and the message says which
+    of the two to change.
+    """
+    if mode is None:
+        monkeypatch.delenv("RAIL_AUTH_MODE", raising=False)
+    else:
+        monkeypatch.setenv("RAIL_AUTH_MODE", mode)
+    monkeypatch.setenv("RAIL_AUTH_TOKEN", SECRET)
+
+    with pytest.raises(AuthConfigurationError) as caught:
+        auth_headers()
+
+    message = str(caught.value)
+    assert "sends no credential" in message
+    assert "RAIL_AUTH_MODE=bearer" in message
+    assert SECRET not in message
+
+
+@pytest.mark.parametrize("token", ["", "   ", "\n"])
+def test_an_empty_token_beside_none_is_the_ordinary_shape(
+    monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """Empty is not set.
+
+    A deployment writing `RAIL_AUTH_TOKEN=${TOKEN:-}` passes an empty value
+    whenever the mode is `none`, so refusing on the variable's presence rather
+    than its content would refuse the compose file that runs the demo.
     """
     monkeypatch.setenv("RAIL_AUTH_MODE", "none")
-    monkeypatch.setenv("RAIL_AUTH_TOKEN", "a\nb")
+    monkeypatch.setenv("RAIL_AUTH_TOKEN", token)
     assert auth_headers() == {}

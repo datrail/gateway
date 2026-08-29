@@ -21,8 +21,10 @@ implementations can be compared on.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -56,22 +58,66 @@ DEFAULT_REFRESH_SECONDS = 60
 #: turn a fleet into a load generator.
 MIN_REFRESH_SECONDS = 5
 
-#: A fetch with no deadline leaves a refresh hanging, the next tick starts
-#: another, and a slow control plane accumulates them. Five seconds is far more
-#: than a same-region round trip and far less than the interval, so one attempt
-#: has always finished before the next begins.
+#: The deadline on one fetch. Five seconds is far more than a same-region round
+#: trip, and short enough that a control plane which has stopped answering
+#: without closing the connection costs one refresh rather than an unbounded
+#: wait.
+#:
+#: Attempts do not pile up without it: `_loop` awaits the sleep and the refresh
+#: in sequence, and `refresh()` serialises on a lock. What the deadline bounds is
+#: how long a hung fetch holds that lock — which is what the next scheduled
+#: refresh, and any manual one, waits behind.
 FETCH_TIMEOUT_SECONDS = 5.0
 
 #: The largest bundle this gateway will read, in bytes.
 #:
 #: The deadline bounds how *long* a response may take and says nothing about how
-#: *large* it may be: a control plane answering quickly with an enormous body is
-#: buffered whole before anything looks at it. Four megabytes is far more than a
-#: tenant's whole ruleset — a chain is a few dozen policies of a few hundred
-#: bytes — and small enough that a body past it is a fault rather than a big
-#: customer. One past it is treated as unreachable, so the last bundle held stays
-#: in force.
+#: *large* it may be: a control plane answering quickly with an enormous body
+#: would otherwise be read whole. Four megabytes is far more than a tenant's
+#: whole ruleset — a chain is a few dozen policies of a few hundred bytes — and
+#: small enough that a body past it is a fault rather than a big customer. One
+#: past it is treated as unreachable, so the last bundle held stays in force.
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
+
+#: What may not appear in a header value this holder sends.
+#:
+#: Deliberately not `auth.py`'s rule, which is stricter because it governs a
+#: bearer token rather than a whole field value: `Bearer t0ken` carries a space,
+#: which is legal between the parts of a value and illegal inside a credential.
+_HEADER_VALUE_UNSAFE = re.compile(r"[^\x20-\x7E]")
+
+
+def _sendable(headers: dict[str, str]) -> dict[str, str]:
+    """`headers`, or a refusal naming the header and not its value.
+
+    The value is checked here rather than left to the socket, because h11
+    refuses one by raising `LocalProtocolError` **quoting the value it could not
+    send** — and that reason reaches `_unreachable` on every failed refresh.
+    `safe_for_log` does not catch it: `repr` has already flattened the offending
+    control byte into two printable characters, so nothing unsafe is left to
+    see, and an `Authorization` value would be logged whole, once per refresh
+    interval, for as long as the misconfiguration stood.
+
+    `auth_headers()` pre-filters the credential it produces, so today's only
+    caller cannot get here. This constructor declares `dict[str, str]` and has
+    to hold for what it declares.
+    """
+    for name, value in headers.items():
+        found = _HEADER_VALUE_UNSAFE.search(value)
+        if found is not None:
+            offset = found.start()
+            raise ValueError(
+                f"header {safe_for_log(name)} holds "
+                f"U+{ord(value[offset]):04X} at offset {offset}, "
+                "which cannot go in a header value"
+            )
+        if value != value.strip():
+            # h11 refuses a padded value too, and quotes it the same way.
+            raise ValueError(
+                f"header {safe_for_log(name)} is padded with whitespace, "
+                "which cannot go in a header value"
+            )
+    return headers
 
 
 @dataclass(frozen=True)
@@ -152,7 +198,7 @@ class BundleHolder:
         sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._url = rail_center_url.rstrip("/") + BUNDLE_PATH
-        self._headers = {"Accept": "application/json", **headers}
+        self._headers = _sendable({"Accept": "application/json", **headers})
         self._interval = interval_seconds
         self._timeout = timeout_seconds
         self._max_bytes = max_bytes
@@ -194,9 +240,15 @@ class BundleHolder:
         request while the loop keeps trying, which is a state an operator can
         see and act on. Refusing to start would turn a control plane that is
         briefly down into a gateway that never comes up.
+
+        Calling it twice refreshes twice and still leaves one loop. Overwriting
+        `_task` instead would drop the only handle to the first, which nothing
+        could then cancel: it would keep refreshing for the life of the process,
+        contending for the lock and doubling the load on the control plane.
         """
         outcome = await self.refresh()
-        self._task = asyncio.create_task(self._loop())
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._loop())
         return outcome
 
     async def stop(self) -> None:
@@ -280,11 +332,27 @@ class BundleHolder:
     async def _fetch(self) -> Any:
         """The parsed body, or `_Unreachable` for every way of not getting one."""
         try:
-            async with httpx.AsyncClient(
-                timeout=self._timeout, transport=self._transport
-            ) as client:
-                response = await client.get(self._url, headers=self._headers)
-
+            # Streamed, so that the bound below bounds memory rather than only
+            # the verdict. A non-streaming `get()` reads the whole body before
+            # it returns, which would leave a responder free to commit whatever
+            # it can send inside the deadline no matter what `max_bytes` says
+            # afterwards.
+            async with (
+                httpx.AsyncClient(
+                    timeout=self._timeout,
+                    transport=self._transport,
+                    # `RAIL_CENTER_URL` is the whole of where this call may go.
+                    # Left at its default, httpx reads `HTTP_PROXY` and
+                    # `ALL_PROXY` out of the process environment, so whatever
+                    # can set a variable in this container — a base image, a
+                    # sidecar, an orchestrator — chooses the host that answers
+                    # with the ruleset this gateway then enforces, and against
+                    # an `http://` control plane sees the bearer token on the
+                    # way past.
+                    trust_env=False,
+                ) as client,
+                client.stream("GET", self._url, headers=self._headers) as response,
+            ):
                 if response.status_code in (401, 403):
                     # The credential was produced and Rail Center refused it.
                     # Every later refresh fails the same way until the
@@ -298,11 +366,12 @@ class BundleHolder:
                 if response.status_code >= 400:
                     raise _Unreachable(f"Rail Center responded {response.status_code}")
 
-                # Bounded before parsing, not after. `len(response.content)`
-                # already holds the whole body in memory, which is the thing the
-                # bound exists to prevent — so the length header is checked
-                # first, and the body second for a responder that did not send
-                # one.
+                # The status and the headers arrive before the body, so a
+                # declared length past the bound is refused without reading
+                # anything at all. The header is the responder's claim
+                # though, and a responder that under-declares or sends no
+                # length is bounded by the running total below, which stops
+                # reading the moment it is past.
                 declared = response.headers.get("content-length")
                 if (
                     declared is not None
@@ -313,20 +382,26 @@ class BundleHolder:
                         f"policy bundle declares {declared} bytes, "
                         f"past the {self._max_bytes} this gateway reads"
                     )
-                if len(response.content) > self._max_bytes:
-                    raise _Unreachable(
-                        f"policy bundle is {len(response.content)} bytes, "
-                        f"past the {self._max_bytes} this gateway reads"
-                    )
-                return response.json()
+
+                chunks: list[bytes] = []
+                read = 0
+                async for chunk in response.aiter_bytes():
+                    read += len(chunk)
+                    if read > self._max_bytes:
+                        raise _Unreachable(
+                            "policy bundle is past the "
+                            f"{self._max_bytes} bytes this gateway reads"
+                        )
+                    chunks.append(chunk)
+                return json.loads(b"".join(chunks))
         except _Unreachable:
             raise
         except Exception as error:
             # `httpx` raises a family for connection, timeout, protocol and
-            # decode failures, and `json()` raises its own. They differ in cause
-            # and not in consequence: nothing usable arrived, so the last bundle
-            # held stays in force. The type is named so the log line is worth
-            # reading.
+            # decode failures, and `json.loads` raises its own. They differ in
+            # cause and not in consequence: nothing usable arrived, so the last
+            # bundle held stays in force. The type is named so the log line is
+            # worth reading.
             raise _Unreachable(f"{type(error).__name__}: {error}") from error
 
     def _unreachable(self, reason: str, held: str | None) -> RefreshOutcome:
@@ -336,8 +411,7 @@ class BundleHolder:
         # carries: h11 quotes the bytes it could not parse — `illegal header
         # line: b'...'` — so a malformed response puts its own content in this
         # line. Python's own JSON decoder does not, reporting a line and column
-        # instead; the reference implementation this was ported from relied on
-        # the opposite, since `JSON.parse` quotes a snippet.
+        # instead.
         #
         # A warning while a bundle is held — the gateway is still enforcing,
         # against a ruleset that is merely not fresh. An error once nothing is

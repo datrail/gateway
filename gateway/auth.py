@@ -77,10 +77,7 @@ def auth_headers() -> dict[str, str]:
     """The headers every Rail Center call carries, resolved from the environment.
 
     A plain dict rather than a callable: this component's only credential source
-    is an environment variable, which a running process cannot change. A mode
-    whose credential can rotate under a live process — a file that is re-read, a
-    token that is minted — needs resolving per call instead, and that is the
-    shape to reach for when one lands rather than now.
+    is an environment variable, which a running process cannot change.
 
     Raises `AuthConfigurationError` for anything it cannot honour.
     """
@@ -97,6 +94,26 @@ def auth_headers() -> dict[str, str]:
         )
 
     if mode == "none":
+        # A token beside `none` is not a spare. It is an operator who set the
+        # credential and not the mode — a misspelled `RAIL_AUTH_MODE`, or a
+        # variable that never got set at all — and letting the default win calls
+        # a control plane they meant to authenticate to anonymously. That is the
+        # silent degradation this module exists to refuse, reached through the
+        # one door the unknown-mode branch does not cover: an unset variable is
+        # not a mistake anyone can see.
+        #
+        # Empty is not set: a deployment writing `RAIL_AUTH_TOKEN=${TOKEN:-}`
+        # passes an empty value whenever the mode is `none`, and that is the
+        # ordinary shape rather than an error.
+        if _trimmed("RAIL_AUTH_TOKEN"):
+            configured = (
+                "none" if _trimmed("RAIL_AUTH_MODE") else "unset, which is none"
+            )
+            raise AuthConfigurationError(
+                f"RAIL_AUTH_MODE is {configured} and sends no credential, but "
+                "RAIL_AUTH_TOKEN is set; set RAIL_AUTH_MODE=bearer to use it, "
+                "or unset RAIL_AUTH_TOKEN to mean none"
+            )
         return {}
     return {
         "Authorization": f"Bearer {_bearer_credential(os.environ.get('RAIL_AUTH_TOKEN') or '', 'RAIL_AUTH_TOKEN')}"

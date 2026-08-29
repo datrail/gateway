@@ -16,6 +16,7 @@ reported the failure honestly, which is the bug this file exists to catch.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -314,11 +315,10 @@ async def test_a_body_past_the_bound_is_treated_as_unreachable() -> None:
 
 @pytest.mark.asyncio
 async def test_a_declared_length_past_the_bound_is_refused_before_the_body() -> None:
-    """The header is read first, which is the half that avoids the memory.
+    """The header is read first, so a body past the bound is never read at all.
 
-    Checking only `len(response.content)` means the body is already held whole
-    by the time the bound is applied — which is the thing the bound exists to
-    prevent.
+    The running total below covers a responder that under-declares; this covers
+    the honest one, and costs it nothing.
     """
     h = holder(
         httpx.Response(200, json=bundle("v1"), headers={"content-length": "999999"}),
@@ -329,6 +329,24 @@ async def test_a_declared_length_past_the_bound_is_refused_before_the_body() -> 
     assert outcome.kind == "unreachable"
     assert "declares 999999 bytes" in outcome.reason
     assert h.current() is None
+
+
+@pytest.mark.asyncio
+async def test_a_bundle_of_exactly_the_bound_is_read() -> None:
+    """The bound is the largest bundle read, not the smallest one refused.
+
+    Both halves of the check carry the same boundary — the declared length and
+    the running total — and either of them moving by one would start refusing a
+    legitimate bundle of exactly `MAX_BUNDLE_BYTES`, which is a size a growing
+    tenant arrives at rather than an attack.
+    """
+    body = json.dumps(bundle("v1")).encode()
+
+    h = holder(httpx.Response(200, content=body), max_bytes=len(body))
+    outcome = await h.refresh()
+
+    assert outcome.kind == "replaced"
+    assert h.current().version == "v1"
 
 
 # --- what an operator is told ---------------------------------------------
@@ -395,6 +413,35 @@ async def test_a_rejected_policy_is_named_every_time_the_bundle_changes(
     assert TWO in said
     assert "condition not evaluable" in said
     assert "not in force" in said
+
+
+@pytest.mark.parametrize("field", ["policy_name", "policy_id", "reason"])
+@pytest.mark.asyncio
+async def test_a_rejected_entry_cannot_forge_a_log_line(
+    caplog: pytest.LogCaptureFixture, field: str
+) -> None:
+    """`rejected` is the one thing in a bundle that validation does not inspect.
+
+    `validate_bundle` checks that it is a list and never looks inside an entry,
+    so all three of these reach `logger.warning` raw off the wire — unlike
+    `version`, which is refused upstream. `safe_for_log` on each is the only
+    guard there is, which makes this the one log-injection defence in the file
+    with nothing behind it.
+    """
+    from gateway.key_safety import has_unsafe_key_characters
+
+    forged = "innocent\n2026-08-29 ERROR nothing was rejected\x1b[31m"
+    entry = {"policy_id": TWO, "policy_name": "P2", "reason": "unevaluable"}
+    entry[field] = forged
+
+    h = holder(httpx.Response(200, json=bundle("v1", rejected=[entry])))
+    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert not has_unsafe_key_characters(said)
+    assert "ERROR nothing was rejected" not in said
+    assert "<unprintable>" in said
 
 
 @pytest.mark.asyncio
@@ -529,6 +576,35 @@ async def test_stopping_is_safe_before_starting_and_twice() -> None:
     await h.stop()
 
 
+@pytest.mark.asyncio
+async def test_two_refreshes_never_run_at_once() -> None:
+    """Serialised on a lock, and this is the only place that is observable.
+
+    A scheduled refresh and a manual one can be asked for at the same moment.
+    Two in flight double the load on the control plane and interleave their
+    reads and writes of what is held — the second could validate an older body
+    and overwrite the newer bundle the first had just stored.
+    """
+    depth = 0
+    overlapped = False
+
+    async def handle(_request: httpx.Request) -> httpx.Response:
+        nonlocal depth, overlapped
+        depth += 1
+        overlapped = overlapped or depth > 1
+        # A suspension point inside the fetch, which is where a second refresh
+        # would get in if nothing held it back.
+        await asyncio.sleep(0)
+        depth -= 1
+        return httpx.Response(200, json=bundle("v1"))
+
+    h = BundleHolder("http://rc.test", {}, transport=httpx.MockTransport(handle))
+    outcomes = await asyncio.gather(h.refresh(), h.refresh())
+
+    assert not overlapped
+    assert [o.kind for o in outcomes] == ["replaced", "unchanged"]
+
+
 # --- the interval ---------------------------------------------------------
 
 
@@ -547,25 +623,42 @@ def test_the_interval_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.parametrize("value", ["5", "60", "3600", " 120 "])
 def test_an_interval_at_or_above_the_floor_is_taken(
-    monkeypatch: pytest.MonkeyPatch, value: str
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, value: str
 ) -> None:
+    """The floor itself is taken, and taken silently.
+
+    `5` is the boundary: at it the floor and the configured value are the same
+    number, so only the absence of the warning distinguishes a value that was
+    accepted from one that was overruled.
+    """
     monkeypatch.setenv("RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS", value)
-    assert refresh_seconds() == int(value.strip())
+    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+        assert refresh_seconds() == int(value.strip())
+
+    assert caplog.records == []
 
 
 @pytest.mark.parametrize("value", ["1", "0", "-30", "4"])
 def test_an_interval_below_the_floor_is_raised_rather_than_refused(
-    monkeypatch: pytest.MonkeyPatch, value: str
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, value: str
 ) -> None:
-    """Overruled, not fatal.
+    """Overruled, not fatal — and never silently.
 
     A number that cannot be read at all is a typo and stops the process; one
     that is merely too eager is a judgement this component is entitled to
     overrule, and refusing to start over it would take enforcement down to
-    protect the control plane from load.
+    protect the control plane from load. Overruling an operator without saying
+    so is the failure the warning exists to prevent, so the warning is half of
+    the contract and is asserted as such.
     """
     monkeypatch.setenv("RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS", value)
-    assert refresh_seconds() == MIN_REFRESH_SECONDS
+    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+        assert refresh_seconds() == MIN_REFRESH_SECONDS
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS" in said
+    assert f"below the floor of {MIN_REFRESH_SECONDS}" in said
+    assert f"using {MIN_REFRESH_SECONDS}" in said
 
 
 @pytest.mark.parametrize("value", ["sixty", "60s", "6.0", ""])

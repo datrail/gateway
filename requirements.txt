@@ -5,7 +5,7 @@
 # direct dependencies.
 #
 # It does not make the build reproducible, and the SBOM container-release.yml
-# attaches should not be read as claiming so: these three pull in seventy-odd
+# attaches should not be read as claiming so: these four pull in seventy-odd
 # transitive packages, every one of them ranged by its own parent. Closing that
 # needs a lock file, which this repository does not have.
 fastmcp==3.4.6
