@@ -58,16 +58,29 @@ DEFAULT_REFRESH_SECONDS = 60
 #: turn a fleet into a load generator.
 MIN_REFRESH_SECONDS = 5
 
-#: The deadline on one fetch. Five seconds is far more than a same-region round
-#: trip, and short enough that a control plane which has stopped answering
-#: without closing the connection costs one refresh rather than an unbounded
-#: wait.
+#: How long one socket read may wait, in seconds. Five is far more than a
+#: same-region round trip, and short enough that a control plane which has
+#: stopped answering without closing the connection costs one refresh rather
+#: than an unbounded wait.
 #:
-#: Attempts do not pile up without it: `_loop` awaits the sleep and the refresh
-#: in sequence, and `refresh()` serialises on a lock. What the deadline bounds is
-#: how long a hung fetch holds that lock — which is what the next scheduled
-#: refresh, and any manual one, waits behind.
+#: This is httpx's timeout, and httpx restarts it on every read that succeeds.
+#: It therefore bounds a silence, not an attempt: a responder sending one byte
+#: just inside it holds the read open for as long as it keeps sending. What
+#: bounds the attempt is `FETCH_DEADLINE_SECONDS`.
 FETCH_TIMEOUT_SECONDS = 5.0
+
+#: The deadline on a whole fetch, in seconds.
+#:
+#: `refresh()` serialises on a lock and `_loop` awaits it in sequence, so an
+#: attempt that never finishes stops every later one: the held bundle stays in
+#: force and quietly stops being fresh, for the cost of one open socket held by
+#: whoever answers as `RAIL_CENTER_URL`. This is what bounds that.
+#:
+#: Thirty rather than five, because it has to cover a whole `MAX_BUNDLE_BYTES`
+#: body and not one read — four megabytes at 140 KiB/s arrives inside it, so a
+#: slow link is not mistaken for a stalled one. Past it the attempt is
+#: `unreachable` like any other, which keeps what is held.
+FETCH_DEADLINE_SECONDS = 30.0
 
 #: The largest bundle this gateway will read, in bytes.
 #:
@@ -191,6 +204,7 @@ class BundleHolder:
         *,
         interval_seconds: int = DEFAULT_REFRESH_SECONDS,
         timeout_seconds: float = FETCH_TIMEOUT_SECONDS,
+        deadline_seconds: float = FETCH_DEADLINE_SECONDS,
         max_bytes: int = MAX_BUNDLE_BYTES,
         # Injected so the tests need neither a network nor a wait. A caller that
         # passes neither gets the real ones.
@@ -201,12 +215,14 @@ class BundleHolder:
         self._headers = _sendable({"Accept": "application/json", **headers})
         self._interval = interval_seconds
         self._timeout = timeout_seconds
+        self._deadline = deadline_seconds
         self._max_bytes = max_bytes
         self._transport = transport
         self._sleep = sleep or asyncio.sleep
 
         self._held: UsableBundle | None = None
         self._task: asyncio.Task[None] | None = None
+        self._stopping = False
         self._lock = asyncio.Lock()
 
     def current(self) -> UsableBundle | None:
@@ -245,14 +261,22 @@ class BundleHolder:
         `_task` instead would drop the only handle to the first, which nothing
         could then cancel: it would keep refreshing for the life of the process,
         contending for the lock and doubling the load on the control plane.
+
+        A `stop()` landing while the first fetch is still in flight is honoured
+        rather than lost. There is no task for it to cancel yet, so it records
+        the request and this returns without starting a loop — otherwise a
+        shutdown racing a slow first fetch leaves a loop behind that has already
+        been told to stop and that nothing holds a handle to.
         """
+        self._stopping = False
         outcome = await self.refresh()
-        if self._task is None or self._task.done():
+        if not self._stopping and (self._task is None or self._task.done()):
             self._task = asyncio.create_task(self._loop())
         return outcome
 
     async def stop(self) -> None:
         """Stop refreshing. Safe to call twice, and safe with one in flight."""
+        self._stopping = True
         task, self._task = self._task, None
         if task is None:
             return
@@ -337,7 +361,14 @@ class BundleHolder:
             # it returns, which would leave a responder free to commit whatever
             # it can send inside the deadline no matter what `max_bytes` says
             # afterwards.
+            #
+            # Wrapped in a deadline because the client's own timeout is
+            # httpx's, and httpx applies it per socket read: the timer
+            # restarts on every byte that arrives, so it bounds a silence and
+            # not an attempt. `asyncio.timeout` bounds the attempt, and with
+            # it the lock `refresh()` is holding while it runs.
             async with (
+                asyncio.timeout(self._deadline),
                 httpx.AsyncClient(
                     timeout=self._timeout,
                     transport=self._transport,
@@ -396,6 +427,12 @@ class BundleHolder:
                 return json.loads(b"".join(chunks))
         except _Unreachable:
             raise
+        except TimeoutError as error:
+            # The deadline, not the socket: `str(TimeoutError())` is empty, so
+            # the generic branch below would log the fault without naming it.
+            raise _Unreachable(
+                f"policy bundle fetch ran past {self._deadline} seconds"
+            ) from error
         except Exception as error:
             # `httpx` raises a family for connection, timeout, protocol and
             # decode failures, and `json.loads` raises its own. They differ in

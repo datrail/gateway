@@ -349,6 +349,38 @@ async def test_a_bundle_of_exactly_the_bound_is_read() -> None:
     assert h.current().version == "v1"
 
 
+@pytest.mark.asyncio
+async def test_a_body_that_never_ends_is_bounded_by_the_deadline() -> None:
+    """A drip is not a silence, and only the deadline tells them apart.
+
+    httpx applies its own timeout per socket read and restarts it on every
+    byte, so a responder sending one byte at a time inside it holds the read
+    open indefinitely — and because `refresh()` serialises on a lock and
+    `_loop` awaits it in sequence, that one open socket freezes every later
+    refresh. What is held stays held throughout: this is a failed fetch like
+    any other, not a reason to clear anything.
+    """
+
+    async def drip():
+        while True:
+            await asyncio.sleep(0.005)
+            yield b" "
+
+    h = holder(
+        httpx.Response(200, json=bundle("v1")),
+        httpx.Response(200, content=drip()),
+        timeout_seconds=30.0,
+        deadline_seconds=0.2,
+    )
+    assert (await h.refresh()).kind == "replaced"
+
+    outcome = await h.refresh()
+
+    assert outcome.kind == "unreachable"
+    assert "0.2 seconds" in outcome.reason
+    assert h.current().version == "v1"
+
+
 # --- what an operator is told ---------------------------------------------
 
 
@@ -471,6 +503,39 @@ async def test_a_reason_never_carries_a_character_a_log_line_cannot_hold() -> No
 # --- the request itself ---------------------------------------------------
 
 
+def test_a_header_value_that_cannot_be_sent_is_refused_at_the_constructor() -> None:
+    """h11 refuses one by quoting the value it could not send.
+
+    That reason reaches the log on every failed refresh, and `safe_for_log`
+    does not catch it: `repr` has already flattened the control byte into two
+    printable characters, so nothing unsafe is left to see and an
+    `Authorization` value would be logged whole, once per refresh interval, for
+    as long as the misconfiguration stood. The refusal here names the header
+    and not the value.
+    """
+    secret = "Bearer s3cr3t-b\nearer-abc123XYZ"
+
+    with pytest.raises(ValueError) as caught:
+        BundleHolder("http://rc.test", {"Authorization": secret})
+
+    said = str(caught.value)
+    assert "Authorization" in said
+    assert "U+000A" in said
+    assert "s3cr3t" not in said
+
+
+def test_an_ordinary_credential_still_travels() -> None:
+    """The guard is not `auth.py`'s, which governs a bare token.
+
+    `Bearer t0ken` carries a space, legal between the parts of a header value
+    and illegal inside a credential, so the stricter rule here would refuse
+    every request this gateway makes.
+    """
+    h = BundleHolder("http://rc.test", {"Authorization": "Bearer t0ken"})
+
+    assert h._headers["Authorization"] == "Bearer t0ken"
+
+
 @pytest.mark.asyncio
 async def test_the_credential_and_the_route_travel_with_the_request() -> None:
     seen: list[httpx.Request] = []
@@ -505,6 +570,41 @@ async def test_a_trailing_slash_does_not_double_the_path(configured: str) -> Non
     await BundleHolder(configured, {}, transport=httpx.MockTransport(handle)).refresh()
 
     assert seen == [f"http://rc.test{BUNDLE_PATH}"]
+
+
+@pytest.mark.asyncio
+async def test_a_proxy_in_the_environment_does_not_redirect_the_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`RAIL_CENTER_URL` is the whole of where this call may go.
+
+    Left at its default, httpx reads `HTTP_PROXY` and `ALL_PROXY` out of the
+    process environment — so whatever can set a variable in this container
+    chooses the host that answers with the ruleset this gateway then enforces,
+    and against an `http://` control plane sees the bearer token on the way
+    past.
+    """
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:1")
+
+    built: list[httpx.AsyncClient] = []
+    real = httpx.AsyncClient
+
+    def record(**kwargs: Any) -> httpx.AsyncClient:
+        client = real(**kwargs)
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(httpx, "AsyncClient", record)
+
+    # No injected transport: httpx consults the environment only when it is
+    # building its own, which is the shape every deployment runs.
+    h = BundleHolder("http://127.0.0.1:1", {}, timeout_seconds=0.5)
+    outcome = await h.refresh()
+
+    assert outcome.kind == "unreachable"
+    # A proxy httpx took from the environment arrives as a mount on the client.
+    assert len(built) == 1 and not built[0]._mounts
 
 
 # --- the refresh loop -----------------------------------------------------
@@ -570,10 +670,71 @@ async def test_the_loop_survives_an_attempt_that_raises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_starting_twice_leaves_one_loop() -> None:
+    """Overwriting `_task` would drop the only handle to the first loop.
+
+    Nothing could then cancel it: it would keep refreshing for the life of the
+    process, contending for the lock and doubling the load on the control
+    plane, while `stop()` reported success having cancelled the second.
+    """
+
+    async def never(_seconds: float) -> None:
+        # The loop parks here, so neither start's fetch is the loop's.
+        await asyncio.Event().wait()
+
+    h = holder(
+        httpx.Response(200, json=bundle("v1")),
+        httpx.Response(200, json=bundle("v1")),
+        sleep=never,
+    )
+    await h.start()
+    first = h._task
+    assert first is not None
+
+    await h.start()
+
+    assert h._task is first
+    assert not first.done()
+    await h.stop()
+
+
+@pytest.mark.asyncio
 async def test_stopping_is_safe_before_starting_and_twice() -> None:
     h = holder()
     await h.stop()
     await h.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_the_first_fetch_leaves_no_loop_behind() -> None:
+    """`start()` has no task to cancel until its first fetch resolves.
+
+    A shutdown landing in that window has nothing to act on, and a `stop()`
+    that returned having done nothing would leave `start()` free to create the
+    loop straight afterwards — a background refresh outliving an explicit,
+    already-returned stop, with nothing holding a handle to cancel it.
+    """
+    reached = asyncio.Event()
+    release = asyncio.Event()
+
+    async def handle(_request: httpx.Request) -> httpx.Response:
+        reached.set()
+        await release.wait()
+        return httpx.Response(200, json=bundle("v1"))
+
+    h = BundleHolder("http://rc.test", {}, transport=httpx.MockTransport(handle))
+    starting = asyncio.create_task(h.start())
+    await reached.wait()
+
+    await h.stop()
+    release.set()
+    outcome = await starting
+
+    # The fetch still counted: what it brought back is held, and only the loop
+    # was called off.
+    assert outcome.kind == "replaced"
+    assert h.current().version == "v1"
+    assert h._task is None
 
 
 @pytest.mark.asyncio
