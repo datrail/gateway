@@ -19,15 +19,20 @@ import asyncio
 import gzip
 import json
 import logging
+import random
+import struct
 import tracemalloc
+import zlib
 from typing import Any
 
 import httpx
 import pytest
 
+from gateway.bundle import client as bundle_client
 from gateway.bundle.client import (
     BUNDLE_PATH,
     DEFAULT_REFRESH_SECONDS,
+    FETCH_DEADLINE_SECONDS,
     MIN_REFRESH_SECONDS,
     BundleHolder,
     refresh_seconds,
@@ -68,18 +73,24 @@ def responder(*responses: httpx.Response | Exception):
     return httpx.MockTransport(handle)
 
 
-def streamed(body: bytes, encoding: str | None = None) -> httpx.Response:
+def streamed(
+    body: bytes, encoding: str | None = None, *, chunk_bytes: int = 16 * 1024
+) -> httpx.Response:
     """A response httpx has not already read, which is what a socket hands over.
 
     A `Response` built from bytes is read at construction and `read()` applies
     `Content-Encoding`, so an encoded body built that way reaches the holder
     already decoded — a shape no deployment has. Arriving in chunks, it reaches
     the holder as it left the responder.
+
+    `chunk_bytes` is how a socket's own framing is chosen: a bound the holder
+    reaches part-way through a body needs chunks smaller than the bound, or the
+    first one carries the whole overrun and nothing accumulates.
     """
 
     async def chunks():
-        for start in range(0, len(body), 16 * 1024):
-            yield body[start : start + 16 * 1024]
+        for start in range(0, len(body), chunk_bytes):
+            yield body[start : start + chunk_bytes]
 
     return httpx.Response(
         200,
@@ -336,6 +347,50 @@ async def test_a_body_past_the_bound_is_treated_as_unreachable() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_wire_body_past_the_bound_is_refused_across_chunks() -> None:
+    """The bound on the wire is the only one a body like this ever meets.
+
+    Every other test of it hands the body over whole, which reaches the holder
+    as a single chunk — so the running total never runs, and a bound that only
+    ever saw the last chunk would look identical from outside. This body is
+    half a megabyte of empty gzip blocks around sixty-five bytes of perfectly
+    good bundle: what it decodes to is far inside the bound, so the decode
+    guard never fires and nothing but the wire total can stop the read. A real
+    socket delivers every body in more than one chunk, which is what makes this
+    the ordinary case rather than the exotic one.
+    """
+    payload = json.dumps(bundle("v2")).encode()
+    # Deflate stored blocks: five bytes of framing each, none of them carrying
+    # a byte of output, then a final one holding the whole bundle.
+    empty = b"\x00" + struct.pack("<HH", 0, 0xFFFF)
+    carrying = b"\x01" + struct.pack("<HH", len(payload), len(payload) ^ 0xFFFF)
+    body = (
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03"
+        + empty * 100_000
+        + carrying
+        + payload
+        + struct.pack("<II", zlib.crc32(payload), len(payload))
+    )
+    limit = 4096
+
+    assert len(body) > limit, "the wire size is the whole point"
+    assert len(payload) < limit, "and what it decodes to must be well inside it"
+
+    h = holder(
+        httpx.Response(200, json=bundle("v1")),
+        streamed(body, "gzip", chunk_bytes=512),
+        max_bytes=limit,
+    )
+    await h.refresh()
+
+    outcome = await h.refresh()
+
+    assert outcome.kind == "unreachable"
+    assert f"is past the {limit}" in outcome.reason
+    assert h.current().version == "v1"
+
+
+@pytest.mark.asyncio
 async def test_a_declared_length_past_the_bound_is_refused_before_the_body() -> None:
     """The header is read first, so a body past the bound is never read at all.
 
@@ -371,18 +426,25 @@ async def test_a_bundle_of_exactly_the_bound_is_read() -> None:
     assert h.current().version == "v1"
 
 
+@pytest.mark.parametrize("declared", ["gzip", "GZIP", " Gzip", "gzip "])
 @pytest.mark.asyncio
-async def test_a_compressed_bundle_is_read() -> None:
+async def test_a_compressed_bundle_is_read(declared: str) -> None:
     """Compression is not refused, and this is why it cannot be.
 
     `RAIL_CENTER_URL` points at a Cloud Run service whose frontend may gzip a
     response of its own accord. A gateway that refused every encoded bundle
     would refuse every bundle, which is a worse failure than the one the bound
     exists for.
+
+    Whatever spelling it arrives in. `Content-Encoding` is case-insensitive per
+    RFC 9110, while the dispatch turns on an exact match against what this
+    gateway offered — so a compliant peer answering `GZIP` for the very
+    encoding this holder asked for would be refused as one it never offered,
+    and every fetch would fail that way for the life of the process.
     """
     body = gzip.compress(json.dumps(bundle("v1")).encode())
 
-    h = holder(streamed(body, "gzip"))
+    h = holder(streamed(body, declared))
     outcome = await h.refresh()
 
     assert outcome.kind == "replaced"
@@ -423,6 +485,88 @@ async def test_a_compressed_body_is_bounded_where_it_decodes() -> None:
     assert f"decodes past the {limit}" in outcome.reason
     assert h.current().version == "v1"
     assert peak < size // 8
+
+
+@pytest.mark.asyncio
+async def test_the_decode_budget_allocates_one_byte_past_the_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The budget is what makes the refusal and the truncation inseparable.
+
+    The measurement above is a memory proxy with megabytes of tolerance, so a
+    per-chunk budget wrong by kilobytes never moves it. What the budget buys is
+    exact: a capped call lands the decoded total at precisely one past the
+    bound and so trips the refusal in the same iteration it overruns, which is
+    why the surplus the decompressor still holds is never asked for.
+    """
+    produced: list[int] = []
+    decompressobj = zlib.decompressobj
+
+    class Counting:
+        """`zlib`, with what each capped `decompress` actually produced."""
+
+        @staticmethod
+        def decompressobj(wbits: int) -> Any:
+            inner = decompressobj(wbits)
+
+            class Counted:
+                @staticmethod
+                def decompress(data: bytes, max_length: int = 0) -> bytes:
+                    out = inner.decompress(data, max_length)
+                    produced.append(len(out))
+                    return out
+
+            return Counted()
+
+    monkeypatch.setattr(bundle_client, "zlib", Counting)
+
+    body = gzip.compress(b'{"padding":"' + b"A" * (32 * 1024 * 1024) + b'"}')
+    limit = 256 * 1024
+
+    h = holder(streamed(body, "gzip"), max_bytes=limit)
+    outcome = await h.refresh()
+
+    assert outcome.kind == "unreachable"
+    assert f"decodes past the {limit}" in outcome.reason
+    assert sum(produced) == limit + 1
+
+
+@pytest.mark.asyncio
+async def test_a_body_that_decodes_past_the_bound_across_chunks_is_refused() -> None:
+    """A bomb does not have to arrive in one chunk to be one.
+
+    The maximally repetitive payload above saturates the budget inside the
+    first `decompress` call, so the refusal fires on chunk zero and the running
+    decoded total is never carried across chunks at all. This payload is
+    compressible enough to stay well under the bound on the wire and ordinary
+    enough that no single chunk decodes past it — only the accumulation does,
+    which is the half the bound exists for and the half nothing else here
+    exercises.
+    """
+    words = [f"policy-{n:04d}" for n in range(256)]
+    picked = random.Random(0)
+    padding = " ".join(picked.choice(words) for _ in range(30_000))
+    doc = json.dumps(dict(bundle("v2"), padding=padding)).encode()
+    body = gzip.compress(doc)
+    limit = 256 * 1024
+
+    assert len(body) < limit, "the wire bound must not be what refuses this"
+    assert len(doc) > limit, "the decoded total has to walk past the bound"
+    per_chunk = 16 * 1024 * len(doc) / len(body)
+    assert per_chunk < limit, "no single chunk may reach the bound on its own"
+
+    h = holder(
+        httpx.Response(200, json=bundle("v1")),
+        streamed(body, "gzip"),
+        max_bytes=limit,
+    )
+    await h.refresh()
+
+    outcome = await h.refresh()
+
+    assert outcome.kind == "unreachable"
+    assert f"decodes past the {limit}" in outcome.reason
+    assert h.current().version == "v1"
 
 
 @pytest.mark.asyncio
@@ -476,6 +620,41 @@ async def test_a_body_that_never_ends_is_bounded_by_the_deadline() -> None:
     assert outcome.kind == "unreachable"
     assert "0.2 seconds" in outcome.reason
     assert h.current().version == "v1"
+
+
+@pytest.mark.asyncio
+async def test_a_holder_given_no_deadline_bounds_the_attempt_at_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deadline a deployment gets is the one nothing passes.
+
+    Every other test here hands `deadline_seconds` in, and the refusal names
+    `self._deadline` rather than the value the bound was actually applied with
+    — so both the constructor default and the argument handed to `wait_for`
+    can drift without a single assertion moving. What drifts with them is the
+    whole-attempt bound: a shipped holder would hold the refresh lock against a
+    drip responder for as long as the drift says, silently, and the message
+    would still read thirty seconds.
+    """
+    applied: list[float] = []
+
+    class Recording:
+        """`asyncio`, with the deadline `_fetch` applies written down."""
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(asyncio, name)
+
+        async def wait_for(self, awaitable: Any, timeout: float) -> Any:
+            applied.append(timeout)
+            return await asyncio.wait_for(awaitable, timeout)
+
+    monkeypatch.setattr(bundle_client, "asyncio", Recording())
+
+    h = holder(httpx.Response(200, json=bundle("v1")))
+    outcome = await h.refresh()
+
+    assert outcome.kind == "replaced"
+    assert applied == [FETCH_DEADLINE_SECONDS]
 
 
 # --- what an operator is told ---------------------------------------------
@@ -789,7 +968,7 @@ async def test_the_loop_survives_an_attempt_that_raises() -> None:
         return RefreshOutcome("unreachable", None)
 
     h.refresh = refresh_that_breaks_once  # type: ignore[method-assign]
-    h._task = asyncio.create_task(h._loop())
+    h._task = asyncio.create_task(h._loop(h._epoch))
     for _ in range(8):
         await asyncio.sleep(0)
     await h.stop()

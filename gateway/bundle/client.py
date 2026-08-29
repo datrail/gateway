@@ -308,7 +308,7 @@ class BundleHolder:
         epoch = self._epoch
         outcome = await self.refresh()
         if epoch == self._epoch and (self._task is None or self._task.done()):
-            self._task = asyncio.create_task(self._loop())
+            self._task = asyncio.create_task(self._loop(epoch))
         return outcome
 
     async def stop(self) -> None:
@@ -323,8 +323,18 @@ class BundleHolder:
         except asyncio.CancelledError:
             pass
 
-    async def _loop(self) -> None:
-        while True:
+    async def _loop(self, epoch: int) -> None:
+        # What ends this loop is the epoch `stop()` retires, not the
+        # cancellation it then issues. On 3.10 — the floor `ruff.toml` declares
+        # — `asyncio.wait_for` discards a `CancelledError` that arrives after
+        # the coroutine it wraps has already finished, so the cancel sent into
+        # a refresh below can be swallowed whole: `_fetch`'s `except Exception`
+        # would turn it into a routine `unreachable`, the loop would carry on
+        # refreshing as fast as it could, and `stop()` — having spent its one
+        # `task.cancel()` — would wait on it for ever. Reading the epoch makes
+        # termination a fact about this object rather than about the
+        # interpreter's cancellation semantics, on either version.
+        while epoch == self._epoch:
             await self._sleep(self._interval)
             try:
                 await self.refresh()
@@ -408,6 +418,12 @@ class BundleHolder:
             # request, reported in the log as a control-plane outage. Ruff's
             # target version gates syntax, not stdlib attributes, and CI runs
             # one interpreter, so nothing else here would catch it.
+            #
+            # What it costs on 3.10 is that a cancellation arriving after
+            # `_attempt` has already completed is discarded rather than
+            # propagated. `_loop` therefore ends on the epoch rather than on the
+            # cancel, so a shutdown does not depend on which interpreter this
+            # line is running under.
             return await asyncio.wait_for(self._attempt(), self._deadline)
         except _Unreachable:
             raise
