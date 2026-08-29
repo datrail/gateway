@@ -614,7 +614,7 @@
       "now": 1700000000,
       "state": "expired",
       "token": null,
-      "note": "The one value where testing `exp is None` and testing its truth diverge, and the state is what a denial report carries."
+      "note": "The one value where testing `exp is None` and testing its truth diverge, and the state is what a refusal is eventually reported as."
     },
     {
       "name": "a value that is not text is refused rather than raised on",

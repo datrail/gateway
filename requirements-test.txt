@@ -12,6 +12,11 @@
 pytest==9.1.1
 pytest-asyncio==1.4.0
 httpx==0.28.1
+# The schemas under `schemas/` are published as a contract, so something has to
+# check they are valid JSON Schema and that the examples in them satisfy their
+# own rules. It arrives transitively through mcp either way; pinning it here
+# says the suite depends on it rather than borrowing it.
+jsonschema==4.26.0
 
 # Turns a hung test into a failure that names itself. Without it a test that
 # never returns is indistinguishable from a slow one until the job's own limit
