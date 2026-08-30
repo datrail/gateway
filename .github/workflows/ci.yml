@@ -205,3 +205,49 @@ jobs:
           fi
           echo "readiness ok"
           docker rm -f gw >/dev/null
+
+  # The e2e stack, which is the only gate that exercises a decision over the
+  # wire: the suite runs a real gateway against a real upstream, but its control
+  # plane is a mocked transport, so no test in it decides a call against a
+  # bundle that was fetched over the wire — and the `image` job above runs one
+  # container that reaches nothing. Neither can answer whether a policy fetched
+  # from a control plane refuses a real MCP call and reports it. Without this
+  # job that stack is a file nobody runs, and it would decay within a release or
+  # two while still reading as coverage.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # `--exit-code-from driver` is what makes this a gate: it propagates the
+      # driver's exit code and, with `--abort-on-container-exit`, tears the rest
+      # of the stack down when it finishes. Without it compose reports its own
+      # success at bringing containers up, which is true of a run where every
+      # assertion failed.
+      #
+      # `--force-recreate` does nothing on a fresh runner, which has no
+      # container to reuse, and it is here anyway: it makes this the same string
+      # both READMEs and `e2e/compose.yml`'s header document, so the command a
+      # stranger copies is the command this gate runs. A quickstart that has
+      # drifted from the gate is green here and broken on every machine that
+      # follows it.
+      - name: A policy refuses a real call, and the denial is reported
+        run: |
+          set -euo pipefail
+          docker compose -f e2e/compose.yml up --build --force-recreate \
+            --abort-on-container-exit --exit-code-from driver
+
+      # The driver asserts against request journals, so a failure names which
+      # assertion went and nothing about why. These are where that lives.
+      - name: Logs, on failure
+        if: failure()
+        run: docker compose -f e2e/compose.yml logs --no-color
+
+      - name: Down
+        if: always()
+        run: docker compose -f e2e/compose.yml down -v --remove-orphans
