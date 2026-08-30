@@ -162,7 +162,7 @@ async def test_an_upstream_failure_does_not_hand_the_caller_its_credential():
     from starlette.responses import JSONResponse
     from starlette.routing import Route
 
-    from tests.conftest import _free_port, serve
+    from tests.conftest import _free_port, holder_serving, serve, unreachable
 
     async def always_401(_request):
         return JSONResponse({"error": "nope"}, status_code=401)
@@ -174,7 +174,7 @@ async def test_an_upstream_failure_does_not_hand_the_caller_its_credential():
     gateway_port = _free_port()
     async with (
         serve(refusing, upstream_port),
-        serve(build_app(secret_url), gateway_port),
+        serve(build_app(secret_url, holder_serving(unreachable)), gateway_port),
         httpx.AsyncClient() as client,
     ):
         response = await client.post(
@@ -203,14 +203,14 @@ async def test_the_upstream_credential_still_travels(upstream, seen_headers):
     same request — dropping it entirely would silently 401 every credentialed
     deployment, and nothing else here would notice.
     """
-    from tests.conftest import _free_port, serve
+    from tests.conftest import _free_port, holder_serving, serve, unreachable
 
     scheme, rest = upstream.split("://", 1)
     credentialed = f"{scheme}://svcuser:s3cret@{rest}"
 
     port = _free_port()
     async with (
-        serve(build_app(credentialed), port),
+        serve(build_app(credentialed, holder_serving(unreachable)), port),
         Client(StreamableHttpTransport(url=f"http://127.0.0.1:{port}/mcp")) as c,
     ):
         await c.call_tool("track_package", {"tracking_number": "77123"})

@@ -72,17 +72,32 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      # Both ends of the supported range, because a defect that only exists at
+      # one end is invisible from the other and this project has shipped two.
+      # `ruff.toml` declares 3.10 the floor and the image ships 3.12, and ruff's
+      # target version gates syntax alone. `wait_for`'s cancellation semantics
+      # differ across that span, `gateway/bundle/client.py` calls it on every
+      # fetch, and which stdlib attributes exist differs across it too — that
+      # second one is why the same call is `wait_for` and not the
+      # `asyncio.timeout` block a reader of 3.12 alone would reach for. A
+      # linter reads neither. A single interpreter here checked whichever end
+      # it ran and called it the whole range.
+      #
+      # Moving the floor means moving `target-version` in `ruff.toml` with it;
+      # moving the ceiling means moving the Dockerfile. Neither is derivable
+      # from this file, so this list is written out rather than computed.
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
 
-      # The interpreter the image ships (see the Dockerfile). There is no
-      # .python-version to read from, so if the Dockerfile moves, move this with
-      # it — otherwise the suite passes on a Python the image never runs.
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           # Both files, because requirements-test.txt only `-r`s the other one:
           # keyed on the including file alone, a runtime pin could move and the
@@ -138,7 +153,12 @@ jobs:
       # `docker build` exiting 0 proves the image assembles, not that it runs:
       # a CMD naming a module that does not exist builds cleanly and fails on
       # start. This is the cheapest thing that tells the two apart.
-      - name: The image starts and serves liveness
+      # Both addresses are unresolvable, which is the point: this asks whether
+      # the image starts and tells the truth about itself while it can reach
+      # nothing, and that is the state every deployment is in for its first few
+      # seconds. A gateway that needed its control plane in order to come up
+      # would fail here rather than in production.
+      - name: The image starts, serves liveness, and reports itself unready
         run: |
           set -euo pipefail
           # A non-default port on purpose. With 8080 this step passes against
@@ -146,14 +166,36 @@ jobs:
           # somewhere else, which is the defect it exists to catch.
           docker run -d --name gw -p 9100:9100 \
             -e RAIL_GATEWAY_PORT=9100 \
+            -e RAIL_CENTER_URL=http://rail-center.invalid \
             -e RAIL_GATEWAY_UPSTREAM_URL=http://upstream.invalid/mcp gateway:ci
-          for _ in $(seq 1 20); do
+
+          # Forty rather than twenty, for a wait that should be under six: the
+          # lifespan awaits its first bundle fetch before uvicorn serves
+          # anything, and that wait is bounded by STARTUP_FETCH_GRACE_SECONDS
+          # (5s) — not by the holder's own deadline, which a fetch left running
+          # past the grace goes on paying in the background. An unresolvable
+          # host fails in milliseconds in any case, so this margin is for the
+          # runner having a bad day rather than for the expected path.
+          live=""
+          for _ in $(seq 1 40); do
             if curl -fsS http://127.0.0.1:9100/health >/dev/null; then
-              echo "liveness ok"; docker rm -f gw >/dev/null; exit 0
+              live=yes; break
             fi
             sleep 1
           done
-          echo "::error::the image did not serve /health within 20s"
-          docker logs gw
+          if [ -z "$live" ]; then
+            echo "::error::the image did not serve /health within 40s"
+            docker logs gw; docker rm -f gw >/dev/null; exit 1
+          fi
+          echo "liveness ok"
+
+          # `-o /dev/null -w` rather than `-f`: the expected answer is a 503,
+          # which `-f` turns into a non-zero exit and this step into a failure
+          # for the image behaving correctly.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9100/ready)
+          if [ "$code" != "503" ]; then
+            echo "::error::/ready answered $code holding no bundle, expected 503"
+            docker logs gw; docker rm -f gw >/dev/null; exit 1
+          fi
+          echo "readiness ok"
           docker rm -f gw >/dev/null
-          exit 1

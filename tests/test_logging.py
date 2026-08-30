@@ -23,6 +23,18 @@ from gateway.server import _configure_logging, _safe_to_log, build_gateway, log
         # needs, and reading `port` raised on one that is not a number.
         ("http://user:pw@[::1]:9443/mcp", "http://[::1]:9443/mcp"),
         ("http://user:pw@host:notaport/mcp", "http://host:notaport/mcp"),
+        # A userinfo short enough to occur again in the host or the path.
+        # Redacting every occurrence of it rather than the one in front of the
+        # `@` overwrote both — `https://***.default.***.cluster.local:8080/mcp`
+        # — and scheme, host and path are what the line is read for.
+        (
+            "https://svc@svc.default.svc.cluster.local:8080/mcp",
+            "https://svc.default.svc.cluster.local:8080/mcp",
+        ),
+        (
+            "http://api@internal.example.com/api/mcp",
+            "http://internal.example.com/api/mcp",
+        ),
     ],
 )
 def test_nothing_that_can_carry_a_secret_reaches_the_log(url, expected):
@@ -33,9 +45,11 @@ def test_the_startup_line_itself_is_safe(caplog):
     """The helper being correct is not the property that matters — the call
     site using it is. Asserting only on `_safe_to_log` leaves a mutation that
     logs the raw URL passing the whole suite."""
+    from tests.conftest import holder_serving, unreachable
+
     secret_url = "https://svcuser:s3cret@host.invalid:9443/mcp?api_key=TOKEN"
     with caplog.at_level(logging.INFO, logger="gateway"):
-        build_gateway(secret_url)
+        build_gateway(secret_url, holder_serving(unreachable))
 
     written = "\n".join(caplog.messages)
     assert "forwarding to" in written
