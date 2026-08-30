@@ -1,0 +1,10 @@
+{
+  "priority": 1,
+  "request": {
+    "method": "DELETE",
+    "urlPath": "/mcp"
+  },
+  "response": {
+    "status": 200
+  }
+}
