@@ -162,7 +162,13 @@ async def test_an_upstream_failure_does_not_hand_the_caller_its_credential():
     from starlette.responses import JSONResponse
     from starlette.routing import Route
 
-    from tests.conftest import _free_port, holder_serving, serve, unreachable
+    from tests.conftest import (
+        RAIL_CENTER,
+        _free_port,
+        holder_serving,
+        serve,
+        unreachable,
+    )
 
     async def always_401(_request):
         return JSONResponse({"error": "nope"}, status_code=401)
@@ -175,7 +181,12 @@ async def test_an_upstream_failure_does_not_hand_the_caller_its_credential():
     async with (
         serve(refusing, upstream_port),
         serve(
-            build_app(secret_url, holder_serving(unreachable), slug="delivery"),
+            build_app(
+                secret_url,
+                holder_serving(unreachable),
+                slug="delivery",
+                rail_center=RAIL_CENTER,
+            ),
             gateway_port,
         ),
         httpx.AsyncClient() as client,
@@ -206,7 +217,13 @@ async def test_the_upstream_credential_still_travels(upstream, seen_headers):
     same request — dropping it entirely would silently 401 every credentialed
     deployment, and nothing else here would notice.
     """
-    from tests.conftest import _free_port, holder_serving, serve, unreachable
+    from tests.conftest import (
+        RAIL_CENTER,
+        _free_port,
+        holder_serving,
+        serve,
+        unreachable,
+    )
 
     scheme, rest = upstream.split("://", 1)
     credentialed = f"{scheme}://svcuser:s3cret@{rest}"
@@ -214,7 +231,17 @@ async def test_the_upstream_credential_still_travels(upstream, seen_headers):
     port = _free_port()
     async with (
         serve(
-            build_app(credentialed, holder_serving(unreachable), slug="delivery"), port
+            build_app(
+                credentialed,
+                holder_serving(unreachable),
+                # `observe`: this holds no bundle, and enforcing on one that
+                # cannot be judged answers 503 before the upstream is reached —
+                # which is the request this test needs to arrive.
+                mode="observe",
+                slug="delivery",
+                rail_center=RAIL_CENTER,
+            ),
+            port,
         ),
         Client(StreamableHttpTransport(url=f"http://127.0.0.1:{port}/mcp")) as c,
     ):

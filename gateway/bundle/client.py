@@ -272,11 +272,14 @@ class BundleHolder:
         Never a bundle that failed validation, and never cleared by a failed
         fetch: the last usable bundle stays until a newer usable one replaces
         it. None is the contract's *refuse*, and it is not the same as a bundle
-        with no policies, which allows. What the one caller does with it today
-        is report it on `/ready` and forward the request anyway — there is no
-        decision to withhold yet, so refusing would be an outage for no
-        enforcement — and the change that adds the decision is the one that
-        makes the refusal real.
+        with no policies, which allows. Two callers read it. Readiness reports
+        it on `/ready`, where holding nothing is what makes the gateway not
+        ready. `_judge` decides against it, and what it does with None is the
+        mode's answer rather than this holder's: under `enforce`, the default,
+        it refuses the request 503 without judging it, and under `observe` it
+        forwards it unjudged. So a holder that has never held a bundle is
+        refusing every call on an ordinary deployment — which is why nothing
+        here may describe the absence of a bundle as harmless.
         """
         return self._held
 
@@ -296,11 +299,17 @@ class BundleHolder:
         """Fetch once, then keep refreshing in the background.
 
         Returns after the first attempt whether or not it succeeded. A gateway
-        holding no bundle still starts and still listens; it forwards every
-        request unjudged while the loop keeps trying, and reports on `/ready`
-        that it is holding nothing — a state an operator can see and act on.
-        Refusing to start would turn a control plane that is briefly down into
-        a gateway that never comes up.
+        holding no bundle still starts and still listens, reports on `/ready`
+        that it is holding nothing, and keeps trying — a state an operator can
+        see and act on. Refusing to start would turn a control plane that is
+        briefly down into a gateway that never comes up.
+
+        **What happens to a request in that window is the caller's, not this
+        module's, and it is not the same in every mode.** Under `enforce` a
+        request that cannot be judged is refused; under `observe` it is
+        forwarded and the fact that nothing judged it is logged. `current()`
+        returning None is what both read, and neither answer is described here,
+        because a holder that named one of them would be wrong in the other.
 
         Calling it twice refreshes twice and still leaves one loop. Overwriting
         `_task` instead would drop the only handle to the first, which nothing
@@ -385,9 +394,7 @@ class BundleHolder:
             logger.error(
                 "refusing the fetched policy bundle — %s; %s",
                 refusal.reason,
-                f"keeping version {safe_for_log(held)}"
-                if held
-                else "no bundle held, so nothing is enforced",
+                f"keeping version {safe_for_log(held)}" if held else "no bundle held",
             )
             return RefreshOutcome("unusable", held, refusal.reason)
 
@@ -580,13 +587,18 @@ class BundleHolder:
         # line. Python's own JSON decoder does not, reporting a line and column
         # instead.
         #
-        # A warning while a bundle is held — the gateway is enforcing against a
+        # A warning while a bundle is held — the gateway is judging against a
         # ruleset that is merely not fresh. An error once nothing is held,
-        # which is the more serious state and not for the reason this line used
-        # to give: nothing consults what is held yet, so a gateway holding no
-        # bundle is not refusing traffic, it is admitting all of it unjudged.
-        # Both messages say what is true rather than what the contract will
-        # require, because an operator reads them to find out which.
+        # which is the more serious state.
+        #
+        # **Neither line says what becomes of traffic, and that is the point.**
+        # The holder is constructed without a mode, so it cannot know: under
+        # `enforce` a gateway holding no bundle refuses every request, under
+        # `observe` it forwards every request unjudged, and those are as far
+        # apart as an operator's log can put them. `_judge` writes that
+        # sentence per request, where the mode is in hand. A claim made here
+        # would be wrong for half the deployments that read it, and `enforce`
+        # is the default half.
         safe = safe_for_log(reason)
         if held:
             logger.warning(
@@ -596,8 +608,7 @@ class BundleHolder:
             )
         else:
             logger.error(
-                "policy bundle fetch failed — %s; no bundle held, "
-                "so nothing is enforced",
+                "policy bundle fetch failed — %s; no bundle held",
                 safe,
             )
         return RefreshOutcome("unreachable", held, safe)

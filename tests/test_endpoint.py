@@ -18,10 +18,31 @@ from __future__ import annotations
 
 import pytest
 
-from gateway.endpoint import resolve_endpoint_key
+from gateway.endpoint import (
+    MAX_BODY_NESTING_DEPTH,
+    resolve_endpoint_key,
+    resolve_from_body,
+)
 from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH
+from gateway.ticket import MAX_NESTING_DEPTH as TICKET_NESTING_DEPTH
 
 SLUG = "delivery"
+
+
+def nested_call(depth: int) -> bytes:
+    """A well-formed `tools/call` whose arguments nest `depth` levels deep.
+
+    Counted whole, so a case can be written against `MAX_BODY_NESTING_DEPTH`
+    directly: the outer object and `params` and `arguments` are three of the
+    levels, and the array of brackets supplies the rest.
+    """
+    assert depth >= 3, "the JSON-RPC frame alone is three levels"
+    inner = "[" * (depth - 3) + "]" * (depth - 3)
+    body = (
+        '{"method": "tools/call", "params": {"name": "track_package", '
+        f'"arguments": {{"q": {inner}}}}}}}'
+    )
+    return body.encode()
 
 
 def resolve(method: object = "tools/call", tool_name: object = "track_package"):
@@ -124,3 +145,68 @@ def test_the_bound_is_on_the_composed_key_rather_than_the_tool_name():
     past it, and the key is what has to match a registered endpoint."""
     tool_name = "t" * MAX_ENDPOINT_KEY_LENGTH
     assert resolve(tool_name=tool_name) == (None, "unrecognised")
+
+
+# --- a body too deep to read ----------------------------------------------
+
+
+def test_a_body_at_the_nesting_bound_still_resolves():
+    """Asserted from both sides of the bound, so a guard that is merely off by
+    one is not mistaken for one that is there. Past it the body is
+    `unrecognised` — never `keyless`, because a body that could not be read is
+    drift or garbage and has to face the whole chain."""
+    at = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH), SLUG)
+    assert (at.key, at.status) == ("delivery.track_package", "resolved")
+
+    past = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH + 1), SLUG)
+    assert (past.key, past.status) == (None, "unrecognised")
+
+
+def test_the_body_bound_is_not_the_ticket_headers():
+    """The header's limit would be the wrong bound here and reusing it would be
+    a new defect rather than a fix. A ticket is a flat object of scalars a mint
+    issues; a body carries `params.arguments`, which is whatever JSON the tool
+    this gateway fronts declares. An `unrecognised` body faces the **whole**
+    chain, so a bound tight enough to catch a well-formed deep tool call refuses
+    real traffic in order to enforce against it."""
+    assert MAX_BODY_NESTING_DEPTH > TICKET_NESTING_DEPTH
+
+    deeper_than_a_ticket = resolve_from_body(
+        nested_call(TICKET_NESTING_DEPTH + 1), SLUG
+    )
+    assert deeper_than_a_ticket.status == "resolved"
+
+
+@pytest.mark.parametrize("depth", [1000, 2000, 10000, 100000])
+def test_a_body_deep_enough_to_exhaust_the_stack_answers_rather_than_raising(depth):
+    """`json.loads` recurses per nesting level and raises `RecursionError`,
+    which is neither `ValueError` nor `UnicodeDecodeError` — and `_judge` calls
+    this on its first line, above the `try` that keeps a defect in the walk off
+    the forward path. A raise here leaves the caller with neither a refusal nor
+    a forward.
+
+    The depths cover both declared interpreters: 1000 raises on 3.10 and 10000
+    on 3.12, from a shallow stack, and the 3.10 threshold falls further the
+    deeper the caller's own stack — an ASGI handler's is deep."""
+    resolution = resolve_from_body(nested_call(depth), SLUG)
+    assert (resolution.key, resolution.status) == (None, "unrecognised")
+
+
+def test_brackets_inside_a_string_are_characters_rather_than_nesting():
+    """A tool argument may hold whatever text the tool takes. Counting a
+    quoted bracket as structure would refuse a legitimate call, and the count
+    runs before the parse precisely so it cannot be told apart afterwards."""
+    body = (
+        '{"method": "tools/call", "params": {"name": "track_package", '
+        '"arguments": {"q": "%s"}}}' % ("[" * (MAX_BODY_NESTING_DEPTH * 20))
+    ).encode()
+
+    resolution = resolve_from_body(body, SLUG)
+    assert (resolution.key, resolution.status) == ("delivery.track_package", "resolved")
+
+
+def test_a_body_that_is_not_json_at_all_still_answers():
+    """The bound is a new way in to a function whose whole contract is that it
+    answers, so the paths that were already there are held alongside it."""
+    for body in (b"", b"\xff\xfe{", b"not json", b"[]", b"null"):
+        assert resolve_from_body(body, SLUG).status == "unrecognised", body

@@ -52,7 +52,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from gateway.bundle.conditions import ConditionInput, holds
+from gateway.bundle.conditions import (
+    ConditionInput,
+    UninterpretableCondition,
+    holds,
+    keys_on_endpoint,
+)
 from gateway.bundle.validate import Policy, UsableBundle
 
 
@@ -82,7 +87,9 @@ class Decision:
     alerts: tuple[Policy, ...] = field(default_factory=tuple)
 
 
-def chain_for(bundle: UsableBundle, endpoint_key: str | None) -> tuple[Policy, ...]:
+def chain_for(
+    bundle: UsableBundle, endpoint_key: str | None, *, keyless: bool = True
+) -> tuple[Policy, ...]:
     """The policies this endpoint is judged by, in evaluation order.
 
     **An endpoint with no binding entry is subject to every policy**, so the
@@ -98,12 +105,43 @@ def chain_for(bundle: UsableBundle, endpoint_key: str | None) -> tuple[Policy, .
     the bundle is written. Copying that here makes the two sides disagree —
     deny there, allow here — on a bundle Rail Center did not produce.
 
-    A call naming no endpoint is judged by the whole chain too. There is no key
-    to look up, so nothing narrows; the rules that key on `endpoint_key` decline
-    to hold against an absence, and the rest apply as they would anywhere.
+    **A call naming no endpoint is judged by every rule that can meaningfully
+    ask about it, and by no others.** There is no key to look up, so no binding
+    narrows — but the two endpoint-derived fields are dropped from the chain,
+    because a rule keyed on one of them asks a question with no subject.
+
+    That is not the same as letting them resolve to absent. Absent is the answer
+    that makes ``skill_match missing`` **hold**, so a chain carrying the seeded
+    "deny an agent without a matching skill" would deny `initialize`,
+    `notifications/initialized` and `tools/list` — every message a session opens
+    with — for an agent whose declared skills are exactly right. The rule is
+    about whether this agent may call *this* endpoint, and there is no endpoint.
+
+    Everything else still applies, which is the half worth keeping: ``deny
+    unknown agents`` keys on the ticket rather than the endpoint, so a caller
+    with no ticket is still stopped at `initialize` rather than being let
+    through to enumerate the tool surface.
+
+    **Rail Center's evaluator needs this rule too.** The contract takes no
+    position on a call that names no endpoint, so until both sides carry it the
+    two disagree on exactly the messages a session opens with.
+
+    **`keyless` is what earns the narrowing, not the absent key.** Two very
+    different messages arrive here with `endpoint_key=None`: one that names no
+    tool *by design* — `initialize`, `tools/list` — and a `tools/call` that
+    named a tool this gateway declined to compose a key for, because the name
+    was missing, unsafe or too long. Only the first has no subject for an
+    endpoint-derived rule to ask about; the second named an endpoint and is
+    evidence of drift or garbage, so it faces the whole chain and
+    ``skill_match missing`` holds against it. Narrowing for both would drop the
+    guard on precisely the inputs this gateway understands least, and let a
+    caller shed every endpoint-derived rule by appending a newline to a tool
+    name.
     """
     if endpoint_key is None:
-        return bundle.chain
+        if not keyless:
+            return bundle.chain
+        return tuple(p for p in bundle.chain if not keys_on_endpoint(p.condition))
     binding = bundle.bindings.get(endpoint_key)
     if binding is None:
         return bundle.chain
@@ -115,17 +153,34 @@ def chain_for(bundle: UsableBundle, endpoint_key: str | None) -> tuple[Policy, .
 def decide(
     bundle: UsableBundle,
     request: ConditionInput,
+    *,
+    keyless: bool = True,
 ) -> Decision:
     """Walk this endpoint's chain and return the first denial, if any.
 
+    `keyless` says which kind of absent key this is, and is read only when
+    `request.endpoint_key` is None — see `chain_for`. It defaults to the
+    message that names no tool by design, which is the case every vector and
+    every contract statement is about.
+
     Raises `UninterpretableCondition` where the walk reaches a rule outside the
-    grammar. The caller answers 503 and reports no denial — no policy decided
-    this request, so naming one would attribute a verdict nobody reached.
+    grammar, **carrying the id of the policy it reached it on**. The caller
+    answers 503 and reports no denial — no policy decided this request, so
+    naming one would attribute a verdict nobody reached — but it must still log
+    which rule it could not read, because disabling that rule is the remedy the
+    contract names and an operator cannot disable a policy nothing identifies.
+    Attached here rather than raised with, because `holds` is handed a
+    condition and this is the only place that knows whose it is.
     """
     alerts: list[Policy] = []
 
-    for policy in chain_for(bundle, request.endpoint_key):
-        if not holds(policy.condition, request):
+    for policy in chain_for(bundle, request.endpoint_key, keyless=keyless):
+        try:
+            matched = holds(policy.condition, request)
+        except UninterpretableCondition as refusal:
+            refusal.policy_id = policy.id
+            raise
+        if not matched:
             continue
 
         # **Any action that is not `alert` denies**, and the comparison is

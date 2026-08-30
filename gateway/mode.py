@@ -26,14 +26,12 @@ ready, and must not poll Rail Center for one it will never read. Both are
 implemented where they belong — in the readiness route and the holder's
 lifecycle — rather than being re-derived from the mode at each site.
 
-**`enforce` is accepted here and enforces nothing yet.** Blocking arrives in the
-change that adds it, so today `enforce` evaluates and logs exactly as `observe`
-does. It is accepted rather than refused because ``enforce`` is the *default*:
-refusing it under its own name, the way `gateway.auth` refuses ``gcp``, would
-stop every deployment that has never set this variable — which is all of them.
-The startup line `describe` returns is what keeps that honest, so an operator
-reading the log is told the mode is not yet doing what its name says rather than
-discovering it from a request that was not blocked.
+**`enforce` is the default, and it blocks.** A deployment that has never set
+this variable evaluates every call and refuses the ones the walk denies, because
+a component whose default is not to enforce stops protecting anything the day an
+operator forgets a line. The startup line `describe` returns is what keeps that
+visible: an operator reading the log is told what this mode does to traffic
+rather than discovering it from a request that was refused.
 """
 
 from __future__ import annotations
@@ -99,9 +97,10 @@ def evaluates(mode: TicketMode) -> bool:
 def describe(mode: TicketMode) -> str:
     """The startup line for this mode, naming what it does and does not do.
 
-    `enforce` gets the awkward sentence on purpose: it is the default, it is
-    accepted, and it does not yet block. An operator who reads this line knows
-    that before a request goes unblocked tells them.
+    Each line says what traffic will experience, because that is what an
+    operator is checking this against: `enforce` names both refusals and the
+    report, and `observe` says plainly that nothing is blocked, so a deployment
+    reading its own log learns which of the two it is before a request tells it.
     """
     if mode == "none":
         return (
@@ -115,6 +114,6 @@ def describe(mode: TicketMode) -> str:
         )
     return (
         "RAIL_TICKET_MODE=enforce — every request is evaluated and every verdict "
-        "logged, and nothing is blocked yet: enforcement is not implemented in "
-        "this build, so this mode behaves as observe"
+        "logged; a denied request is refused with 403 and reported to Rail "
+        "Center, and one that cannot be judged is refused with 503"
     )

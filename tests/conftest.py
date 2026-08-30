@@ -36,6 +36,11 @@ STARTUP_TIMEOUT_SEC = 10
 SHUTDOWN_TIMEOUT_SEC = 10
 LIFESPAN_TIMEOUT_SEC = 10
 
+#: Where a test gateway reports denials, and the credential it uses. Injected
+#: for the same reason the holder is: a suite that read the environment would
+#: report to whatever `RAIL_CENTER_URL` happened to be set to on the machine.
+RAIL_CENTER = ("http://rail-center.test", {})
+
 #: The data source every test gateway fronts. Injected rather than read from the
 #: environment, so a suite run with `RAIL_DATASOURCE_SLUG` set to something else
 #: still composes the keys its bundles are bound on.
@@ -246,8 +251,17 @@ async def gateway_url(upstream):
     reached its control plane has to forward exactly as one that has — asserting
     that on a fixture that is never ready is what makes it hard to wire the two
     together by accident later.
+
+    **`observe`, deliberately.** This fixture holds no bundle, and under
+    `enforce` a gateway that cannot judge a call refuses it — so every test here
+    would be asserting against a 503 rather than against the forward path it is
+    about. The mode that evaluates and blocks nothing is the one where "the
+    transport still works" is a question with an answer.
     """
     port = _free_port()
     holder = holder_serving(unreachable)
-    async with serve(build_app(upstream, holder, slug=SLUG), port):
+    app = build_app(
+        upstream, holder, mode="observe", slug=SLUG, rail_center=RAIL_CENTER
+    )
+    async with serve(app, port):
         yield f"http://127.0.0.1:{port}"

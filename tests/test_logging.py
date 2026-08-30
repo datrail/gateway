@@ -49,7 +49,7 @@ def test_the_startup_line_itself_is_safe(caplog):
 
     secret_url = "https://svcuser:s3cret@host.invalid:9443/mcp?api_key=TOKEN"
     with caplog.at_level(logging.INFO, logger="gateway"):
-        build_gateway(secret_url, holder_serving(unreachable), slug="delivery")
+        build_gateway(secret_url, holder_serving(unreachable))
 
     written = "\n".join(caplog.messages)
     assert "forwarding to" in written
