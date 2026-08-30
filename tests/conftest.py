@@ -36,6 +36,11 @@ STARTUP_TIMEOUT_SEC = 10
 SHUTDOWN_TIMEOUT_SEC = 10
 LIFESPAN_TIMEOUT_SEC = 10
 
+#: The data source every test gateway fronts. Injected rather than read from the
+#: environment, so a suite run with `RAIL_DATASOURCE_SLUG` set to something else
+#: still composes the keys its bundles are bound on.
+SLUG = "delivery"
+
 #: One valid bundle, for tests whose subject is what holding one does rather
 #: than what makes one valid. `tests/test_bundle_holder.py` keeps its own
 #: `bundle()` factory: that one exists to vary versions, policies and rejects
@@ -244,5 +249,5 @@ async def gateway_url(upstream):
     """
     port = _free_port()
     holder = holder_serving(unreachable)
-    async with serve(build_app(upstream, holder), port):
+    async with serve(build_app(upstream, holder, slug=SLUG), port):
         yield f"http://127.0.0.1:{port}"

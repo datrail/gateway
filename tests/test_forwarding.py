@@ -174,7 +174,10 @@ async def test_an_upstream_failure_does_not_hand_the_caller_its_credential():
     gateway_port = _free_port()
     async with (
         serve(refusing, upstream_port),
-        serve(build_app(secret_url, holder_serving(unreachable)), gateway_port),
+        serve(
+            build_app(secret_url, holder_serving(unreachable), slug="delivery"),
+            gateway_port,
+        ),
         httpx.AsyncClient() as client,
     ):
         response = await client.post(
@@ -210,7 +213,9 @@ async def test_the_upstream_credential_still_travels(upstream, seen_headers):
 
     port = _free_port()
     async with (
-        serve(build_app(credentialed, holder_serving(unreachable)), port),
+        serve(
+            build_app(credentialed, holder_serving(unreachable), slug="delivery"), port
+        ),
         Client(StreamableHttpTransport(url=f"http://127.0.0.1:{port}/mcp")) as c,
     ):
         await c.call_tool("track_package", {"tracking_number": "77123"})
