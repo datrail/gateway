@@ -11,7 +11,8 @@ An empty chain **allows**, so treating a failed fetch as a bundle with no rules
 turns an outage of the control plane into an outage of enforcement — every
 request admitted, with nothing in the logs saying that is what happened. Every
 failure path below therefore ends in one of two places: keep what is held, or
-hold nothing and let the caller refuse.
+hold nothing and leave the caller to answer for it — which today means
+reporting it on `/ready`, not refusing. `current()` is where that stands.
 
 The network and the clock are injected. Everything they touch is small and
 everything else is a pure function of what arrived, which is the only shape two
@@ -259,9 +260,12 @@ class BundleHolder:
 
         Never a bundle that failed validation, and never cleared by a failed
         fetch: the last usable bundle stays until a newer usable one replaces
-        it. A caller reading None refuses traffic — that is the whole of what
-        None means, and it is not the same as a bundle with no policies, which
-        allows.
+        it. None is the contract's *refuse*, and it is not the same as a bundle
+        with no policies, which allows. What the one caller does with it today
+        is report it on `/ready` and forward the request anyway — there is no
+        decision to withhold yet, so refusing would be an outage for no
+        enforcement — and the change that adds the decision is the one that
+        makes the refusal real.
         """
         return self._held
 
@@ -281,10 +285,11 @@ class BundleHolder:
         """Fetch once, then keep refreshing in the background.
 
         Returns after the first attempt whether or not it succeeded. A gateway
-        holding no bundle still starts and still listens — it just refuses every
-        request while the loop keeps trying, which is a state an operator can
-        see and act on. Refusing to start would turn a control plane that is
-        briefly down into a gateway that never comes up.
+        holding no bundle still starts and still listens; it forwards every
+        request unjudged while the loop keeps trying, and reports on `/ready`
+        that it is holding nothing — a state an operator can see and act on.
+        Refusing to start would turn a control plane that is briefly down into
+        a gateway that never comes up.
 
         Calling it twice refreshes twice and still leaves one loop. Overwriting
         `_task` instead would drop the only handle to the first, which nothing
@@ -371,7 +376,7 @@ class BundleHolder:
                 refusal.reason,
                 f"keeping version {safe_for_log(held)}"
                 if held
-                else "no bundle held, refusing traffic",
+                else "no bundle held, so nothing is enforced",
             )
             return RefreshOutcome("unusable", held, refusal.reason)
 
@@ -414,10 +419,12 @@ class BundleHolder:
             # lowest interpreter this project supports, and there the attribute
             # does not exist at all. The `except Exception` below would turn
             # that `AttributeError` into an ordinary `unreachable` on every
-            # attempt — a gateway that never holds a bundle and refuses every
-            # request, reported in the log as a control-plane outage. Ruff's
-            # target version gates syntax, not stdlib attributes, and CI runs
-            # one interpreter, so nothing else here would catch it.
+            # attempt — a gateway that never holds a bundle, forwards every
+            # request unjudged, and reports itself unready for the life of the
+            # process, while the log blames a control plane that is answering
+            # perfectly well. Ruff's target version gates syntax, not stdlib
+            # attributes, and CI runs one interpreter, so nothing else here
+            # would catch it.
             #
             # What it costs on 3.10 is that a cancellation arriving after
             # `_attempt` has already completed is discarded rather than
@@ -547,9 +554,13 @@ class BundleHolder:
         # line. Python's own JSON decoder does not, reporting a line and column
         # instead.
         #
-        # A warning while a bundle is held — the gateway is still enforcing,
-        # against a ruleset that is merely not fresh. An error once nothing is
-        # held, because every request is now refused.
+        # A warning while a bundle is held — the gateway is enforcing against a
+        # ruleset that is merely not fresh. An error once nothing is held,
+        # which is the more serious state and not for the reason this line used
+        # to give: nothing consults what is held yet, so a gateway holding no
+        # bundle is not refusing traffic, it is admitting all of it unjudged.
+        # Both messages say what is true rather than what the contract will
+        # require, because an operator reads them to find out which.
         safe = safe_for_log(reason)
         if held:
             logger.warning(
@@ -559,7 +570,8 @@ class BundleHolder:
             )
         else:
             logger.error(
-                "policy bundle fetch failed — %s; no bundle held, refusing traffic",
+                "policy bundle fetch failed — %s; no bundle held, "
+                "so nothing is enforced",
                 safe,
             )
         return RefreshOutcome("unreachable", held, safe)

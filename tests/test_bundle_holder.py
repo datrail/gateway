@@ -217,6 +217,29 @@ async def test_an_unusable_first_bundle_holds_nothing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_unusable_first_bundle_claims_no_refusal_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The twin of the unreachable line, and the one the suite never reached.
+
+    An unreachable control plane is driven by the readiness suite, which
+    asserts nothing there claims a refusal; nothing drove the *unusable* path,
+    where the second of these two lines lives. What is true of both is that
+    the gateway holding no bundle forwards the request anyway — so an operator
+    reading a claim of refused traffic hunts refusals that never happened
+    while every call goes through unjudged. The bundle is refused; traffic is
+    not, and only one of those two words may appear.
+    """
+    h = holder(httpx.Response(200, json=bundle("v1", policies="not a list")))
+    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "no bundle held, so nothing is enforced" in said, said
+    assert "refusing traffic" not in said, said
+
+
+@pytest.mark.asyncio
 async def test_a_new_version_replaces_what_is_held() -> None:
     h = holder(
         httpx.Response(200, json=bundle("v1")),
@@ -678,11 +701,13 @@ async def test_a_rejected_credential_says_so_distinctly() -> None:
 async def test_a_failure_is_a_warning_while_a_bundle_is_held(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """And an error once nothing is, because every request is then refused.
+    """And an error once nothing is, because that is the state nothing resolves.
 
-    The gateway with a stale ruleset is still enforcing; the gateway with none
-    is not serving. Logging both at one level makes the second invisible among
-    the first.
+    The gateway with a stale ruleset still holds one, and `/ready` answers 200
+    throughout. The gateway with none answers 503 for as long as this keeps
+    failing, which is indefinitely — a refresh is the only thing that ends it,
+    and a refresh is what just failed. So the second is the one an operator has
+    to act on, and logging both at one level makes it invisible among the first.
     """
     with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
         cold = holder(httpx.Response(503))
@@ -921,9 +946,10 @@ async def test_the_socket_timeout_reaches_the_client(
 async def test_start_returns_after_the_first_attempt_even_when_it_failed() -> None:
     """A gateway holding no bundle still starts, and still listens.
 
-    It refuses every request while the loop keeps trying, which is a state an
-    operator can see and act on. Refusing to start would turn a control plane
-    that is briefly down into a gateway that never comes up.
+    It forwards every request unjudged while the loop keeps trying, and reports
+    on `/ready` that it is holding nothing — a state an operator can see and act
+    on. Refusing to start would turn a control plane that is briefly down into a
+    gateway that never comes up.
     """
     ticks: list[float] = []
 

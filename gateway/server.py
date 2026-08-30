@@ -1,10 +1,23 @@
 """Receive an agent's MCP calls and forward them to the service behind us.
 
-This is the transport half. It decides nothing yet — a ticket is read in a
-later change, a policy bundle fetched in the one after — so every request that
-arrives is forwarded.
+This is the transport half. It decides nothing: a policy bundle is fetched and
+held, **nothing consults it**, and no request that arrives here has its ticket
+read at all — `gateway.ticket` is reached by the suite and by nothing else. So
+every request that arrives is forwarded. What this module adds over the
+forwarding is a truthful account of what is held on `/ready`, and the process
+lifecycle that keeps the account current.
 
-Four choices here are not obvious, and each has a way of being wrong that
+**Readiness reports; it does not gate.** `/ready` answers 503 while no bundle
+is held, and a request arriving in that window is forwarded all the same.
+Wiring the two together buys no enforcement while nothing reads the bundle —
+there is no decision a held bundle would change yet — and costs an outage
+whenever the control plane is briefly unreachable. The change that adds the
+decision is the change that may connect them, and it inherits a second rule
+with it: under `RAIL_TICKET_MODE=none` this gateway evaluates nothing, so
+readiness there has to be unconditional or the deployment that turns
+enforcement off is one that never serves.
+
+Six choices here are not obvious, and each has a way of being wrong that
 nothing would report:
 
   * **The backend is a `ProxyClient` with three of its five handlers refused.**
@@ -53,13 +66,34 @@ nothing would report:
     could not be judged at all. Inside an MCP server a refusal is a JSON-RPC
     error instead, which the control plane's denial contract does not describe
     and an operator cannot read off a status line.
+
+  * **The holder is built here and started by the lifespan.** Two different
+    failures, kept apart on purpose. Everything the environment gets to say —
+    the URL, the credential, the interval — is resolved while `build_gateway`
+    runs, so a deployment configured wrongly is refused before a socket is
+    open. Everything the network gets to say is resolved after, in the
+    lifespan, where a control plane that is briefly down leaves a gateway that
+    starts, serves, reports itself unready and keeps trying. Resolving the
+    first lazily would turn a typo into a bundle that never arrives; resolving
+    the second eagerly would turn a control-plane blip into a gateway that
+    never comes up.
+
+  * **The `/ready` route closes over the holder rather than reading it from the
+    request.** A lifespan's yielded state does not reach `request.scope`
+    through this stack — measured, not assumed: the dict comes back empty at
+    the route. Closing over the object is also what keeps the answer live, so a
+    bundle arriving after startup flips the report without anything having to
+    notice and republish it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
@@ -72,9 +106,18 @@ from fastmcp.server.providers.proxy import ProxyClient
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
+from gateway.auth import auth_headers
+from gateway.bundle.client import BundleHolder, refresh_seconds
+
 log = logging.getLogger("gateway")
 
 DEFAULT_PORT = 8080
+
+#: How long the lifespan waits on the first policy bundle fetch before serving
+#: anyway. Not the holder's deadline: this one is paid by `/health`, which
+#: answers connection-refused until it elapses, so it is set against an
+#: orchestrator's patience rather than against a control plane's.
+STARTUP_FETCH_GRACE_SECONDS = 5.0
 
 #: Checked against by name rather than through `logging.getLevelName`, whose
 #: return type is the contract: an integer for a known name and the string
@@ -92,6 +135,32 @@ def _required(name: str) -> str:
     if not value:
         raise RuntimeError(f"{name} is required and is unset or empty")
     return value
+
+
+def _checked_url(name: str, url: str) -> str:
+    """`url`, once it is one that names somewhere to go.
+
+    Both variables this validates are addresses the process cannot function
+    without and cannot discover to be wrong: `http://` and `http://user:pw@`
+    parse, and a gateway built on either starts and answers `/health` while
+    reaching nothing. The upstream one forwards nothing; the Rail Center one
+    fetches no bundle ever, and reports it in the log as a control plane that
+    is down — a fault an operator would look for in the wrong place entirely.
+    """
+    try:
+        hostname = urlsplit(url).hostname
+    except ValueError as exc:
+        # An unclosed IPv6 bracket raises here, before the host check below —
+        # a bare traceback that never names the variable the operator set.
+        # Through `_credential_free` and not `_safe_to_log`: the message being
+        # reported is the one `urlsplit` raised, so anything that parses to
+        # redact would raise it again.
+        raise RuntimeError(
+            f"{name} is not a URL that can be parsed: {_credential_free(str(exc), url)}"
+        ) from None
+    if not hostname:
+        raise RuntimeError(f"{name} names no host: {_safe_to_log(url)}")
+    return url
 
 
 def port() -> int:
@@ -115,26 +184,59 @@ def port() -> int:
     return value
 
 
-def build_gateway(upstream_url: str | None = None) -> FastMCP:
-    """The proxy that forwards to the upstream, plus a liveness route."""
-    url = upstream_url or _required("RAIL_GATEWAY_UPSTREAM_URL")
-    try:
-        hostname = urlsplit(url).hostname
-    except ValueError as exc:
-        # An unclosed IPv6 bracket raises here, before the host check below —
-        # a bare traceback that never names the variable the operator set.
-        raise RuntimeError(
-            f"RAIL_GATEWAY_UPSTREAM_URL is not a URL that can be parsed: {exc}"
-        ) from None
-    if not hostname:
-        # `http://` and `http://user:pw@` both parse, and a gateway built on
-        # either starts and answers /health while able to forward nothing.
-        raise RuntimeError(
-            f"RAIL_GATEWAY_UPSTREAM_URL names no host: {_safe_to_log(url)}"
-        )
+def _holder_from_environment() -> BundleHolder:
+    """The policy bundle holder a deployment's variables describe.
 
-    clean_url, auth_headers = _split_credential(url)
-    transport = StreamableHttpTransport(url=clean_url, headers=auth_headers)
+    Every one of them is read here rather than inside the holder, so the whole
+    of what an operator can misconfigure is refused in one place at startup:
+    `auth_headers` raises on a credential that cannot go in a header, and
+    `refresh_seconds` on an interval that is not a number.
+
+    `RAIL_CENTER_URL` goes through `_split_credential` for the same reason the
+    upstream URL does and one more: httpx derives `BasicAuth` from a URL's
+    userinfo and **overwrites** the `Authorization` header it was given, so a
+    `user:password@` left in this one silently displaces the configured bearer
+    token and calls the control plane as somebody else. Two credentials is an
+    operator who set both by accident, and `auth.py` is explicit that a gateway
+    which cannot send the credential it was configured for stops rather than
+    sends a different one.
+    """
+    url, from_url = _split_credential(
+        _checked_url("RAIL_CENTER_URL", _required("RAIL_CENTER_URL"))
+    )
+    configured = auth_headers()
+    if from_url and "Authorization" in configured:
+        raise RuntimeError(
+            "RAIL_CENTER_URL carries a credential and RAIL_AUTH_MODE configures "
+            "one; only one of them can be sent, so set exactly one"
+        )
+    return BundleHolder(
+        url,
+        {**from_url, **configured},
+        interval_seconds=refresh_seconds(),
+    )
+
+
+def build_gateway(
+    upstream_url: str | None = None,
+    holder: BundleHolder | None = None,
+) -> FastMCP:
+    """The proxy that forwards to the upstream, plus liveness and readiness.
+
+    `holder` is injected by the suite so its gateways answer to a control plane
+    the test holds rather than one on the network. A caller that passes none
+    gets the one the environment describes.
+    """
+    url = _checked_url(
+        "RAIL_GATEWAY_UPSTREAM_URL",
+        upstream_url or _required("RAIL_GATEWAY_UPSTREAM_URL"),
+    )
+    # After the upstream, so a gateway pointed nowhere is refused for that
+    # rather than for the Rail Center variable it also has not been given.
+    bundle_holder = holder if holder is not None else _holder_from_environment()
+
+    clean_url, credential_headers = _split_credential(url)
+    transport = StreamableHttpTransport(url=clean_url, headers=credential_headers)
     backend = ProxyClient(
         transport,
         # See the module docstring: relayed upstream-to-caller, refused
@@ -143,7 +245,11 @@ def build_gateway(upstream_url: str | None = None) -> FastMCP:
         sampling_handler=None,
         elicitation_handler=None,
     )
-    gateway = create_proxy(backend, name="datrail-gateway")
+    gateway = create_proxy(
+        backend,
+        name="datrail-gateway",
+        lifespan=_bundle_lifespan(bundle_holder),
+    )
     gateway.add_middleware(_UpstreamErrorBoundary())
 
     # Last, and it has to be: see the module docstring. Both `create_proxy` and
@@ -157,20 +263,124 @@ def build_gateway(upstream_url: str | None = None) -> FastMCP:
     async def health(_request):  # pragma: no cover - exercised over HTTP
         """Liveness only: the process is up and its configuration parsed.
 
-        It says nothing about whether this gateway can decide anything, because
-        there is nothing to decide with yet. Once a policy bundle is held, a
-        process holding none must stop reporting ready — otherwise whatever
-        waits on this is released into the window where every call is refused.
+        It says nothing about the policy bundle, and must not learn to. The two
+        questions have opposite remedies — a process that is not live should be
+        replaced, a process that is not ready should be left alone to become
+        ready — so an orchestrator handed one answer for both restarts a
+        gateway whose only problem is a control plane it cannot reach yet, and
+        restarting is the one action that cannot help.
         """
         return JSONResponse({"status": "ok"})
+
+    @gateway.custom_route("/ready", methods=["GET"])
+    async def ready(_request):  # pragma: no cover - exercised over HTTP
+        """Whether a policy bundle is held. Asked fresh, answered honestly.
+
+        `None` from `current()` is *no ruleset*, never *an empty one* — an
+        empty chain allows — so the only thing this can truthfully report while
+        nothing is held is that this gateway would have nothing to decide with.
+        503 rather than a 200 carrying a false flag, because the code is the
+        part every orchestrator and load balancer reads without being taught to.
+
+        **What it deliberately does not carry is the version held.** This route
+        is unauthenticated and shares a port with the MCP surface, so a version
+        here is a public feed of when a customer's policy changed, bought for an
+        operator convenience the `holding policy bundle version …` log line
+        already covers.
+        """
+        if bundle_holder.current() is None:
+            return JSONResponse({"status": "not ready"}, status_code=503)
+        return JSONResponse({"status": "ready"})
 
     log.info("forwarding to %s", _safe_to_log(url))
     return gateway
 
 
-def build_app(upstream_url: str | None = None) -> ASGIApp:
+def _bundle_lifespan(holder: BundleHolder):
+    """Start the holder with the application and stop it with the application.
+
+    **Nothing here catches.** `start()` turns every expected failure — an
+    unreachable control plane, a refused credential, a bundle that will not
+    validate — into an outcome it returns, so anything that raises past it is a
+    defect rather than a deployment's circumstances. A process that fails to
+    start names that defect; one that logged it and carried on would be a
+    gateway serving traffic, reporting itself unready for ever, and never
+    retrying — because the refresh loop is created after the first fetch and a
+    raise means it never was.
+
+    **The first fetch is awaited, and only for `STARTUP_FETCH_GRACE_SECONDS`.**
+    Waiting for it is what makes `/ready` answerable from the first request
+    rather than briefly reporting a state no attempt has established yet, and
+    what puts the line below in the log before the process claims to be up. But
+    uvicorn binds no socket until this function reaches its `yield`, so every
+    second spent here is a second `/health` answers *connection refused* rather
+    than 503 — which is the one shape of failure liveness must never take, since
+    an orchestrator reads it as a process to replace and restarting cannot help
+    a control plane that is merely slow. Unbounded, that wait runs to the
+    holder's own deadline, which is long enough for a default Kubernetes
+    liveness probe to kill the container and long enough for the next start to
+    repeat it. So the fetch runs as a task, the wait on it is short, and a fetch
+    still running when the grace expires is left to finish in the background —
+    where the refresh loop it creates picks up exactly as it would have.
+    """
+
+    @asynccontextmanager
+    async def lifespan(_server) -> AsyncIterator[None]:
+        # `asyncio.wait` rather than `wait_for`: a timeout there cancels what it
+        # was waiting on, and cancelling this one would take the refresh loop
+        # with it — `start()` creates the loop after the first fetch returns.
+        first = asyncio.create_task(holder.start())
+        done, _ = await asyncio.wait({first}, timeout=STARTUP_FETCH_GRACE_SECONDS)
+        if first in done:
+            # `.result()` and not a `try`: **nothing here catches**, per above.
+            outcome = first.result()
+            if outcome.held is None:
+                # Not fatal, and worth a line at this level: it is the whole
+                # difference between a gateway that is starting and one that is
+                # stuck, and `/ready` reports only the bit.
+                log.warning(
+                    "started holding no policy bundle: %s — /ready reports not ready "
+                    "until one arrives",
+                    outcome.reason or outcome.kind,
+                )
+        else:
+            log.warning(
+                "started holding no policy bundle: the first fetch has run for "
+                "%ss and is still going — /ready reports not ready until one "
+                "arrives",
+                STARTUP_FETCH_GRACE_SECONDS,
+            )
+        try:
+            yield
+        finally:
+            # In a `finally` so a failure anywhere in the served life of the
+            # app still retires the refresh loop. Left running, it holds the
+            # event loop open and uvicorn's shutdown waits on it.
+            #
+            # `stop()` first: it retires the epoch a first fetch still in flight
+            # captured, so that fetch returns without creating a loop nothing
+            # would then hold a handle to.
+            await holder.stop()
+            first.cancel()
+            try:
+                await first
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # Only reachable past the grace, where the raise this function
+                # does not catch can no longer refuse the start. It is still a
+                # defect, so it is still said out loud.
+                log.exception("the first policy bundle fetch raised")
+
+    return lifespan
+
+
+def build_app(
+    upstream_url: str | None = None,
+    holder: BundleHolder | None = None,
+) -> ASGIApp:
     """The ASGI application uvicorn serves."""
-    return build_gateway(upstream_url).http_app(transport="streamable-http")
+    return build_gateway(upstream_url, holder).http_app(transport="streamable-http")
 
 
 def _split_credential(url: str) -> tuple[str, dict[str, str]]:
@@ -226,6 +436,41 @@ class _UpstreamErrorBoundary(Middleware):
             raise ToolError("the upstream service could not be reached") from None
 
 
+def _credential_free(text: str, url: str) -> str:
+    """`text`, with any credential `url` carries taken back out of it.
+
+    The redaction every message about a rejected URL is built on. `urlsplit`
+    raises `ValueError("netloc '<netloc>' contains invalid characters under
+    NFKC normalization")` for a host that normalises into a delimiter, and it
+    quotes that netloc **whole, userinfo included** — so interpolating the
+    exception into a startup error writes a live control-plane password to
+    stderr, where the container's log collector and the CI log of every job
+    that runs the image both keep it. Parsing is no help on that path: it is
+    the branch reached because parsing raised. So the authority is found by
+    string surgery on the raw value instead, and whatever precedes its last
+    `@` is removed wherever the message repeats it.
+
+    Removed together with that `@`, and replaced by a marker that keeps one.
+    The userinfo on its own is a short, ordinary string — `svc`, `api` — and
+    replacing every occurrence of it overwrote the host and the path as well:
+    `https://svc@svc.default.svc.cluster.local:8080/mcp` came out as
+    `https://***.default.***.cluster.local:8080/mcp`, losing the half of the
+    line an operator reads it for. A credential is only a credential where it
+    sits in front of an `@`, so that is what is matched.
+
+    An authority does not need `scheme://` in front of it, and keying off that
+    separator finds nothing in exactly the malformed values these messages are
+    written for: `//user:pw@host/`, and the `user:pw@host/` of an operator who
+    forgot the scheme, both carry one.
+    """
+    _, separator, rest = url.partition("://")
+    authority = rest if separator else url.removeprefix("//")
+    for delimiter in "/?#":
+        authority = authority.partition(delimiter)[0]
+    userinfo = authority.rpartition("@")[0]
+    return text.replace(f"{userinfo}@", "***@") if userinfo else text
+
+
 def _safe_to_log(url: str) -> str:
     """Where the gateway points, with every part that can carry a secret gone.
 
@@ -238,8 +483,16 @@ def _safe_to_log(url: str) -> str:
     brackets an IPv6 literal needs and raised on a port that is not a number —
     a redaction helper crashing on the value it was handed being the worst
     shape available. Scheme, host and path are what an operator is reading for.
+
+    The credential comes out through `_credential_free` first, on the raw
+    string, because the rebuild below only redacts a URL that has an authority
+    to rebuild and `scheme://` is what tells `urlsplit` there is one. This is
+    also called on the value `_checked_url` rejects for naming no host, and
+    `user:pw@host/` — an operator who forgot the scheme — parses as a scheme
+    with the rest as path: an empty netloc, from which the rebuild strips
+    nothing and returns the password whole.
     """
-    parsed = urlsplit(url)
+    parsed = urlsplit(_credential_free(url, url))
     netloc = parsed.netloc.rsplit("@", 1)[-1]
     dropped = [
         n for n, v in (("query", parsed.query), ("fragment", parsed.fragment)) if v
