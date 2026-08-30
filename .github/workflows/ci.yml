@@ -164,9 +164,15 @@ jobs:
           # A non-default port on purpose. With 8080 this step passes against
           # an image that validates RAIL_GATEWAY_PORT and then listens
           # somewhere else, which is the defect it exists to catch.
+          # Every variable `.env.example` says this gateway needs, and the
+          # step exists to catch the day that list grows: a required variable
+          # added without a line here is a container that cannot start, and
+          # this is the only check that runs one. `RAIL_TICKET_MODE` is left
+          # unset on purpose, so the default path is the one exercised.
           docker run -d --name gw -p 9100:9100 \
             -e RAIL_GATEWAY_PORT=9100 \
             -e RAIL_CENTER_URL=http://rail-center.invalid \
+            -e RAIL_DATASOURCE_SLUG=delivery \
             -e RAIL_GATEWAY_UPSTREAM_URL=http://upstream.invalid/mcp gateway:ci
 
           # Forty rather than twenty, for a wait that should be under six: the
