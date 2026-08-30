@@ -4,8 +4,12 @@ Every value this refuses came off the wire. A bundle's version, a policy's id
 and priority, an endpoint key, a binding's mode — all are chosen by whoever
 produced the bundle, never by anyone here, and this component writes them into
 the messages it refuses a bundle with, which reach an operator's log. An
-endpoint key travels further still, into a denial report and whatever reads
-one, though nothing on this branch sends one yet.
+endpoint key travels further still, into the denial reports this gateway sends
+Rail Center and whatever reads one there — and so does a caller's claimed
+`x-rail-status`, which is a header rather than bundle content but is rendered
+through here for the same reasons. Rail Center stores a report's `metadata`
+free-form with no request-size limit in front of it, so this is the last place
+either value can be bounded at all.
 
 Four character classes are refused, by category rather than by enumeration:
 

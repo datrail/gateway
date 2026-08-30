@@ -1,23 +1,26 @@
 """Receive an agent's MCP calls and forward them to the service behind us.
 
-Every request is read, judged and **forwarded whatever the verdict**. The ticket
-is decoded, the endpoint key composed, the held bundle walked, and the answer
-written to the log — and then the call goes upstream exactly as it would have
-without any of it. That is what `RAIL_TICKET_MODE=observe` means, and in this
-build `enforce` behaves identically, because blocking is not implemented yet.
+Every request is read and judged: the ticket is decoded, the endpoint key
+composed, the held bundle walked, and the answer written to the log. What
+happens next is `RAIL_TICKET_MODE`'s to say. Under `observe` the call goes
+upstream exactly as it would have without any of it. Under `enforce` a verdict
+is acted on — a denied call is answered 403 and reported to Rail Center, and one
+that could not be judged at all is answered 503 and reported to nobody.
 
-**Nothing here acts on a verdict, and that is the design of this change rather
-than an omission.** A refusal wired in now would stop traffic for an enforcement
-decision nothing downstream records: no denial is reported, no 403 or 503 is
-specified until the change that adds them, so a request stopped here is a
-request lost for nothing. What the verdict buys today is the log line an
-operator runs a dry run for — which calls *would* stop, seen before enforcement
-is turned on. The change that adds enforcement is the change that may act on it.
+**403 and 503 are kept apart deliberately.** A 403 says the call was judged and
+rejected; a 503 says the ruleset could not be applied at all. Only the first
+names a policy that decided anything, so only the first is reported — naming a
+policy on the second would attribute a verdict nobody reached.
 
-**`/ready` reports and does not gate**, on the same reasoning, and under
-`RAIL_TICKET_MODE=none` it is unconditionally ready: a pass-through evaluates
-nothing, needs no bundle to do its whole job, and must not be the deployment
-that turns enforcement off and then never serves.
+**Only `enforce` reports.** `observe` runs the same walk, logs the same verdict,
+forwards the request and sends nothing — a denial table filled from a mode that
+is explicitly not enforcing leaves an operator unable to tell which rows stopped
+traffic.
+
+**`/ready` reports and does not gate**, and under `RAIL_TICKET_MODE=none` it is
+unconditionally ready: a pass-through evaluates nothing, needs no bundle to do
+its whole job, and must not be the deployment that turns enforcement off and
+then never serves.
 
 Seven choices here are not obvious, and each has a way of being wrong that
 nothing would report:
@@ -100,10 +103,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
@@ -111,7 +116,6 @@ from fastmcp import FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 from fastmcp.server import create_proxy
-from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.middleware import Middleware
 from fastmcp.server.providers.proxy import ProxyClient
 from starlette.responses import JSONResponse
@@ -121,7 +125,8 @@ from gateway.auth import auth_headers
 from gateway.bundle.client import BundleHolder, refresh_seconds
 from gateway.bundle.conditions import ConditionInput, UninterpretableCondition
 from gateway.bundle.decide import decide
-from gateway.endpoint import resolve_endpoint_key
+from gateway.denial import build_report, report
+from gateway.endpoint import resolve_from_body
 from gateway.key_safety import safe_for_log
 from gateway.mode import TicketMode, describe, evaluates, ticket_mode
 from gateway.ticket import parse_rail_header
@@ -201,22 +206,20 @@ def port() -> int:
     return value
 
 
-def _holder_from_environment() -> BundleHolder:
-    """The policy bundle holder a deployment's variables describe.
+def rail_center_from_environment() -> tuple[str, dict[str, str]]:
+    """Where Rail Center is, and what this gateway presents to it.
 
-    Every one of them is read here rather than inside the holder, so the whole
-    of what an operator can misconfigure is refused in one place at startup:
-    `auth_headers` raises on a credential that cannot go in a header, and
-    `refresh_seconds` on an interval that is not a number.
+    One pair, resolved once, for both callers that reach the control plane: the
+    bundle holder and the denial reporter. Resolving it twice would let the two
+    disagree — a gateway fetching policy as one identity and reporting denials
+    as another is a state nothing would report and an operator could not read
+    off either side.
 
-    `RAIL_CENTER_URL` goes through `_split_credential` for the same reason the
+    `RAIL_CENTER_URL` goes through `_split_credential` for the reason the
     upstream URL does and one more: httpx derives `BasicAuth` from a URL's
     userinfo and **overwrites** the `Authorization` header it was given, so a
     `user:password@` left in this one silently displaces the configured bearer
-    token and calls the control plane as somebody else. Two credentials is an
-    operator who set both by accident, and `auth.py` is explicit that a gateway
-    which cannot send the credential it was configured for stops rather than
-    sends a different one.
+    token and calls the control plane as somebody else.
     """
     url, from_url = _split_credential(
         _checked_url("RAIL_CENTER_URL", _required("RAIL_CENTER_URL"))
@@ -227,11 +230,19 @@ def _holder_from_environment() -> BundleHolder:
             "RAIL_CENTER_URL carries a credential and RAIL_AUTH_MODE configures "
             "one; only one of them can be sent, so set exactly one"
         )
-    return BundleHolder(
-        url,
-        {**from_url, **configured},
-        interval_seconds=refresh_seconds(),
-    )
+    return url, {**from_url, **configured}
+
+
+def _holder_from_environment() -> BundleHolder:
+    """The policy bundle holder a deployment's variables describe.
+
+    Every one of them is read here rather than inside the holder, so the whole
+    of what an operator can misconfigure is refused in one place at startup:
+    `auth_headers` raises on a credential that cannot go in a header, and
+    `refresh_seconds` on an interval that is not a number.
+    """
+    url, headers = rail_center_from_environment()
+    return BundleHolder(url, headers, interval_seconds=refresh_seconds())
 
 
 def datasource_slug() -> str:
@@ -252,14 +263,13 @@ def build_gateway(
     upstream_url: str | None = None,
     holder: BundleHolder | None = None,
     mode: TicketMode | None = None,
-    slug: str | None = None,
 ) -> FastMCP:
     """The proxy that forwards to the upstream, plus liveness and readiness.
 
-    `holder`, `mode` and `slug` are injected by the suite so its gateways answer
-    to a control plane the test holds, in a mode the test chose, fronting a data
-    source the test named. A caller that passes none of them gets what the
-    environment describes.
+    `holder` and `mode` are injected by the suite so its gateways answer to a
+    control plane the test holds, in a mode the test chose. The endpoint slug is
+    not needed here: composing keys is the enforcement layer's, and this builds
+    the MCP server that sits under it.
 
     **Under `RAIL_TICKET_MODE=none` no holder is built at all**, whether or not
     one was passed, and `RAIL_CENTER_URL` is not read. A pass-through evaluates
@@ -279,10 +289,8 @@ def build_gateway(
     # rather than for the Rail Center variable it also has not been given.
     if not evaluates(resolved_mode):
         bundle_holder = None
-        endpoint_slug = None
     else:
         bundle_holder = holder if holder is not None else _holder_from_environment()
-        endpoint_slug = slug if slug is not None else datasource_slug()
     log.info("%s", describe(resolved_mode))
 
     clean_url, credential_headers = _split_credential(url)
@@ -301,8 +309,6 @@ def build_gateway(
         lifespan=_bundle_lifespan(bundle_holder),
     )
     gateway.add_middleware(_UpstreamErrorBoundary())
-    if bundle_holder is not None and endpoint_slug is not None:
-        gateway.add_middleware(_PolicyVerdict(bundle_holder, endpoint_slug))
 
     # Last, and it has to be: see the module docstring. Both `create_proxy` and
     # `ProxyClient.__init__` set this True, so an assignment above either one is
@@ -450,10 +456,43 @@ def build_app(
     holder: BundleHolder | None = None,
     mode: TicketMode | None = None,
     slug: str | None = None,
+    *,
+    rail_center: tuple[str, dict[str, str]] | None = None,
+    report_transport: httpx.AsyncBaseTransport | None = None,
 ) -> ASGIApp:
-    """The ASGI application uvicorn serves."""
-    return build_gateway(upstream_url, holder, mode, slug).http_app(
-        transport="streamable-http"
+    """The ASGI application uvicorn serves.
+
+    The configuration is resolved **here** and handed down, rather than each
+    layer reading the environment for itself: the holder and the denial reporter
+    both reach Rail Center, and a gateway fetching policy as one identity while
+    reporting denials as another is a state nothing would report.
+
+    `_Enforcement` wraps the MCP application rather than sitting inside it, for
+    the reason its own docstring gives. Under `RAIL_TICKET_MODE=none` there is
+    nothing to wrap it with — no holder, no slug, no walk — and the app is served
+    bare.
+    """
+    resolved_mode = mode if mode is not None else ticket_mode()
+    if not evaluates(resolved_mode):
+        return build_gateway(upstream_url, None, resolved_mode).http_app(
+            transport="streamable-http"
+        )
+
+    resolved_holder = holder if holder is not None else _holder_from_environment()
+    resolved_slug = slug if slug is not None else datasource_slug()
+    url, auth = (
+        rail_center if rail_center is not None else rail_center_from_environment()
+    )
+
+    gateway = build_gateway(upstream_url, resolved_holder, resolved_mode)
+    return _Enforcement(
+        gateway.http_app(transport="streamable-http"),
+        resolved_holder,
+        resolved_slug,
+        blocking=resolved_mode == "enforce",
+        rail_center_url=url,
+        auth=auth,
+        transport=report_transport,
     )
 
 
@@ -483,137 +522,324 @@ def _split_credential(url: str) -> tuple[str, dict[str, str]]:
     )
 
 
-class _PolicyVerdict(Middleware):
-    """Evaluate every call against the held bundle, and act on none of it.
+class _Enforcement:
+    """Judge every MCP call, and answer for the ones that do not pass.
 
-    **This is the whole of what `observe` means, and today `enforce` behaves the
-    same way** — blocking arrives in the change that adds it. Wiring a refusal
-    here now would be an outage bought for no enforcement: nothing downstream
-    reads a verdict, so a request stopped is a request lost for nothing.
+    **An ASGI layer above the MCP server, not a middleware inside it**, and that
+    placement is the reason this is a class rather than a hook. A refusal here is
+    an HTTP status — 403 for a call that was judged and denied, 503 for one that
+    could not be judged at all. Inside FastMCP the same refusal is a JSON-RPC
+    error, which the control plane's denial contract does not describe and an
+    operator cannot read off a status line.
 
-    What it produces is the log line an operator runs a dry run for. A verdict
-    computed and written down is what tells them which calls *would* stop before
-    they turn enforcement on, and it is the only thing this branch owes them.
+    Sitting above costs the parsed message: this is handed bytes and does its own
+    parsing. It buys something worth more than it costs — the raw scope carries
+    **every** `x-rail` value, so a repeated header is visible here as the two
+    values it is, where anything downstream has already collapsed them and
+    destroyed the evidence the contract says to check before reading the value.
 
-    Three failures are answered here rather than left to propagate, because a
-    gateway that forwards nothing is worse than one that enforces nothing:
+    Three outcomes, and only one is a denial:
 
-      * **No bundle held.** The contract's answer is to refuse, and refusing is
-        exactly what this branch does not do yet — so the call is forwarded and
-        the line says the request went unjudged. That is the honest report:
-        `/ready` already says the gateway holds nothing, and inventing a verdict
-        from an absent ruleset would be worse than saying there was none.
-      * **A condition outside the grammar.** `decide` raises where the walk
-        reaches it. Under enforcement that is a 503 and no denial report;
-        here it is logged at error level naming the offending policy, because
-        that line is the signal that Rail Center and this gateway have drifted,
-        which is the actual fault and the only thing that fixes it.
-      * **Anything else.** A defect in the walk must not take the forward path
-        down while the walk decides nothing. It is logged with a traceback and
-        the call proceeds — the one place in this file that catches broadly, and
-        it is defensible only because the verdict is inert.
+      * **A policy matched** — 403, and the denial reported to Rail Center naming
+        the policy that actually matched. Under `observe` the same walk runs and
+        the same verdict is logged, the request is forwarded, and **nothing is
+        reported**: a denial table filled from a mode that is explicitly not
+        enforcing leaves an operator unable to tell which rows stopped traffic.
+      * **Nothing could judge it** — 503 and **no denial report**. No policy
+        decided, so naming one would attribute a verdict nobody reached, and a
+        403 would tell the caller their ticket was judged and rejected when the
+        ruleset could not be applied at all. Two cases: no bundle ever held, and
+        a condition outside this build's grammar. Both are logged at error level
+        naming what could not be read, because that line is the signal that Rail
+        Center and this gateway have drifted.
+      * **Nothing matched** — the body is replayed and the call goes on exactly
+        as it would have.
+
+    All three are answers to a call, which is a POST whose body finished
+    arriving. A request the caller abandoned mid-upload is none of them: it is
+    logged and replayed downstream, and reaches the walk not at all.
     """
 
-    def __init__(self, holder: BundleHolder, slug: str) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        holder: BundleHolder,
+        slug: str,
+        *,
+        blocking: bool,
+        rail_center_url: str,
+        auth: dict[str, str],
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._app = app
         self._holder = holder
         self._slug = slug
+        self._blocking = blocking
+        self._rail_center_url = rail_center_url
+        self._auth = auth
+        self._transport = transport
+        # Strong references to the reports still in flight. A bare `create_task`
+        # is only weakly held by the loop, so a report can be collected
+        # mid-flight and simply never arrive — a missing row with nothing in the
+        # log to say why.
+        self._reports: set[asyncio.Task[Any]] = set()
 
-    async def on_message(self, context, call_next):
-        self._record(context)
-        return await call_next(context)
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or scope.get("method") != "POST":
+            # Only a POST carries a call to judge. `/health`, `/ready` and the
+            # GET that opens the event stream name no endpoint.
+            await self._app(scope, receive, send)
+            return
 
-    def _record(self, context) -> None:
-        """Write down what the walk concluded. Never raises."""
-        resolution = resolve_endpoint_key(
-            getattr(context, "method", None),
-            getattr(getattr(context, "message", None), "name", None),
-            self._slug,
-        )
+        body, replay, complete = await _drained(receive)
+        if not complete:
+            # **A request that never finished arriving is not a call**, so it is
+            # not judged and no denial is reported for it. The bytes that did
+            # arrive do not parse, which resolves `unrecognised` and faces the
+            # whole chain — so judging a fragment attributes a policy denial to
+            # a named agent over a call the ruleset may well allow, and Rail
+            # Center records that attribution without re-deriving it.
+            #
+            # Nothing is answered instead, because there is nobody left to
+            # answer: a body ends short here only when `http.disconnect` arrived,
+            # and uvicorn discards whatever this layer composes once the client
+            # has gone. The log line is the whole of the operator's signal, and
+            # the replay still carries the fragment and the disconnect down to
+            # the app below, which is where an abort has always been visible.
+            log.info(
+                "%s abandoned before its body finished arriving; not judged",
+                safe_for_log(scope.get("path") or "the request"),
+            )
+            await self._app(scope, replay, send)
+            return
+        refusal = self._judge(scope, body)
+        if refusal is not None:
+            await _refuse(send, *refusal)
+            return
+        await self._app(scope, replay, send)
+
+    def _judge(self, scope, body: bytes) -> tuple[int, str] | None:
+        """The status and reason to answer with, or None to let the call pass.
+
+        Never raises. A defect in the walk must not take the forward path down:
+        an unforeseen exception is logged with its traceback and the request
+        proceeds, which is the same trade `_UpstreamErrorBoundary` makes — a
+        gateway that forwards nothing is worse than one that enforces nothing.
+        """
+        resolution = resolve_from_body(body, self._slug)
+        named = safe_for_log(resolution.key or resolution.status)
+        ticket = parse_rail_header(_x_rail_values(scope))
+
         bundle = self._holder.current()
         if bundle is None:
-            log.warning(
-                "no policy bundle held — forwarding %s unjudged",
-                safe_for_log(resolution.key or resolution.status),
-            )
-            return
-
-        request = ConditionInput(
-            ticket=parse_rail_header(_x_rail_header()),
-            endpoint_key=resolution.key,
-        )
-        try:
-            verdict = decide(bundle, request)
-        except UninterpretableCondition as refusal:
             log.error(
-                "refusing to judge %s — %s; Rail Center and this gateway have "
-                "drifted, and the request was forwarded because this build "
-                "enforces nothing",
-                safe_for_log(resolution.key or resolution.status),
+                "no policy bundle held — %s went unjudged and was %s",
+                named,
+                "refused" if self._blocking else "forwarded",
+            )
+            return (503, "policy ruleset cannot be applied") if self._blocking else None
+
+        try:
+            decision = decide(
+                bundle,
+                ConditionInput(ticket=ticket, endpoint_key=resolution.key),
+                # `resolution.key` is None for both keyless outcomes, and only
+                # one of them earns the narrowing: a message that names no tool
+                # by design has no subject for an endpoint-derived rule, while
+                # an `unrecognised` `tools/call` named one this gateway declined
+                # to compose a key for and faces the whole chain.
+                keyless=resolution.status == "keyless",
+            )
+        except UninterpretableCondition as refusal:
+            # The policy is named because disabling it is the remedy the
+            # contract states, and an operator holding two rules with the same
+            # unreadable condition cannot act on the field name alone.
+            log.error(
+                "refusing to judge %s — policy %s: %s; Rail Center and this "
+                "gateway have drifted",
+                named,
+                safe_for_log(refusal.policy_id),
                 refusal.reason,
             )
-            return
+            return (503, "policy ruleset cannot be applied") if self._blocking else None
         except Exception:
-            log.exception(
-                "policy evaluation raised for %s; the request was forwarded",
-                safe_for_log(resolution.key or resolution.status),
-            )
-            return
+            log.exception("policy evaluation raised for %s; forwarding", named)
+            return None
 
-        for alert in verdict.alerts:
+        for alert in decision.alerts:
+            log.warning("policy %s alerts on %s", safe_for_log(alert.id), named)
+
+        if decision.allowed:
+            log.info("allow %s (ticket %s)", named, ticket.state)
+            return None
+
+        # `denied_by` is the policy that **matched**. Reporting the chain's first
+        # rule instead produces a record that is wrong and that nothing
+        # downstream will contradict: Rail Center records this attribution and
+        # does not re-derive it.
+        policy = decision.denied_by
+        if policy is None:  # pragma: no cover - `allowed` is False iff this is set
+            log.error("denied %s with no policy named; forwarding", named)
+            return None
+
+        if not self._blocking:
             log.warning(
-                "policy %s alerts on %s",
-                safe_for_log(alert.id),
-                safe_for_log(resolution.key or resolution.status),
+                "would deny %s by policy %s (ticket %s) — this mode enforces "
+                "nothing, so the request was forwarded",
+                named,
+                safe_for_log(policy.id),
+                ticket.state,
             )
-        if verdict.allowed:
-            log.info(
-                "allow %s (ticket %s)",
-                safe_for_log(resolution.key or resolution.status),
-                request.ticket.state,
-            )
-            return
-        # The policy that *actually matched*, never the first in the chain: this
-        # id is what a denial report will name once one is sent, and an operator
-        # reading a rule that did not decide has no second opinion to correct it.
+            return None
+
         log.warning(
-            "would deny %s by policy %s (ticket %s) — this build enforces "
-            "nothing, so the request was forwarded",
-            safe_for_log(resolution.key or resolution.status),
-            safe_for_log(verdict.denied_by.id if verdict.denied_by else None),
-            request.ticket.state,
+            "denied %s by policy %s (ticket %s)",
+            named,
+            safe_for_log(policy.id),
+            ticket.state,
         )
+        self._send_report(scope, resolution, ticket, policy)
+        # **The policy id does not go back to the caller.** The `x-rail` ticket
+        # is unsigned and this gateway is the only thing in front of the
+        # upstream, so a caller that reads which id stopped each attempt can
+        # vary its claims and binary-search the tenant's chain and its
+        # thresholds. The operator's side of that trade is paid twice already —
+        # the log line above names the policy, and so does the report to Rail
+        # Center — both on the trusted side of the boundary.
+        return 403, "denied by policy"
+
+    def _send_report(self, scope, resolution, ticket, policy) -> None:
+        """Report the denial without the caller waiting for it.
+
+        Fire-and-forget: the caller has already been refused, so awaiting this
+        would put Rail Center's availability into how long a denied request
+        takes, and a failed report would look like a failed refusal.
+        """
+        claims = ticket.token or {}
+        body = build_report(
+            policy_id=policy.id,
+            datasource_slug=self._slug,
+            endpoint_key=resolution.key,
+            endpoint_status=resolution.status,
+            ticket_state=ticket.state,
+            agent_id=claims.get("agent_id"),
+            posture_score=claims.get("posture_score"),
+            claimed_status=_claimed_status(scope),
+        )
+        task = asyncio.create_task(
+            report(self._rail_center_url, body, self._auth, transport=self._transport)
+        )
+        self._reports.add(task)
+        task.add_done_callback(self._reports.discard)
 
 
-def _x_rail_header() -> list[str] | None:
-    """Every `x-rail` value on the request, or None when there is no request.
+async def _drained(receive):
+    """The request body, a `receive` that hands it over once more, and whether
+    the body finished arriving.
 
-    **`getlist`, and it has to be.** The contract refuses a repeated `x-rail`
-    outright and says why the check cannot be deferred: by the time a platform
-    has collapsed two values into one the evidence is gone. Both of the obvious
-    routes here lose it — `get_http_headers()` returns a `dict[str, str]`, and
-    Starlette's `Headers.get` returns the *first* value, which decodes normally.
-    Either would admit a ticket an attacker chose by sending the header twice,
-    while Node's header handling joins the pair into `"AAA, BBB"` and refuses
-    it. That is two conformant-looking implementations reaching opposite
-    verdicts on input the caller fully controls.
+    An ASGI body is a stream that can be read once, so a layer that looks at it
+    has to put it back for whatever runs next. What the replay hands over is
+    what this actually received, in the order it arrived; everything past it
+    falls through to the original `receive`.
 
-    `parse_rail_header` takes the list and classifies a repeat as
-    `undecodable`, so the whole of this function's job is not to flatten it.
+    **A disconnect is not the end of a body.** `http.disconnect` carries neither
+    `body` nor `more_body`, so reading it as the last chunk would end the drain
+    on a body that never finished arriving and then present that fragment
+    downstream as a complete request — while swallowing the disconnect itself,
+    which is the one message telling the app below the caller is gone. It ends
+    the drain here too, because nothing further is coming, but it is replayed as
+    the disconnect it is and the truncated fragment keeps its `more_body: True`.
 
-    A message with no HTTP request behind it — an in-process transport, a test —
-    has no header to read, and no ticket is exactly what `absent` means.
+    That disconnect is also the one exit from this drain that returns less than
+    the caller meant to send, so the third value is what a reader above needs to
+    tell a request from a fragment of one — and it says nothing to anyone who
+    does not ask, which is how a fragment came to be judged as a call.
     """
-    try:
-        request = get_http_request()
-    except RuntimeError:
-        # Documented: "No active HTTP request found." Narrow on purpose — a
-        # blind except here would swallow a defect in the accessor and report
-        # it as an absent ticket, which denies rather than admits but hides the
-        # fault either way.
-        return None
-    # `[]` for a header that was never sent, which `parse_rail_header` reads as
-    # absent exactly as it reads None.
-    return request.headers.getlist("x-rail") or None
+    chunks: list[bytes] = []
+    disconnected = False
+    more = True
+    while more:
+        message = await receive()
+        if message.get("type") == "http.disconnect":
+            disconnected = True
+            break
+        chunks.append(message.get("body", b""))
+        more = message.get("more_body", False)
+    body = b"".join(chunks)
+
+    pending: list[dict[str, Any]] = []
+    if not disconnected:
+        pending.append({"type": "http.request", "body": body, "more_body": False})
+    else:
+        if chunks:
+            pending.append({"type": "http.request", "body": body, "more_body": True})
+        pending.append({"type": "http.disconnect"})
+
+    async def replay():
+        if pending:
+            return pending.pop(0)
+        return await receive()
+
+    return body, replay, not disconnected
+
+
+async def _refuse(send, status: int, reason: str) -> None:
+    """Answer the caller directly, without the MCP server seeing the request."""
+    payload = json.dumps({"error": reason}).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(payload)).encode()),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": payload})
+
+
+def _x_rail_values(scope) -> list[str] | None:
+    """Every `x-rail` value on the request, or None when there are none.
+
+    **Every one, and that is the point.** The contract refuses a repeated
+    `x-rail` outright and says the check cannot be deferred: once a platform has
+    collapsed two values into one the evidence is gone. Reading the raw scope is
+    what makes that impossible to lose — a header dict or Starlette's
+    `Headers.get` would each hand back a single value, admitting a ticket an
+    attacker chose by sending the header twice.
+
+    Latin-1 because that is how a header's bytes map to `str` on this side. The
+    ticket's own decoding is `parse_rail_header`'s, and is strict UTF-8 over the
+    base64 it decodes.
+    """
+    found = [v.decode("latin-1") for k, v in scope.get("headers", ()) if k == b"x-rail"]
+    return found or None
+
+
+def _claimed_status(scope) -> str | None:
+    """What the caller said about why it sent no ticket, if it said anything.
+
+    Recorded, never believed, and never near the field an operator reads as the
+    verdict. A repeated header is dropped the way a repeated ticket is refused:
+    two claims are not a claim.
+
+    **Rendered through `safe_for_log`, because this is the last place a bound
+    can be applied.** The value is a caller-chosen header that travels into a
+    denial report's `metadata`, which Rail Center bounds only for the two keys
+    it lifts out and otherwise stores free-form with no request-size limit in
+    front of it. The caller chooses when a denial happens — send no ticket — so
+    an unbounded write is on demand, and the vocabulary this header carries is
+    three short words: past `MAX_LOGGED_LENGTH` the value is a payload rather
+    than a claim, and a control character in it is a forgery aimed at whatever
+    renders the row.
+    """
+    found = [
+        v.decode("latin-1")
+        for k, v in scope.get("headers", ())
+        if k == b"x-rail-status"
+    ]
+    return safe_for_log(found[0]) if len(found) == 1 else None
 
 
 class _UpstreamErrorBoundary(Middleware):

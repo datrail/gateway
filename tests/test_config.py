@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from gateway.auth import AuthConfigurationError
-from gateway.mode import TicketModeError, ticket_mode
+from gateway.mode import TICKET_MODES, TicketModeError, describe, ticket_mode
 from gateway.server import (
     DEFAULT_PORT,
     _holder_from_environment,
@@ -357,3 +357,60 @@ def test_a_refused_ticket_mode_names_what_the_operator_wrote(monkeypatch):
     monkeypatch.setenv("RAIL_TICKET_MODE", "Enforcing")
     with pytest.raises(TicketModeError, match="Enforcing"):
         ticket_mode()
+
+
+# --- the startup line each mode writes -------------------------------------
+#
+# `build_gateway` writes `describe(resolved_mode)` at INFO on every start, and
+# `mode.py` states what that line is for: an operator is told what this mode
+# does to traffic rather than discovering it from a request that was refused.
+# The one test that sees the banner — `test_readiness.py`'s control-plane-down
+# case — filters it out by `RAIL_TICKET_MODE=` prefix before asserting, so what
+# the line says has to be pinned here or nowhere.
+
+
+@pytest.mark.parametrize("mode", TICKET_MODES)
+def test_each_startup_line_names_the_mode_it_describes(mode):
+    """A line naming the wrong mode is worse than no line: it is the log an
+    operator checks *instead of* sending a request."""
+    assert describe(mode).startswith(f"RAIL_TICKET_MODE={mode} — ")
+
+
+def test_the_three_startup_lines_do_not_repeat_each_other():
+    """Three modes, three answers about traffic. A line shared between two of
+    them is one of the two lying, and nothing else in the log corrects it."""
+    assert len({describe(mode) for mode in TICKET_MODES}) == len(TICKET_MODES)
+
+
+def test_the_enforce_line_says_the_traffic_it_refuses():
+    """`enforce` is the default, so this is the line every unconfigured
+    deployment writes, on a build that answers 403 and 503. Both refusals are
+    named, and the claim this line used to carry — that enforcement is not
+    implemented and the mode behaves as observe — may not come back."""
+    line = describe("enforce")
+
+    assert "403" in line and "503" in line
+    assert "reported to Rail Center" in line
+    assert "nothing is blocked" not in line
+    assert "not implemented" not in line
+
+
+def test_the_observe_line_says_nothing_is_blocked():
+    """The half of the pair that must stay true of `observe` alone: it
+    evaluates and logs, and no request is refused for it."""
+    line = describe("observe")
+
+    assert "nothing is blocked" in line
+    assert "403" not in line and "503" not in line
+    assert "refus" not in line
+
+
+def test_the_none_line_says_nothing_is_evaluated():
+    """`none` is a pass-through, and the second half matters as much: a gateway
+    that will never read a bundle does not poll for one, and an operator
+    debugging a control plane it is not talking to needs to know that here."""
+    line = describe("none")
+
+    assert "forwards every request" in line
+    assert "no policy bundle is fetched" in line
+    assert "403" not in line and "503" not in line

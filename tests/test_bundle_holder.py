@@ -222,20 +222,46 @@ async def test_an_unusable_first_bundle_claims_no_refusal_in_the_log(
 ) -> None:
     """The twin of the unreachable line, and the one the suite never reached.
 
-    An unreachable control plane is driven by the readiness suite, which
-    asserts nothing there claims a refusal; nothing drove the *unusable* path,
-    where the second of these two lines lives. What is true of both is that
-    the gateway holding no bundle forwards the request anyway — so an operator
-    reading a claim of refused traffic hunts refusals that never happened
-    while every call goes through unjudged. The bundle is refused; traffic is
-    not, and only one of those two words may appear.
+    An unreachable control plane is driven by the readiness suite; nothing
+    drove the *unusable* path, where the second of these two lines lives. What
+    both may say is that no bundle is held. What neither may say is what that
+    does to traffic: the holder has no mode, and the answer is opposite in the
+    two it could be running under — every request refused under `enforce`,
+    every request forwarded unjudged under `observe`. The line an operator
+    reaches for to tell those apart is `_judge`'s, not this one.
     """
     h = holder(httpx.Response(200, json=bundle("v1", policies="not a list")))
     with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
         await h.refresh()
 
     said = "\n".join(r.getMessage() for r in caplog.records)
-    assert "no bundle held, so nothing is enforced" in said, said
+    assert "no bundle held" in said, said
+    assert "nothing is enforced" not in said, said
+    assert "refusing traffic" not in said, said
+
+
+@pytest.mark.asyncio
+async def test_a_failed_first_fetch_claims_no_refusal_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of the same rule, and the half an operator meets more often.
+
+    A control plane that is briefly down at startup is the ordinary way to end
+    up holding nothing, so this is the line most deployments read. The one test
+    that reaches this path — `test_readiness.py`'s
+    `test_a_control_plane_that_is_down_does_not_stop_the_gateway_starting` —
+    asks only that no line about the bundle contains `refus`, which a claim that
+    nothing is enforced satisfies while being the exact inversion of what an
+    `enforce` gateway does. Same rule as the twin above: the line may say no
+    bundle is held, and may not say what that does to traffic.
+    """
+    h = holder(httpx.Response(503))
+    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "no bundle held" in said, said
+    assert "nothing is enforced" not in said, said
     assert "refusing traffic" not in said, said
 
 

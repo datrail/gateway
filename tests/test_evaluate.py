@@ -27,7 +27,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
 from gateway.server import build_app
-from tests.conftest import SLUG, _free_port, holder_serving, serve
+from tests.conftest import RAIL_CENTER, SLUG, _free_port, holder_serving, serve
 
 #: A chain with one rule of each action, so a single bundle exercises deny,
 #: alert and allow depending on the ticket presented.
@@ -92,7 +92,9 @@ def evaluating(upstream):
     @asynccontextmanager
     async def start(bundle=BUNDLE, mode="observe"):
         port = _free_port()
-        app = build_app(upstream, serving(bundle), mode=mode, slug=SLUG)
+        app = build_app(
+            upstream, serving(bundle), mode=mode, slug=SLUG, rail_center=RAIL_CENTER
+        )
         async with serve(app, port):
             yield f"http://127.0.0.1:{port}"
 
@@ -278,7 +280,7 @@ async def test_none_evaluates_nothing_and_is_ready_without_a_bundle(upstream, ca
         # Built inside the capture: the mode's startup line is written by
         # `build_gateway`, so building it first would emit the one line this
         # case is about before anything was listening.
-        app = build_app(upstream, mode="none", slug=SLUG)
+        app = build_app(upstream, mode="none", slug=SLUG, rail_center=RAIL_CENTER)
         async with serve(app, port):
             url = f"http://127.0.0.1:{port}"
             async with httpx.AsyncClient() as client:

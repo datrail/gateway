@@ -67,6 +67,13 @@ class UninterpretableCondition(Exception):
     def __init__(self, reason: str) -> None:
         super().__init__(f"uninterpretable condition: {reason}")
         self.reason = reason
+        #: The policy whose condition could not be read. Attached by the walk
+        #: rather than passed in here, because `holds` is handed a condition
+        #: and never the policy carrying it — and the contract requires the
+        #: refusal to be logged "naming the offending policy where there is
+        #: one", disabling that policy being the remedy it names. None only
+        #: where something outside the walk raised this.
+        self.policy_id: str | None = None
 
 
 def _q(value: object) -> str:
@@ -112,6 +119,43 @@ FIELD_OPERATORS: Final[dict[str, frozenset[str]]] = {
     ),
     "skills": frozenset({"missing", "present", "contains"}),
 }
+
+
+#: The two fields derived from the endpoint being called, rather than from the
+#: ticket or from the request's existence.
+#:
+#: A message that names no tool — `initialize`, `tools/list`, a notification —
+#: has no endpoint for either to describe, so a rule keyed on one of them asks a
+#: question with no subject. `decide.chain_for` drops such a rule from a keyless
+#: message's chain rather than letting it resolve to absent, because absent is
+#: the answer that makes ``skill_match missing`` **hold** — and a chain
+#: containing "deny an agent without a matching skill" would then deny every
+#: handshake, for an agent whose declared skills are exactly right, before it
+#: could call anything at all.
+#:
+#: **Both implementations have to agree on this**, or the two sides differ on
+#: precisely the messages a session opens with. The evaluation contract takes no
+#: position on a call that names no endpoint; this is the position, and Rail
+#: Center's evaluator needs the same one.
+ENDPOINT_DERIVED_FIELDS: Final[frozenset[str]] = frozenset(
+    {"endpoint_key", "skill_match"}
+)
+
+
+def keys_on_endpoint(condition: Any) -> bool:
+    """Whether `condition` asks about the endpoint being called.
+
+    False for anything this cannot read as such a condition — a non-object, a
+    non-string field, a field outside the grammar. That is deliberate: a policy
+    whose condition is uninterpretable stays in the chain and refuses the
+    request where the walk reaches it, exactly as it would for a call that named
+    a tool. Dropping it here would turn the contract's most emphasised rule off
+    for every keyless message.
+    """
+    return (
+        isinstance(condition, dict)
+        and condition.get("field") in ENDPOINT_DERIVED_FIELDS
+    )
 
 
 @dataclass(frozen=True)

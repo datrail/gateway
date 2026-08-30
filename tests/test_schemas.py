@@ -14,11 +14,22 @@ from typing import Any
 
 import pytest
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
+
+from gateway.denial import build_report
+
+AGENT = "550e8400-e29b-41d4-a716-446655440000"
+POLICY = "11111111-0000-4000-8000-000000000001"
+DATASOURCE = "22222222-0000-4000-8000-000000000002"
 
 SCHEMAS = Path(__file__).parent.parent / "schemas"
 VECTORS = Path(__file__).parent / "vectors"
 
-NAMES = ["x-rail-ticket.schema.json", "policy-bundle.schema.json"]
+NAMES = [
+    "x-rail-ticket.schema.json",
+    "policy-bundle.schema.json",
+    "denial-event.schema.json",
+]
 
 
 def _schema(name: str) -> dict[str, Any]:
@@ -306,3 +317,192 @@ def test_the_ticket_schema_refuses_what_its_descriptions_state() -> None:
     assert not validator.is_valid({**good, "tier": 80})
     # Unrecognised keys travel through, so adding one is not a flag day.
     assert validator.is_valid({**good, "signed_by": "wave-2"})
+
+
+def test_the_denial_schema_describes_what_this_gateway_actually_sends() -> None:
+    """The schema and the reporter, checked against each other.
+
+    A published schema that the component's own output violates is worse than
+    none: it is a contract a third implementation builds against while the
+    reference implementation ignores it. `build_report` is what goes on the
+    wire, so it is what the schema has to accept — and the case with no
+    endpoint key is carried because a null there is the shape a keyless refusal
+    takes, which is the one an operator sees on a handshake.
+    """
+    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    for endpoint_key, status, claims in [
+        (
+            "delivery.track_package",
+            "resolved",
+            {"agent_id": AGENT, "posture_score": 12},
+        ),
+        (None, "keyless", {}),
+        (None, "unrecognised", {"posture_score": 0}),
+    ]:
+        validator.validate(
+            build_report(
+                policy_id=POLICY,
+                datasource_slug="delivery",
+                endpoint_key=endpoint_key,
+                endpoint_status=status,
+                ticket_state="valid",
+                claimed_status="not-found",
+                **claims,
+            )
+        )
+
+
+def test_the_denial_schema_refuses_a_report_naming_no_policy() -> None:
+    """`policy_id` is what makes a report an attribution rather than a note.
+
+    Rail Center records the attribution and does not re-derive it, so a report
+    that names no policy has nothing downstream to supply one.
+    """
+    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    body = build_report(
+        policy_id=POLICY,
+        datasource_slug="delivery",
+        endpoint_key="delivery.track_package",
+        endpoint_status="resolved",
+        ticket_state="valid",
+    )
+    del body["policy_id"]
+    with pytest.raises(ValidationError):
+        validator.validate(body)
+
+
+def test_the_denial_schema_refuses_a_status_this_gateway_cannot_report() -> None:
+    """`metadata["x-rail-status"]` is the enforcement point's own verdict, and
+    the five ticket states are the whole of what it can be. A proxy's claimed
+    vocabulary — `not-found`, `issuer-unreachable` — belongs in the `claimed`
+    key, and putting it here would be forgeable text where an operator reads
+    the decision."""
+    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    body = build_report(
+        policy_id=POLICY,
+        datasource_slug="delivery",
+        endpoint_key="delivery.track_package",
+        endpoint_status="resolved",
+        ticket_state="valid",
+    )
+    body["metadata"]["x-rail-status"] = "not-found"
+    with pytest.raises(ValidationError):
+        validator.validate(body)
+
+
+def _denial(**claims: Any) -> dict[str, Any]:
+    """One report this gateway would actually send, to mutate field by field."""
+    return build_report(
+        policy_id=POLICY,
+        datasource_slug="delivery",
+        endpoint_key="delivery.track_package",
+        endpoint_status="resolved",
+        ticket_state="valid",
+        **claims,
+    )
+
+
+def test_the_denial_schema_requires_exactly_one_data_source() -> None:
+    """Naming neither data source, or both, is refused.
+
+    This is the rule the comparison against the receiver existed to find, and
+    the one a schema is least likely to carry by accident: `DenialEventRequest`
+    answers both bodies with `name the data source by datasource_slug or by
+    datasource_id`, so a schema admitting either would publish a body the route
+    422s — and on this route a 422 is a denial not recorded at all.
+    """
+    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    by_slug = _denial()
+    assert validator.is_valid(by_slug)
+    assert not validator.is_valid({**by_slug, "datasource_id": DATASOURCE})
+    neither = {k: v for k, v in by_slug.items() if k != "datasource_slug"}
+    assert not validator.is_valid(neither)
+    # The other half of "exactly one": by row id alone is a conformant report.
+    assert validator.is_valid({**neither, "datasource_id": DATASOURCE})
+
+
+def test_the_denial_schema_refuses_a_uuid_spelling_the_receiver_refuses() -> None:
+    """A uuid field admits the four spellings the receiver reads and no others.
+
+    `agent_id` off an unsigned ticket is caller-chosen, so a schema whose uuid
+    pattern admitted `agent-42` would publish the shape that costs the row.
+    """
+    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    body = _denial(agent_id=AGENT)
+    assert validator.is_valid(body)
+    for spelling in (
+        AGENT,
+        "{550e8400-e29b-41d4-a716-446655440000}",
+        "urn:uuid:550e8400-e29b-41d4-a716-446655440000",
+        "550e8400e29b41d4a716446655440000",
+    ):
+        assert validator.is_valid({**body, "agent_id": spelling}), spelling
+    for claimed in ("agent-42", "", "550e8400-e29b-41d4-a716-44665544000", 42):
+        assert not validator.is_valid({**body, "agent_id": claimed}), claimed
+    # Omitting the claim is how a malformed one is dropped; null is the same.
+    assert validator.is_valid({**body, "agent_id": None})
+    # The same `$defs/uuid` holds the two fields that are not claims.
+    assert not validator.is_valid({**body, "policy_id": "policy-1"})
+    assert not validator.is_valid({**_denial(), "datasource_id": "delivery"})
+
+
+def test_the_denial_schema_requires_the_instant_the_receiver_requires() -> None:
+    """`denied_at` is required, not merely described.
+
+    The receiver 422s a body that carries no timestamp, and a denial's time is
+    what an operator correlates everything else against.
+    """
+    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    body = _denial()
+    assert validator.is_valid(body)
+    assert not validator.is_valid({k: v for k, v in body.items() if k != "denied_at"})
+    assert not validator.is_valid({**body, "denied_at": None})
+
+
+def test_the_denial_schema_keeps_posture_score_a_number() -> None:
+    """The one latitude this file calls out as deliberately not taken.
+
+    The receiver also coerces a numeric string; the schema does not, because a
+    conformant reporter sends the number. That strictness is a decision the
+    file states, so it is a decision worth a test — describing the coercion
+    would document a latitude rather than the contract.
+    """
+    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    body = _denial(posture_score=12)
+    assert validator.is_valid(body)
+    assert validator.is_valid({**body, "posture_score": None})
+    assert not validator.is_valid({**body, "posture_score": "12"})
+    assert not validator.is_valid({**body, "posture_score": True})
+
+
+def test_the_denial_schema_holds_the_slug_shape_the_receiver_enforces() -> None:
+    """`datasource_slug` is a slug, bounded, not a bare string.
+
+    The receiver refuses the empty string, anything past 64 characters, and
+    anything outside the slug alphabet, each with the whole body.
+    """
+    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    body = _denial()
+    assert validator.is_valid({**body, "datasource_slug": "d" * 64})
+    for slug in ("", "d" * 65, "deliv ery", "delivery.eu", 42):
+        assert not validator.is_valid({**body, "datasource_slug": slug}), slug
+
+
+def test_the_denial_schema_bounds_the_idempotency_key_the_receiver_bounds() -> None:
+    """255 characters, which is the receiver's number and not this file's.
+
+    `IDEMPOTENCY_KEY_MAX_LENGTH` bounds the field `DenialEventRequest`
+    declares, and a longer key is 422'd with the whole body — so a reporter
+    minting a request-id-shaped key against an unbounded schema loses every
+    denial silently. This gateway never sets the field, which is exactly why
+    the bound has to be published here: this file is the only place it is
+    stated, and the only place its absence would show.
+    """
+    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    body = _denial()
+    assert validator.is_valid({**body, "idempotency_key": "k" * 255})
+    # Omitting it is the ordinary case, and a null says the same thing.
+    assert validator.is_valid(body)
+    assert validator.is_valid({**body, "idempotency_key": None})
+    for key in ("k" * 256, "k" * 4096, 42):
+        assert not validator.is_valid({**body, "idempotency_key": key}), key
