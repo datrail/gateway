@@ -72,7 +72,7 @@ async def test_a_gateway_holding_no_bundle_is_not_ready():
     """`None` from `current()` is no ruleset, and there is nothing else it can
     honestly be reported as. 503, because the status code is the part every
     orchestrator reads without being taught to."""
-    app = build_app(UPSTREAM, holder_serving(unreachable))
+    app = build_app(UPSTREAM, holder_serving(unreachable), slug="delivery")
 
     async with running(app) as client:
         response = await client.get("/ready")
@@ -83,7 +83,7 @@ async def test_a_gateway_holding_no_bundle_is_not_ready():
 
 @pytest.mark.asyncio
 async def test_a_gateway_holding_a_bundle_is_ready():
-    app = build_app(UPSTREAM, holder_serving(serving_a_bundle))
+    app = build_app(UPSTREAM, holder_serving(serving_a_bundle), slug="delivery")
 
     async with running(app) as client:
         response = await client.get("/ready")
@@ -97,7 +97,7 @@ async def test_the_report_does_not_carry_the_version_held():
     """The route is unauthenticated and shares a port with the MCP surface, so
     a version in the body is a public feed of when a customer's policy changed.
     The operator use it would serve is already served by the log line."""
-    app = build_app(UPSTREAM, holder_serving(serving_a_bundle))
+    app = build_app(UPSTREAM, holder_serving(serving_a_bundle), slug="delivery")
 
     async with running(app) as client:
         body = (await client.get("/ready")).text
@@ -112,7 +112,7 @@ async def test_readiness_is_read_at_the_request_and_not_cached_at_startup():
     tests above and fails this one, which is the whole reason it is here."""
     answer = unreachable
     holder = holder_serving(lambda: answer())
-    app = build_app(UPSTREAM, holder)
+    app = build_app(UPSTREAM, holder, slug="delivery")
 
     async with running(app) as client:
         assert (await client.get("/ready")).status_code == 503
@@ -131,7 +131,7 @@ async def test_a_failed_refresh_does_not_take_readiness_away():
     everything it needs."""
     answer = serving_a_bundle
     holder = holder_serving(lambda: answer())
-    app = build_app(UPSTREAM, holder)
+    app = build_app(UPSTREAM, holder, slug="delivery")
 
     async with running(app) as client:
         assert (await client.get("/ready")).status_code == 200
@@ -152,7 +152,7 @@ async def test_a_bundle_that_will_not_validate_leaves_the_gateway_unready():
     def missing_its_policies() -> httpx.Response:
         return httpx.Response(200, json={"version": "v1"})
 
-    app = build_app(UPSTREAM, holder_serving(missing_its_policies))
+    app = build_app(UPSTREAM, holder_serving(missing_its_policies), slug="delivery")
 
     async with running(app) as client:
         assert (await client.get("/ready")).status_code == 503
@@ -168,7 +168,7 @@ async def test_a_bundle_that_will_not_validate_leaves_the_gateway_unready():
 )
 async def test_liveness_is_the_same_answer_either_way(label, answer):
     """The one assertion that stops `/health` from acquiring a second job."""
-    app = build_app(UPSTREAM, holder_serving(answer))
+    app = build_app(UPSTREAM, holder_serving(answer), slug="delivery")
 
     async with running(app) as client:
         response = await client.get("/health")
@@ -220,7 +220,7 @@ async def test_the_holder_starts_and_stops_with_the_application():
         await resume.wait()
         resume.clear()
 
-    app = build_app(UPSTREAM, holder_serving(answer, sleep=sleep))
+    app = build_app(UPSTREAM, holder_serving(answer, sleep=sleep), slug="delivery")
 
     async with running(app):
         assert fetches == 1, "the lifespan did not fetch on startup"
@@ -240,7 +240,7 @@ async def test_a_control_plane_that_is_down_does_not_stop_the_gateway_starting(
     gateway that never comes up. It starts, serves, says so once at WARNING —
     the difference between starting and stuck, which the one bit on `/ready`
     cannot carry — and keeps trying."""
-    app = build_app(UPSTREAM, holder_serving(unreachable))
+    app = build_app(UPSTREAM, holder_serving(unreachable), slug="delivery")
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
         async with running(app) as client:
@@ -262,7 +262,7 @@ async def test_a_control_plane_that_is_down_does_not_stop_the_gateway_starting(
 async def test_a_gateway_that_starts_ready_says_nothing_about_it(caplog):
     """The warning above is the abnormal case and has to stay that way, or an
     operator filtering for it finds it on every healthy start too."""
-    app = build_app(UPSTREAM, holder_serving(serving_a_bundle))
+    app = build_app(UPSTREAM, holder_serving(serving_a_bundle), slug="delivery")
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
         async with running(app) as client:
@@ -300,7 +300,7 @@ async def test_the_first_fetch_does_not_hold_the_process_off_the_socket(
     )
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
-        async with running(build_app(UPSTREAM, holder)) as client:
+        async with running(build_app(UPSTREAM, holder, slug="delivery")) as client:
             assert (await client.get("/health")).status_code == 200
             assert (await client.get("/ready")).status_code == 503
 
@@ -327,7 +327,7 @@ async def test_a_start_that_raises_stops_the_process_coming_up():
     )
 
     with pytest.raises(RuntimeError, match="refused to start"):
-        async with running(build_app(UPSTREAM, holder)):
+        async with running(build_app(UPSTREAM, holder, slug="delivery")):
             raise AssertionError("the app was not meant to start")
 
 
@@ -337,7 +337,7 @@ async def test_the_unready_warning_carries_why_and_not_only_that(caplog):
     half that separates a gateway that is starting from one that is stuck. A
     line naming only the kind sends an operator to look for a control plane
     that is down when what happened was a control plane that answered."""
-    app = build_app(UPSTREAM, holder_serving(unreachable))
+    app = build_app(UPSTREAM, holder_serving(unreachable), slug="delivery")
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
         async with running(app):

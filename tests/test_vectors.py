@@ -12,6 +12,7 @@ broke rather than the file that holds it.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import json
 from pathlib import Path
@@ -19,6 +20,8 @@ from typing import Any
 
 import pytest
 
+from gateway.bundle.conditions import ConditionInput, UninterpretableCondition
+from gateway.bundle.decide import decide
 from gateway.bundle.validate import Binding, UnusableBundle, validate_bundle
 from gateway.key_safety import has_unsafe_key_characters
 from gateway.ticket import parse_rail_header
@@ -290,3 +293,137 @@ def test_the_bundle_file_is_worth_running() -> None:
     # would pass while it accepted everything.
     assert sum(1 for c in BUNDLE_CASES if c["usable"]) >= 20
     assert sum(1 for c in BUNDLE_CASES if not c["usable"]) >= 45
+
+
+DECIDE_CASES = _load("decide.json")
+
+#: The policy a *condition* case is walked behind: one enabled `block` rule at
+#: priority 1, so the decision reads straight back as whether the condition
+#: held. Walking it rather than calling `holds` is what makes these vectors
+#: rather than unit tests of a private function — a reimplementation answerable
+#: to this file need not have a function of that name at all.
+CONDITION_POLICY_ID = "5c8f1e42-0000-4000-8000-0000000c04de"
+
+CONDITION_BUNDLE_VERSION = "v-decide-condition"
+
+
+def _encoded(claims: dict[str, Any]) -> str:
+    """`claims` as the mint emits them: base64url(JSON), unpadded."""
+    raw = json.dumps(claims, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decide_request(case: dict[str, Any]) -> ConditionInput:
+    """The request a case describes.
+
+    `header` is passed through unchanged and `claims` is encoded here, which is
+    the split the contract draws: a case that lets the harness encode its own
+    payload cannot detect a disagreement about decoding, so anything about the
+    header's own bytes has to be a literal.
+    """
+    header = case["header"] if "header" in case else _encoded(case["claims"])
+    return ConditionInput(
+        ticket=parse_rail_header(header, case["now"]),
+        endpoint_key=case["endpoint_key"],
+    )
+
+
+def _decide_bundle(case: dict[str, Any]) -> dict[str, Any]:
+    if "bundle" in case:
+        return case["bundle"]
+    return {
+        "version": CONDITION_BUNDLE_VERSION,
+        "policies": [
+            {
+                "id": CONDITION_POLICY_ID,
+                "name": "the condition under test",
+                "priority": 1,
+                "condition": case["condition"],
+                "action": "block",
+                "enabled": True,
+            }
+        ],
+        "bindings": [],
+        "rejected": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "case", DECIDE_CASES, ids=[case["name"] for case in DECIDE_CASES]
+)
+def test_decide_vector(case: dict[str, Any]) -> None:
+    bundle = validate_bundle(_decide_bundle(case))
+    request = _decide_request(case)
+
+    # Where a case says what the header must classify as, that is checked before
+    # the decision. A case whose ticket read differently from what it describes
+    # would still reach the right verdict for the wrong reason.
+    if "ticket_state" in case:
+        assert request.ticket.state == case["ticket_state"]
+
+    if "refusal" in case:
+        # **The kind is asserted, not merely that something was raised.** A
+        # runner asking only "did it throw?" scores a crash as conformant, and a
+        # crash is the one outcome the contract rules out everywhere: an
+        # exception where a decision belongs is neither an allow nor a deny.
+        assert case["refusal"] == "uninterpretable_condition"
+        with pytest.raises(UninterpretableCondition):
+            decide(bundle, request)
+        return
+
+    verdict = decide(bundle, request)
+    denied_by = verdict.denied_by.id if verdict.denied_by else None
+
+    if "holds" in case:
+        assert verdict.allowed is not case["holds"]
+        assert denied_by == (CONDITION_POLICY_ID if case["holds"] else None)
+        # The one policy in the chain blocks, so a condition case that produced
+        # an alert would be a decision reached some other way than the one the
+        # case describes.
+        assert verdict.alerts == ()
+        return
+
+    expect = case["expect"]
+    assert verdict.allowed == expect["allowed"]
+    assert denied_by == expect["denied_by"]
+    # Compared as an ordered list. Alerts accumulate in evaluation order —
+    # priority ascending, ties by canonical id — not in the order the bundle
+    # listed them, and a set assertion cannot see the difference.
+    assert [policy.id for policy in verdict.alerts] == expect["alerts"]
+
+
+def test_the_decide_file_is_worth_running() -> None:
+    """The same guard the other two vector files carry, and one more.
+
+    Every group here can pass by being empty, and the ways that happens are not
+    symmetrical: a file of only refusals passes while the walk refuses
+    everything, a file of only allows passes while nothing is ever denied, and
+    a file with no `holds: true` case passes while every condition answers
+    false — which is precisely the shape the contract's most emphasised rule
+    forbids.
+    """
+    assert len(DECIDE_CASES) >= 140
+    # The contract models `endpoint_key` as an argument that is always present,
+    # so it takes no position on a call naming none. This gateway's answer to
+    # that is `tests/test_decide.py`, and a case for it here would be this
+    # implementation writing its own contract.
+    assert all(case["endpoint_key"] is not None for case in DECIDE_CASES)
+    assert len({case["name"] for case in DECIDE_CASES}) == len(DECIDE_CASES)
+
+    refusals = [case for case in DECIDE_CASES if "refusal" in case]
+    conditions = [case for case in DECIDE_CASES if "holds" in case]
+    walks = [case for case in DECIDE_CASES if "expect" in case]
+    assert len(refusals) >= 25
+    assert sum(1 for case in conditions if case["holds"]) >= 25
+    assert sum(1 for case in conditions if not case["holds"]) >= 25
+    assert sum(1 for case in walks if case["expect"]["allowed"]) >= 5
+    assert sum(1 for case in walks if not case["expect"]["allowed"]) >= 10
+    assert sum(1 for case in walks if case["expect"]["alerts"]) >= 3
+
+    # Every case is one of the three shapes, so a case carrying neither `holds`,
+    # `expect` nor `refusal` cannot sit in the file being counted and never
+    # asserted on.
+    assert len(refusals) + len(conditions) + len(walks) == len(DECIDE_CASES)
+    for case in DECIDE_CASES:
+        assert ("bundle" in case) ^ ("condition" in case), case["name"]
+        assert ("header" in case) ^ ("claims" in case), case["name"]

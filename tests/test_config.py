@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from gateway.auth import AuthConfigurationError
+from gateway.mode import TicketModeError, ticket_mode
 from gateway.server import (
     DEFAULT_PORT,
     _holder_from_environment,
@@ -296,3 +297,63 @@ def test_two_rail_center_credentials_are_refused_at_startup(monkeypatch):
 
     with pytest.raises(RuntimeError, match="only one of them can be sent"):
         build_gateway()
+
+
+# --- RAIL_TICKET_MODE ------------------------------------------------------
+#
+# `ticket_mode()` is the one enumerated variable nothing else in this suite
+# reaches: every other test injects `mode=` into `build_app`, which skips the
+# reader entirely. What that leaves unpinned is the whole of the function —
+# its default, its refusal, and the case folding that makes one platform-wide
+# value configure a zone.
+
+
+def test_an_unset_ticket_mode_is_enforce(monkeypatch):
+    """The default is the strict one, so a deployment that forgets a line does
+    not silently stop protecting anything."""
+    monkeypatch.delenv("RAIL_TICKET_MODE", raising=False)
+    assert ticket_mode() == "enforce"
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "\t\n"])
+def test_a_blank_ticket_mode_is_read_as_unset(monkeypatch, raw):
+    monkeypatch.setenv("RAIL_TICKET_MODE", raw)
+    assert ticket_mode() == "enforce"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["none", "observe", "enforce", " enforce ", "NONE", "None", "Enforce", "OBSERVE"],
+)
+def test_the_ticket_mode_is_read_case_insensitively(monkeypatch, raw):
+    """One variable, read by two components, so both must resolve the same set.
+
+    The proxy in front reads `RAIL_TICKET_MODE` through `.strip().lower()`. A
+    gateway matching exactly would refuse to start on the `NONE` or `Enforce`
+    its proxy resolved happily — the zone is configured correctly in front and
+    the component behind it will not boot.
+    """
+    monkeypatch.setenv("RAIL_TICKET_MODE", raw)
+    assert ticket_mode() == raw.strip().lower()
+
+
+@pytest.mark.parametrize(
+    "raw", ["enforcing", "off", "block", "en force", "none;observe"]
+)
+def test_an_unrecognised_ticket_mode_refuses_to_start(monkeypatch, raw):
+    """Refused rather than defaulted. Falling back to `enforce` is a deployment
+    enforcing where its operator wrote `none`; falling back to `none` is one
+    enforcing nothing while its operator believes it is. Neither is a guess
+    worth making on an operator's behalf."""
+    monkeypatch.setenv("RAIL_TICKET_MODE", raw)
+    with pytest.raises(TicketModeError, match="RAIL_TICKET_MODE must be one of"):
+        ticket_mode()
+
+
+def test_a_refused_ticket_mode_names_what_the_operator_wrote(monkeypatch):
+    """The folded form is what is matched; the raw one is what is reported, so
+    a value refused for some reason other than its case reads back to whoever
+    set it."""
+    monkeypatch.setenv("RAIL_TICKET_MODE", "Enforcing")
+    with pytest.raises(TicketModeError, match="Enforcing"):
+        ticket_mode()

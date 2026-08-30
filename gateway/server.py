@@ -1,23 +1,25 @@
 """Receive an agent's MCP calls and forward them to the service behind us.
 
-This is the transport half. It decides nothing: a policy bundle is fetched and
-held, **nothing consults it**, and no request that arrives here has its ticket
-read at all — `gateway.ticket` is reached by the suite and by nothing else. So
-every request that arrives is forwarded. What this module adds over the
-forwarding is a truthful account of what is held on `/ready`, and the process
-lifecycle that keeps the account current.
+Every request is read, judged and **forwarded whatever the verdict**. The ticket
+is decoded, the endpoint key composed, the held bundle walked, and the answer
+written to the log — and then the call goes upstream exactly as it would have
+without any of it. That is what `RAIL_TICKET_MODE=observe` means, and in this
+build `enforce` behaves identically, because blocking is not implemented yet.
 
-**Readiness reports; it does not gate.** `/ready` answers 503 while no bundle
-is held, and a request arriving in that window is forwarded all the same.
-Wiring the two together buys no enforcement while nothing reads the bundle —
-there is no decision a held bundle would change yet — and costs an outage
-whenever the control plane is briefly unreachable. The change that adds the
-decision is the change that may connect them, and it inherits a second rule
-with it: under `RAIL_TICKET_MODE=none` this gateway evaluates nothing, so
-readiness there has to be unconditional or the deployment that turns
-enforcement off is one that never serves.
+**Nothing here acts on a verdict, and that is the design of this change rather
+than an omission.** A refusal wired in now would stop traffic for an enforcement
+decision nothing downstream records: no denial is reported, no 403 or 503 is
+specified until the change that adds them, so a request stopped here is a
+request lost for nothing. What the verdict buys today is the log line an
+operator runs a dry run for — which calls *would* stop, seen before enforcement
+is turned on. The change that adds enforcement is the change that may act on it.
 
-Six choices here are not obvious, and each has a way of being wrong that
+**`/ready` reports and does not gate**, on the same reasoning, and under
+`RAIL_TICKET_MODE=none` it is unconditionally ready: a pass-through evaluates
+nothing, needs no bundle to do its whole job, and must not be the deployment
+that turns enforcement off and then never serves.
+
+Seven choices here are not obvious, and each has a way of being wrong that
 nothing would report:
 
   * **The backend is a `ProxyClient` with three of its five handlers refused.**
@@ -78,6 +80,14 @@ nothing would report:
     the second eagerly would turn a control-plane blip into a gateway that
     never comes up.
 
+  * **`RAIL_TICKET_MODE=none` builds no holder at all**, rather than building
+    one and declining to read it. The mode evaluates nothing, so a holder would
+    poll Rail Center for the life of the process for a bundle nothing consults,
+    and `RAIL_CENTER_URL` would be configuration a deployment must supply to a
+    component that cannot use it. Both obligations the readiness change handed
+    forward are discharged by that one absence: nothing polls, and `/ready`
+    answers 200 because there is no holder to ask.
+
   * **The `/ready` route closes over the holder rather than reading it from the
     request.** A lifespan's yielded state does not reach `request.scope`
     through this stack — measured, not assumed: the dict comes back empty at
@@ -101,6 +111,7 @@ from fastmcp import FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 from fastmcp.server import create_proxy
+from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.middleware import Middleware
 from fastmcp.server.providers.proxy import ProxyClient
 from starlette.responses import JSONResponse
@@ -108,6 +119,12 @@ from starlette.types import ASGIApp
 
 from gateway.auth import auth_headers
 from gateway.bundle.client import BundleHolder, refresh_seconds
+from gateway.bundle.conditions import ConditionInput, UninterpretableCondition
+from gateway.bundle.decide import decide
+from gateway.endpoint import resolve_endpoint_key
+from gateway.key_safety import safe_for_log
+from gateway.mode import TicketMode, describe, evaluates, ticket_mode
+from gateway.ticket import parse_rail_header
 
 log = logging.getLogger("gateway")
 
@@ -217,23 +234,56 @@ def _holder_from_environment() -> BundleHolder:
     )
 
 
+def datasource_slug() -> str:
+    """`RAIL_DATASOURCE_SLUG` — the first segment of every endpoint key.
+
+    Read only where the gateway evaluates. It plays no part in fetching: the
+    bundle route takes no parameters and is single-tenant per deployment, so
+    this names the data source whose endpoints the bundle's bindings are keyed
+    on, and nothing else. A deployment that got it wrong composes keys matching
+    no binding, and every endpoint falls back to the whole chain — which denies
+    more than the operator wrote rather than less, but is still not what they
+    wrote.
+    """
+    return _required("RAIL_DATASOURCE_SLUG")
+
+
 def build_gateway(
     upstream_url: str | None = None,
     holder: BundleHolder | None = None,
+    mode: TicketMode | None = None,
+    slug: str | None = None,
 ) -> FastMCP:
     """The proxy that forwards to the upstream, plus liveness and readiness.
 
-    `holder` is injected by the suite so its gateways answer to a control plane
-    the test holds rather than one on the network. A caller that passes none
-    gets the one the environment describes.
+    `holder`, `mode` and `slug` are injected by the suite so its gateways answer
+    to a control plane the test holds, in a mode the test chose, fronting a data
+    source the test named. A caller that passes none of them gets what the
+    environment describes.
+
+    **Under `RAIL_TICKET_MODE=none` no holder is built at all**, whether or not
+    one was passed, and `RAIL_CENTER_URL` is not read. A pass-through evaluates
+    nothing, so polling Rail Center on a timer for a bundle it will never read
+    would be load on the control plane bought for nothing — and requiring the
+    variable would be configuration a deployment must supply to a component that
+    cannot use it. An injected holder is ignored rather than honoured because
+    the mode is the stronger statement: a test asking for `none` is asking for a
+    gateway that does not fetch.
     """
+    resolved_mode = mode if mode is not None else ticket_mode()
     url = _checked_url(
         "RAIL_GATEWAY_UPSTREAM_URL",
         upstream_url or _required("RAIL_GATEWAY_UPSTREAM_URL"),
     )
     # After the upstream, so a gateway pointed nowhere is refused for that
     # rather than for the Rail Center variable it also has not been given.
-    bundle_holder = holder if holder is not None else _holder_from_environment()
+    if not evaluates(resolved_mode):
+        bundle_holder = None
+        endpoint_slug = None
+    else:
+        bundle_holder = holder if holder is not None else _holder_from_environment()
+        endpoint_slug = slug if slug is not None else datasource_slug()
+    log.info("%s", describe(resolved_mode))
 
     clean_url, credential_headers = _split_credential(url)
     transport = StreamableHttpTransport(url=clean_url, headers=credential_headers)
@@ -251,6 +301,8 @@ def build_gateway(
         lifespan=_bundle_lifespan(bundle_holder),
     )
     gateway.add_middleware(_UpstreamErrorBoundary())
+    if bundle_holder is not None and endpoint_slug is not None:
+        gateway.add_middleware(_PolicyVerdict(bundle_holder, endpoint_slug))
 
     # Last, and it has to be: see the module docstring. Both `create_proxy` and
     # `ProxyClient.__init__` set this True, so an assignment above either one is
@@ -282,12 +334,20 @@ def build_gateway(
         503 rather than a 200 carrying a false flag, because the code is the
         part every orchestrator and load balancer reads without being taught to.
 
+        **Under `RAIL_TICKET_MODE=none` it is unconditionally ready.** A
+        pass-through evaluates nothing, so it needs no bundle to do its whole
+        job, and reporting it unready would leave the deployment that turns
+        enforcement off as the one that never serves — a switch whose off
+        position takes the component down is not an off position.
+
         **What it deliberately does not carry is the version held.** This route
         is unauthenticated and shares a port with the MCP surface, so a version
         here is a public feed of when a customer's policy changed, bought for an
         operator convenience the `holding policy bundle version …` log line
         already covers.
         """
+        if bundle_holder is None:
+            return JSONResponse({"status": "ready"})
         if bundle_holder.current() is None:
             return JSONResponse({"status": "not ready"}, status_code=503)
         return JSONResponse({"status": "ready"})
@@ -296,8 +356,13 @@ def build_gateway(
     return gateway
 
 
-def _bundle_lifespan(holder: BundleHolder):
+def _bundle_lifespan(holder: BundleHolder | None):
     """Start the holder with the application and stop it with the application.
+
+    `holder` is None under `RAIL_TICKET_MODE=none`, where there is nothing to
+    start: the mode evaluates no policy, so a lifespan that fetched one anyway
+    would poll Rail Center for the whole life of a process that will never read
+    the answer.
 
     **Nothing here catches.** `start()` turns every expected failure — an
     unreachable control plane, a refused credential, a bundle that will not
@@ -326,6 +391,11 @@ def _bundle_lifespan(holder: BundleHolder):
 
     @asynccontextmanager
     async def lifespan(_server) -> AsyncIterator[None]:
+        if holder is None:
+            # `RAIL_TICKET_MODE=none`. Nothing to start, nothing to stop, and
+            # the app serves immediately — there is no first fetch to wait on.
+            yield
+            return
         # `asyncio.wait` rather than `wait_for`: a timeout there cancels what it
         # was waiting on, and cancelling this one would take the refresh loop
         # with it — `start()` creates the loop after the first fetch returns.
@@ -378,9 +448,13 @@ def _bundle_lifespan(holder: BundleHolder):
 def build_app(
     upstream_url: str | None = None,
     holder: BundleHolder | None = None,
+    mode: TicketMode | None = None,
+    slug: str | None = None,
 ) -> ASGIApp:
     """The ASGI application uvicorn serves."""
-    return build_gateway(upstream_url, holder).http_app(transport="streamable-http")
+    return build_gateway(upstream_url, holder, mode, slug).http_app(
+        transport="streamable-http"
+    )
 
 
 def _split_credential(url: str) -> tuple[str, dict[str, str]]:
@@ -407,6 +481,139 @@ def _split_credential(url: str) -> tuple[str, dict[str, str]]:
         urlunsplit(parsed._replace(netloc=host)),
         {"Authorization": f"Basic {encoded}"},
     )
+
+
+class _PolicyVerdict(Middleware):
+    """Evaluate every call against the held bundle, and act on none of it.
+
+    **This is the whole of what `observe` means, and today `enforce` behaves the
+    same way** — blocking arrives in the change that adds it. Wiring a refusal
+    here now would be an outage bought for no enforcement: nothing downstream
+    reads a verdict, so a request stopped is a request lost for nothing.
+
+    What it produces is the log line an operator runs a dry run for. A verdict
+    computed and written down is what tells them which calls *would* stop before
+    they turn enforcement on, and it is the only thing this branch owes them.
+
+    Three failures are answered here rather than left to propagate, because a
+    gateway that forwards nothing is worse than one that enforces nothing:
+
+      * **No bundle held.** The contract's answer is to refuse, and refusing is
+        exactly what this branch does not do yet — so the call is forwarded and
+        the line says the request went unjudged. That is the honest report:
+        `/ready` already says the gateway holds nothing, and inventing a verdict
+        from an absent ruleset would be worse than saying there was none.
+      * **A condition outside the grammar.** `decide` raises where the walk
+        reaches it. Under enforcement that is a 503 and no denial report;
+        here it is logged at error level naming the offending policy, because
+        that line is the signal that Rail Center and this gateway have drifted,
+        which is the actual fault and the only thing that fixes it.
+      * **Anything else.** A defect in the walk must not take the forward path
+        down while the walk decides nothing. It is logged with a traceback and
+        the call proceeds — the one place in this file that catches broadly, and
+        it is defensible only because the verdict is inert.
+    """
+
+    def __init__(self, holder: BundleHolder, slug: str) -> None:
+        self._holder = holder
+        self._slug = slug
+
+    async def on_message(self, context, call_next):
+        self._record(context)
+        return await call_next(context)
+
+    def _record(self, context) -> None:
+        """Write down what the walk concluded. Never raises."""
+        resolution = resolve_endpoint_key(
+            getattr(context, "method", None),
+            getattr(getattr(context, "message", None), "name", None),
+            self._slug,
+        )
+        bundle = self._holder.current()
+        if bundle is None:
+            log.warning(
+                "no policy bundle held — forwarding %s unjudged",
+                safe_for_log(resolution.key or resolution.status),
+            )
+            return
+
+        request = ConditionInput(
+            ticket=parse_rail_header(_x_rail_header()),
+            endpoint_key=resolution.key,
+        )
+        try:
+            verdict = decide(bundle, request)
+        except UninterpretableCondition as refusal:
+            log.error(
+                "refusing to judge %s — %s; Rail Center and this gateway have "
+                "drifted, and the request was forwarded because this build "
+                "enforces nothing",
+                safe_for_log(resolution.key or resolution.status),
+                refusal.reason,
+            )
+            return
+        except Exception:
+            log.exception(
+                "policy evaluation raised for %s; the request was forwarded",
+                safe_for_log(resolution.key or resolution.status),
+            )
+            return
+
+        for alert in verdict.alerts:
+            log.warning(
+                "policy %s alerts on %s",
+                safe_for_log(alert.id),
+                safe_for_log(resolution.key or resolution.status),
+            )
+        if verdict.allowed:
+            log.info(
+                "allow %s (ticket %s)",
+                safe_for_log(resolution.key or resolution.status),
+                request.ticket.state,
+            )
+            return
+        # The policy that *actually matched*, never the first in the chain: this
+        # id is what a denial report will name once one is sent, and an operator
+        # reading a rule that did not decide has no second opinion to correct it.
+        log.warning(
+            "would deny %s by policy %s (ticket %s) — this build enforces "
+            "nothing, so the request was forwarded",
+            safe_for_log(resolution.key or resolution.status),
+            safe_for_log(verdict.denied_by.id if verdict.denied_by else None),
+            request.ticket.state,
+        )
+
+
+def _x_rail_header() -> list[str] | None:
+    """Every `x-rail` value on the request, or None when there is no request.
+
+    **`getlist`, and it has to be.** The contract refuses a repeated `x-rail`
+    outright and says why the check cannot be deferred: by the time a platform
+    has collapsed two values into one the evidence is gone. Both of the obvious
+    routes here lose it — `get_http_headers()` returns a `dict[str, str]`, and
+    Starlette's `Headers.get` returns the *first* value, which decodes normally.
+    Either would admit a ticket an attacker chose by sending the header twice,
+    while Node's header handling joins the pair into `"AAA, BBB"` and refuses
+    it. That is two conformant-looking implementations reaching opposite
+    verdicts on input the caller fully controls.
+
+    `parse_rail_header` takes the list and classifies a repeat as
+    `undecodable`, so the whole of this function's job is not to flatten it.
+
+    A message with no HTTP request behind it — an in-process transport, a test —
+    has no header to read, and no ticket is exactly what `absent` means.
+    """
+    try:
+        request = get_http_request()
+    except RuntimeError:
+        # Documented: "No active HTTP request found." Narrow on purpose — a
+        # blind except here would swallow a defect in the accessor and report
+        # it as an absent ticket, which denies rather than admits but hides the
+        # fault either way.
+        return None
+    # `[]` for a header that was never sent, which `parse_rail_header` reads as
+    # absent exactly as it reads None.
+    return request.headers.getlist("x-rail") or None
 
 
 class _UpstreamErrorBoundary(Middleware):

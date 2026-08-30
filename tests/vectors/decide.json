@@ -1,0 +1,3861 @@
+{
+  "_comment": "Conformance vectors for the policy decision — the condition grammar and the walk — written as data so a reimplementation in another language is answerable to the same cases. They come from rail-center's docs/policy-evaluation-contract.md, under `Conditions` and `The decision`. This repository is where they live; rail-center's api/tests/vectors/policy_evaluation.json covers the same contract from the publishing side.\n\nWhat is NOT here. Whether a bundle can be READ at all: that refusal is eager, taken before the walk, and tests/vectors/bundle.json carries it. How an MCP message resolves to an endpoint key: that is this gateway's own composition, it appears nowhere in the contract, and tests/test_endpoint.py covers it. What a decision means for a call naming NO endpoint: the contract models endpoint_key as an argument that is always present, so it takes no position on one, and every case here carries a key. tests/test_decide.py carries this gateway's own answer. How the `x-rail` header decodes: tests/vectors/ticket.json.\n\nEvery case carries `endpoint_key` — the RESOLVED key, never a raw ingress path — and `now`, a fixed instant, because a decision is a pure function of its inputs and a pure function is the only thing two implementations can be compared on. The ticket comes as either `claims`, which the runner base64url-encodes, or `header`, a literal the runner passes through unchanged. `agent_id` and `exp` are spelled out on every payload rather than filled in by a runner, so a case can be read literally.\n\nCases come in two shapes.\n\nA CONDITION case carries `condition` and `holds`. The runner puts the condition behind a single enabled `block` policy at priority 1, walks it, and reads `holds` off the decision: a condition that holds denies, and one that does not allows. Going through the decision rather than calling a predicate directly is what makes these vectors rather than unit tests of a private function.\n\nA BUNDLE case carries a whole `bundle` and an `expect` of `allowed`, `denied_by` (a canonical policy id, or null) and `alerts` (canonical policy ids, IN EVALUATION ORDER — priority ascending, ties by canonical id — not in the order the bundle listed them).\n\nA case of either shape may carry `refusal` instead, naming the kind of refusal required: `uninterpretable_condition`. Read it and assert on it. A runner that asks only 'did it throw?' scores a crash as conformant, and a crash is the one outcome the contract rules out everywhere — an exception where a decision belongs is neither an allow nor a deny.\n\n`ticket_state`, where a case carries it, is what the header must classify as; its absence means the case does not assert one. `note` says why a case exists where its name does not.",
+  "cases": [
+    {
+      "name": "uninterpretable — a field outside the table",
+      "condition": {
+        "field": "invented_field",
+        "operator": "eq",
+        "value": "x"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition",
+      "note": "Rail Center can learn a field this enforcement point has not. The natural shape — a lookup defaulting to false — silently stops enforcing a block rule."
+    },
+    {
+      "name": "uninterpretable — an operator outside the table",
+      "condition": {
+        "field": "tier",
+        "operator": "regex",
+        "value": "x"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — skill_match does not admit eq",
+      "condition": {
+        "field": "skill_match",
+        "operator": "eq",
+        "value": "x"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — endpoint_key does not admit missing",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition",
+      "note": "It is an argument to the decision rather than a claim that may be absent, so `missing` could never hold."
+    },
+    {
+      "name": "uninterpretable — endpoint_key does not admit present",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition",
+      "note": "The other half: `present` would always hold."
+    },
+    {
+      "name": "uninterpretable — skills does not admit eq",
+      "condition": {
+        "field": "skills",
+        "operator": "eq",
+        "value": "x"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — skills does not admit in",
+      "condition": {
+        "field": "skills",
+        "operator": "in",
+        "value": [
+          "x"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — only endpoint_key admits matches",
+      "condition": {
+        "field": "tier",
+        "operator": "matches",
+        "value": "gold*"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition",
+      "note": "A pattern over an attacker-chosen claim is a subtler control than it looks."
+    },
+    {
+      "name": "uninterpretable — agent_id does not admit contains",
+      "condition": {
+        "field": "agent_id",
+        "operator": "contains",
+        "value": "x"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — posture_score does not admit matches",
+      "condition": {
+        "field": "posture_score",
+        "operator": "matches",
+        "value": "4*"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a string operand for an ordered operator",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lt",
+        "value": "40"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition",
+      "note": "Not a rule that is false — one that can never be true, which is the failure an operator is least likely to notice."
+    },
+    {
+      "name": "uninterpretable — a list operand for an ordered operator",
+      "condition": {
+        "field": "posture_score",
+        "operator": "gte",
+        "value": [
+          40
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a boolean operand for an ordered operator",
+      "condition": {
+        "field": "posture_score",
+        "operator": "gt",
+        "value": true
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition",
+      "note": "A boolean is not a number, here or in the reference."
+    },
+    {
+      "name": "uninterpretable — a null operand for an ordered operator",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lte",
+        "value": null
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a non-scalar operand for eq",
+      "condition": {
+        "field": "tier",
+        "operator": "eq",
+        "value": [
+          "gold"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a boolean operand for ne",
+      "condition": {
+        "field": "tier",
+        "operator": "ne",
+        "value": true
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a null operand for eq",
+      "condition": {
+        "field": "tier",
+        "operator": "eq",
+        "value": null
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a non-list operand for in",
+      "condition": {
+        "field": "tier",
+        "operator": "in",
+        "value": "gold"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a non-scalar operand for contains",
+      "condition": {
+        "field": "skills",
+        "operator": "contains",
+        "value": [
+          "x"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a non-string pattern for matches",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition",
+      "note": "Refused at validation rather than treated as a pattern that never matches: the key is always a string, so a non-string pattern can never hold."
+    },
+    {
+      "name": "uninterpretable — a condition that is not an object",
+      "condition": "not an object",
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a condition that is a list",
+      "condition": [
+        {
+          "field": "tier"
+        }
+      ],
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a field that is not a string",
+      "condition": {
+        "field": 17,
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — an operator that is not a string",
+      "condition": {
+        "field": "tier",
+        "operator": null
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — a field that is missing entirely",
+      "condition": {
+        "operator": "present",
+        "value": 1
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — an operator that is missing entirely",
+      "condition": {
+        "field": "tier",
+        "value": 1
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold",
+        "posture_score": 95,
+        "skills": [
+          "delivery.track_package"
+        ]
+      },
+      "refusal": "uninterpretable_condition"
+    },
+    {
+      "name": "uninterpretable — an unknown field is refused even where no ticket was read",
+      "condition": {
+        "field": "invented_field",
+        "operator": "eq",
+        "value": "x"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "header": null,
+      "refusal": "uninterpretable_condition",
+      "ticket_state": "absent",
+      "note": "The refusal is a property of the rule, not of what it would have resolved against. A reader that resolved first and refused second would answer differently here."
+    },
+    {
+      "name": "x_rail_header is missing for an absent ticket",
+      "condition": {
+        "field": "x_rail_header",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "header": null,
+      "holds": true,
+      "ticket_state": "absent",
+      "note": "no header at all. All four unusable states fold into one answer, which is what makes the seeded P0 a rule about trustworthy identity rather than about whether a header was physically transmitted."
+    },
+    {
+      "name": "x_rail_header is missing for an undecodable ticket",
+      "condition": {
+        "field": "x_rail_header",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "header": "!!!not base64!!!",
+      "holds": true,
+      "ticket_state": "undecodable",
+      "note": "a header that does not decode. All four unusable states fold into one answer, which is what makes the seeded P0 a rule about trustworthy identity rather than about whether a header was physically transmitted."
+    },
+    {
+      "name": "x_rail_header is missing for an expired ticket",
+      "condition": {
+        "field": "x_rail_header",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 1600000000
+      },
+      "holds": true,
+      "ticket_state": "expired"
+    },
+    {
+      "name": "x_rail_header is missing for a malformed ticket",
+      "condition": {
+        "field": "x_rail_header",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "exp": 4102444800
+      },
+      "holds": true,
+      "ticket_state": "malformed",
+      "note": "No string agent_id, so the payload is readable and is not a ticket."
+    },
+    {
+      "name": "x_rail_header is present for a valid ticket",
+      "condition": {
+        "field": "x_rail_header",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "ticket_state": "valid"
+    },
+    {
+      "name": "x_rail_header is not missing for a valid ticket",
+      "condition": {
+        "field": "x_rail_header",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "ticket_state": "valid"
+    },
+    {
+      "name": "an expired ticket's posture_score does not outlive it",
+      "condition": {
+        "field": "posture_score",
+        "operator": "gt",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 1600000000,
+        "posture_score": 95
+      },
+      "holds": false,
+      "ticket_state": "expired",
+      "note": "The claims are still readable as text and are not a basis for any decision. This is the case that rule exists for."
+    },
+    {
+      "name": "an expired ticket's claims are absent rather than retained",
+      "condition": {
+        "field": "posture_score",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 1600000000,
+        "posture_score": 95
+      },
+      "holds": true,
+      "ticket_state": "expired"
+    },
+    {
+      "name": "a claim whose key is absent from the payload resolves to absent",
+      "condition": {
+        "field": "posture_score",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "note": "The one an implementation forgets: reading claims[field] and testing === null leaves an omitted key reading as present. Deleting a key from an unsigned ticket is free."
+    },
+    {
+      "name": "a claim that is present and null resolves to absent",
+      "condition": {
+        "field": "posture_score",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": null
+      },
+      "holds": true,
+      "note": "posture_score is null for an agent registered but not yet scored, and the seeded rule meaning 'deny an unscored agent' has to catch it."
+    },
+    {
+      "name": "a claim that is present and null is not present",
+      "condition": {
+        "field": "posture_score",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": null
+      },
+      "holds": false
+    },
+    {
+      "name": "a claim of zero is present",
+      "condition": {
+        "field": "posture_score",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 0
+      },
+      "holds": true,
+      "note": "The likely drift: testing the value's truth rather than its presence treats all three as missing."
+    },
+    {
+      "name": "a claim of zero is not missing",
+      "condition": {
+        "field": "posture_score",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 0
+      },
+      "holds": false
+    },
+    {
+      "name": "a claim of an empty string is present",
+      "condition": {
+        "field": "tier",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": ""
+      },
+      "holds": true,
+      "note": "The likely drift: testing the value's truth rather than its presence treats all three as missing."
+    },
+    {
+      "name": "a claim of an empty string is not missing",
+      "condition": {
+        "field": "tier",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": ""
+      },
+      "holds": false
+    },
+    {
+      "name": "a claim of an empty list is present",
+      "condition": {
+        "field": "skills",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": []
+      },
+      "holds": true,
+      "note": "The likely drift: testing the value's truth rather than its presence treats all three as missing."
+    },
+    {
+      "name": "a claim of an empty list is not missing",
+      "condition": {
+        "field": "skills",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": []
+      },
+      "holds": false
+    },
+    {
+      "name": "skill_match is present when skills lists the endpoint key",
+      "condition": {
+        "field": "skill_match",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": [
+          "delivery.other",
+          "delivery.track_package"
+        ]
+      },
+      "holds": true
+    },
+    {
+      "name": "skill_match is missing when skills lists something else",
+      "condition": {
+        "field": "skill_match",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": [
+          "delivery.other"
+        ]
+      },
+      "holds": true
+    },
+    {
+      "name": "skill_match is missing when the ticket declares no skills",
+      "condition": {
+        "field": "skill_match",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "a string skills is not a one-element list of itself",
+      "condition": {
+        "field": "skill_match",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": "delivery.track_package"
+      },
+      "holds": true,
+      "note": "It declares no skill at all — the same reading `contains` takes."
+    },
+    {
+      "name": "an object skills declares no skill either",
+      "condition": {
+        "field": "skill_match",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": {
+          "delivery.track_package": true
+        }
+      },
+      "holds": true,
+      "note": "The guard is on the claim being a list. A reader guarding only against null iterates this object's keys and finds the endpoint key among them, so a forged ticket declares a skill it does not carry."
+    },
+    {
+      "name": "a numeric skills declares no skill",
+      "condition": {
+        "field": "skill_match",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": 17
+      },
+      "holds": true
+    },
+    {
+      "name": "skill_match is missing where a matching skill sits inside a nested list",
+      "condition": {
+        "field": "skill_match",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": [
+          [
+            "delivery.track_package"
+          ]
+        ]
+      },
+      "holds": true,
+      "note": "Membership is compared element by element, and a list is not the key."
+    },
+    {
+      "name": "skill_match is missing when no usable ticket was read",
+      "condition": {
+        "field": "skill_match",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "header": null,
+      "holds": true,
+      "ticket_state": "absent"
+    },
+    {
+      "name": "endpoint_key resolves to the key the decision was given",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "eq",
+        "value": "delivery.track_package"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "agent_id — present holds on the claim",
+      "condition": {
+        "field": "agent_id",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "note": "The table carries eleven fields, and this group pins the five that are read straight off the claims. A field the table stops carrying is not a condition that fails to hold: it refuses the request, so a rule Rail Center published against it answers 503 here on every request whose walk reaches it and decides normally there."
+    },
+    {
+      "name": "agent_id — missing holds where no usable ticket was read",
+      "condition": {
+        "field": "agent_id",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "header": null,
+      "holds": true,
+      "ticket_state": "absent",
+      "note": "A ticket is not valid without a string agent_id, so this claim is absent only where the ticket itself is unusable — which is the one way the field can answer missing at all."
+    },
+    {
+      "name": "agent_id — eq holds against the claim",
+      "condition": {
+        "field": "agent_id",
+        "operator": "eq",
+        "value": "agent-1"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "agent_id — ne holds against a different value",
+      "condition": {
+        "field": "agent_id",
+        "operator": "ne",
+        "value": "agent-2"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "agent_id — in holds for a member",
+      "condition": {
+        "field": "agent_id",
+        "operator": "in",
+        "value": [
+          "agent-0",
+          "agent-1"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "sandbox_id — present holds on the claim",
+      "condition": {
+        "field": "sandbox_id",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "sandbox_id": "9f2c4b7e1a8d3056"
+      },
+      "holds": true
+    },
+    {
+      "name": "sandbox_id — missing holds where the payload omits the key",
+      "condition": {
+        "field": "sandbox_id",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "ticket_state": "valid",
+      "note": "Reading a ticket turns on agent_id and exp alone, so a payload without this claim is a valid ticket carrying an absent claim rather than an unreadable one. The ticket is unsigned: deleting a key is free, and a rule keying on this field has to survive it."
+    },
+    {
+      "name": "sandbox_id — eq holds against the claim",
+      "condition": {
+        "field": "sandbox_id",
+        "operator": "eq",
+        "value": "9f2c4b7e1a8d3056"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "sandbox_id": "9f2c4b7e1a8d3056"
+      },
+      "holds": true
+    },
+    {
+      "name": "sandbox_id — ne holds against a different value",
+      "condition": {
+        "field": "sandbox_id",
+        "operator": "ne",
+        "value": "0000000000000000"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "sandbox_id": "9f2c4b7e1a8d3056"
+      },
+      "holds": true
+    },
+    {
+      "name": "sandbox_id — in holds for a member",
+      "condition": {
+        "field": "sandbox_id",
+        "operator": "in",
+        "value": [
+          "1111111111111111",
+          "9f2c4b7e1a8d3056"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "sandbox_id": "9f2c4b7e1a8d3056"
+      },
+      "holds": true
+    },
+    {
+      "name": "sandbox_type — present holds on the claim",
+      "condition": {
+        "field": "sandbox_type",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "sandbox_type": "nemo_claw"
+      },
+      "holds": true
+    },
+    {
+      "name": "sandbox_type — missing holds where the payload omits the key",
+      "condition": {
+        "field": "sandbox_type",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "ticket_state": "valid"
+    },
+    {
+      "name": "sandbox_type — eq holds against the claim",
+      "condition": {
+        "field": "sandbox_type",
+        "operator": "eq",
+        "value": "nemo_claw"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "sandbox_type": "nemo_claw"
+      },
+      "holds": true
+    },
+    {
+      "name": "sandbox_type — ne holds against a different value",
+      "condition": {
+        "field": "sandbox_type",
+        "operator": "ne",
+        "value": "kubernetes"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "sandbox_type": "nemo_claw"
+      },
+      "holds": true
+    },
+    {
+      "name": "sandbox_type — in holds for a member",
+      "condition": {
+        "field": "sandbox_type",
+        "operator": "in",
+        "value": [
+          "bare_metal",
+          "nemo_claw"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "sandbox_type": "nemo_claw"
+      },
+      "holds": true
+    },
+    {
+      "name": "environment_fingerprint — present holds on the claim",
+      "condition": {
+        "field": "environment_fingerprint",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "environment_fingerprint": "c7d1e05a3b924f68"
+      },
+      "holds": true
+    },
+    {
+      "name": "environment_fingerprint — missing holds where the payload omits the key",
+      "condition": {
+        "field": "environment_fingerprint",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "ticket_state": "valid"
+    },
+    {
+      "name": "environment_fingerprint — eq holds against the claim",
+      "condition": {
+        "field": "environment_fingerprint",
+        "operator": "eq",
+        "value": "c7d1e05a3b924f68"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "environment_fingerprint": "c7d1e05a3b924f68"
+      },
+      "holds": true
+    },
+    {
+      "name": "environment_fingerprint — ne holds against a different value",
+      "condition": {
+        "field": "environment_fingerprint",
+        "operator": "ne",
+        "value": "a1b2c3d4e5f60718"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "environment_fingerprint": "c7d1e05a3b924f68"
+      },
+      "holds": true
+    },
+    {
+      "name": "environment_fingerprint — in holds for a member",
+      "condition": {
+        "field": "environment_fingerprint",
+        "operator": "in",
+        "value": [
+          "0f1e2d3c4b5a6978",
+          "c7d1e05a3b924f68"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "environment_fingerprint": "c7d1e05a3b924f68"
+      },
+      "holds": true
+    },
+    {
+      "name": "scored_at — present holds on the claim",
+      "condition": {
+        "field": "scored_at",
+        "operator": "present"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "scored_at": "2026-07-31T18:04:23.881204+00:00"
+      },
+      "holds": true
+    },
+    {
+      "name": "scored_at — missing holds until scoring has run",
+      "condition": {
+        "field": "scored_at",
+        "operator": "missing"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "scored_at": null
+      },
+      "holds": true,
+      "ticket_state": "valid",
+      "note": "Null until posture is computed, by the same rule that leaves posture_score null, and absent by the same door as a key that is not there."
+    },
+    {
+      "name": "scored_at — eq holds against the claim",
+      "condition": {
+        "field": "scored_at",
+        "operator": "eq",
+        "value": "2026-07-31T18:04:23.881204+00:00"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "scored_at": "2026-07-31T18:04:23.881204+00:00"
+      },
+      "holds": true
+    },
+    {
+      "name": "scored_at — ne holds against a different value",
+      "condition": {
+        "field": "scored_at",
+        "operator": "ne",
+        "value": "2026-07-30T00:00:00+00:00"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "scored_at": "2026-07-31T18:04:23.881204+00:00"
+      },
+      "holds": true
+    },
+    {
+      "name": "scored_at — in holds for a member",
+      "condition": {
+        "field": "scored_at",
+        "operator": "in",
+        "value": [
+          "2026-07-29T00:00:00+00:00",
+          "2026-07-31T18:04:23.881204+00:00"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "scored_at": "2026-07-31T18:04:23.881204+00:00"
+      },
+      "holds": true
+    },
+    {
+      "name": "eq compares a string to a string",
+      "condition": {
+        "field": "tier",
+        "operator": "eq",
+        "value": "gold"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "gold"
+      },
+      "holds": true
+    },
+    {
+      "name": "a string never equals a number",
+      "condition": {
+        "field": "tier",
+        "operator": "eq",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "40"
+      },
+      "holds": false,
+      "note": "\"40\" does not satisfy eq 40. JavaScript's == and Number() both coerce and must not be used."
+    },
+    {
+      "name": "an empty string never equals zero",
+      "condition": {
+        "field": "posture_score",
+        "operator": "eq",
+        "value": 0
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": ""
+      },
+      "holds": false
+    },
+    {
+      "name": "a boolean claim never equals one",
+      "condition": {
+        "field": "tier",
+        "operator": "eq",
+        "value": 1
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": true
+      },
+      "holds": false,
+      "note": "True == 1 in Python and true === 1 is false in TypeScript, so a reader that does not exclude booleans makes a rule's meaning depend on which language read it."
+    },
+    {
+      "name": "a boolean claim never equals zero",
+      "condition": {
+        "field": "tier",
+        "operator": "eq",
+        "value": 0
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": false
+      },
+      "holds": false
+    },
+    {
+      "name": "a non-scalar claim does not satisfy eq",
+      "condition": {
+        "field": "tier",
+        "operator": "eq",
+        "value": "gold"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": [
+          "gold"
+        ]
+      },
+      "holds": false
+    },
+    {
+      "name": "a string posture_score is catchable by eq against the same string",
+      "condition": {
+        "field": "posture_score",
+        "operator": "eq",
+        "value": "100"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": "100"
+      },
+      "holds": true,
+      "note": "An allow-list of forgeries rather than a type check, and the difference between 'hard to express' and 'not expressible'."
+    },
+    {
+      "name": "and does not hold against a numeric claim of the same value",
+      "condition": {
+        "field": "posture_score",
+        "operator": "eq",
+        "value": "100"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 100
+      },
+      "holds": false
+    },
+    {
+      "name": "ne holds for a different scalar",
+      "condition": {
+        "field": "tier",
+        "operator": "ne",
+        "value": "gold"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "silver"
+      },
+      "holds": true
+    },
+    {
+      "name": "ne does not hold for an absent field",
+      "condition": {
+        "field": "tier",
+        "operator": "ne",
+        "value": "gold"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "A rule meaning 'absent or different' is two conditions."
+    },
+    {
+      "name": "a boolean claim does not satisfy ne",
+      "condition": {
+        "field": "tier",
+        "operator": "ne",
+        "value": "gold"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": true
+      },
+      "holds": false,
+      "note": "Not comparing is not the same as comparing unequal."
+    },
+    {
+      "name": "a list claim does not satisfy ne",
+      "condition": {
+        "field": "tier",
+        "operator": "ne",
+        "value": "gold"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": [
+          "silver"
+        ]
+      },
+      "holds": false,
+      "note": "Reachable through a forged claim, and the case that catches a reader that negates without checking the kinds first."
+    },
+    {
+      "name": "an object claim does not satisfy ne",
+      "condition": {
+        "field": "tier",
+        "operator": "ne",
+        "value": "gold"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": {
+          "name": "silver"
+        }
+      },
+      "holds": false
+    },
+    {
+      "name": "lt compares two numbers",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lt",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 30
+      },
+      "holds": true
+    },
+    {
+      "name": "a numeric string does not satisfy lt",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lt",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": "30"
+      },
+      "holds": false,
+      "note": "It is not a number at all. The ordered operators must check the type before comparing rather than convert."
+    },
+    {
+      "name": "a boolean claim does not satisfy lt",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lt",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": true
+      },
+      "holds": false
+    },
+    {
+      "name": "a list claim does not satisfy lt",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lt",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": [
+          30
+        ]
+      },
+      "holds": false
+    },
+    {
+      "name": "lte holds at the bound",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lte",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 40
+      },
+      "holds": true
+    },
+    {
+      "name": "lt does not hold at the bound",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lt",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 40
+      },
+      "holds": false
+    },
+    {
+      "name": "gte holds at the bound",
+      "condition": {
+        "field": "posture_score",
+        "operator": "gte",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 40
+      },
+      "holds": true
+    },
+    {
+      "name": "gt holds above it",
+      "condition": {
+        "field": "posture_score",
+        "operator": "gt",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 41
+      },
+      "holds": true
+    },
+    {
+      "name": "a float claim compares against a whole operand",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lt",
+        "value": 40
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 39.5
+      },
+      "holds": true
+    },
+    {
+      "name": "two integers a double cannot separate are equal",
+      "condition": {
+        "field": "posture_score",
+        "operator": "eq",
+        "value": 9007199254740993
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 9007199254740992
+      },
+      "holds": true,
+      "note": "2**53 and 2**53 + 1 are distinct integers in an arbitrary-precision language and the same double in JavaScript. Every number reaching a comparison is narrowed, on both sides of it."
+    },
+    {
+      "name": "and neither is less than the other",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lt",
+        "value": 9007199254740993
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 9007199254740992
+      },
+      "holds": false,
+      "note": "The other half. Narrowing only the claim leaves the divergence on the operand."
+    },
+    {
+      "name": "an integer past the double range saturates rather than raising",
+      "condition": {
+        "field": "posture_score",
+        "operator": "eq",
+        "value": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      "holds": true,
+      "note": "Both saturate to the same infinity and compare equal. float() raises where JavaScript saturates, and an exception where a comparison belongs is neither an allow nor a deny."
+    },
+    {
+      "name": "and so does one past the negative end",
+      "condition": {
+        "field": "posture_score",
+        "operator": "eq",
+        "value": -100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": -10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      "holds": true
+    },
+    {
+      "name": "an operand overflowing to infinity is compared, not refused",
+      "condition": {
+        "field": "posture_score",
+        "operator": "lt",
+        "value": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 95
+      },
+      "holds": true
+    },
+    {
+      "name": "in holds for a member",
+      "condition": {
+        "field": "tier",
+        "operator": "in",
+        "value": [
+          "gold",
+          "silver"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": "silver"
+      },
+      "holds": true
+    },
+    {
+      "name": "in does not coerce its elements",
+      "condition": {
+        "field": "posture_score",
+        "operator": "in",
+        "value": [
+          40,
+          50
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": "40"
+      },
+      "holds": false
+    },
+    {
+      "name": "in holds for a numeric member",
+      "condition": {
+        "field": "posture_score",
+        "operator": "in",
+        "value": [
+          40,
+          50
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 40
+      },
+      "holds": true
+    },
+    {
+      "name": "a non-scalar claim is a member of nothing",
+      "condition": {
+        "field": "tier",
+        "operator": "in",
+        "value": [
+          "gold"
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": [
+          "gold"
+        ]
+      },
+      "holds": false
+    },
+    {
+      "name": "a non-scalar element of an in operand never matches",
+      "condition": {
+        "field": "posture_score",
+        "operator": "in",
+        "value": [
+          [
+            95
+          ],
+          50
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 95
+      },
+      "holds": false,
+      "note": "Accepted by validation and simply never matches, so no comparison ever sees two containers."
+    },
+    {
+      "name": "a boolean element of an in operand never matches a boolean claim",
+      "condition": {
+        "field": "tier",
+        "operator": "in",
+        "value": [
+          true
+        ]
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "tier": true
+      },
+      "holds": false
+    },
+    {
+      "name": "contains holds when the list carries the operand",
+      "condition": {
+        "field": "skills",
+        "operator": "contains",
+        "value": "delivery.track_package"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": [
+          "delivery.other",
+          "delivery.track_package"
+        ]
+      },
+      "holds": true
+    },
+    {
+      "name": "contains does not substring-match a string claim",
+      "condition": {
+        "field": "skills",
+        "operator": "contains",
+        "value": "delivery.admin"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": "delivery.administrator"
+      },
+      "holds": false,
+      "note": "A reader reaching for `operand in claim` would satisfy a rule about delivery.admin with a skills of delivery.administrator."
+    },
+    {
+      "name": "contains does not substring-match an element either",
+      "condition": {
+        "field": "skills",
+        "operator": "contains",
+        "value": "delivery.admin"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": [
+          "delivery.administrator"
+        ]
+      },
+      "holds": false
+    },
+    {
+      "name": "contains requires the claim to be a list",
+      "condition": {
+        "field": "skills",
+        "operator": "contains",
+        "value": "delivery.track_package"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": {
+          "delivery.track_package": true
+        }
+      },
+      "holds": false
+    },
+    {
+      "name": "a boolean element of a list claim does not satisfy contains",
+      "condition": {
+        "field": "skills",
+        "operator": "contains",
+        "value": 1
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "skills": [
+          true
+        ]
+      },
+      "holds": false
+    },
+    {
+      "name": "matches — a trailing star covers a whole segment",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.*"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — a star spans the segment separator",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.*"
+      },
+      "endpoint_key": "delivery.orders.v2",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "note": "`*` includes the `.` that separates endpoint-key segments."
+    },
+    {
+      "name": "matches — a star stands for an empty run",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.*"
+      },
+      "endpoint_key": "delivery.",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — a pattern is anchored at the start",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.*"
+      },
+      "endpoint_key": "acme.delivery.orders",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "A pattern matching anywhere within the key would be a different rule from the one an operator reads it as."
+    },
+    {
+      "name": "matches — a leading star covers everything before the suffix",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "*.orders"
+      },
+      "endpoint_key": "acme.delivery.orders",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — a pattern is anchored at the end",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "*.orders"
+      },
+      "endpoint_key": "acme.delivery.orders.v2",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false
+    },
+    {
+      "name": "matches — a bare star matches any key",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "*"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — a pattern carrying no star is a literal",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.orders"
+      },
+      "endpoint_key": "delivery.orders",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "note": "It matches exactly what `eq` would. Accepted rather than refused, because refusing it would mean broadening a rule from `delivery.orders` to `delivery.*` had to change the operator too."
+    },
+    {
+      "name": "matches — a literal is not a prefix rule",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.order"
+      },
+      "endpoint_key": "delivery.orders.v2",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "A reader answering `key.startswith(pattern)` on the starless branch widens every literal pattern an operator wrote."
+    },
+    {
+      "name": "matches — a literal does not match a longer key",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.orders"
+      },
+      "endpoint_key": "delivery.orders.v2",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false
+    },
+    {
+      "name": "matches — the two ends may abut",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "ab*ab"
+      },
+      "endpoint_key": "abab",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "note": "Pinned from both sides, because startswith-and-endswith is the natural shape to write."
+    },
+    {
+      "name": "matches — the two ends must not overlap",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "ab*ab"
+      },
+      "endpoint_key": "ab",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "`ab*ab` does not match `ab`, though the key both starts and ends with `ab`. `*` stands for a run of characters, possibly empty, but never for characters counted twice."
+    },
+    {
+      "name": "matches — the two ends with a run between them",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "ab*ab"
+      },
+      "endpoint_key": "abXab",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — a key too short for both ends",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "ab*ab"
+      },
+      "endpoint_key": "aba",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false
+    },
+    {
+      "name": "matches — an interior segment must fit before the suffix",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "a*bc*bc"
+      },
+      "endpoint_key": "abc",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "A reader that checks only that the segment was found lets it match the suffix's own characters a second time."
+    },
+    {
+      "name": "matches — and does fit where the key carries it twice",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "a*bc*bc"
+      },
+      "endpoint_key": "abcbc",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — an interior segment matched at its earliest position",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "a*bc*bc"
+      },
+      "endpoint_key": "aXbcYbc",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "note": "With `*` the only metacharacter every interior segment is a fixed literal, so taking one early never rules out a match a fuller search would find — which is why no backtracking is needed to be correct."
+    },
+    {
+      "name": "matches — two stars are one",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "a**b"
+      },
+      "endpoint_key": "ab",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — two stars are one, over a run",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "a**b"
+      },
+      "endpoint_key": "aXYZb",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — an embedded newline is an ordinary character in a pattern",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.track\n*"
+      },
+      "endpoint_key": "delivery.track\npackage",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — a star matches a newline",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.*"
+      },
+      "endpoint_key": "delivery.track\npackage",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "note": "`.` does not without re.DOTALL in Python or the `s` flag in JavaScript, so the default regex translation of `*` to `.*` refuses a key this accepts."
+    },
+    {
+      "name": "matches — a literal does not match a key with a trailing newline",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.orders"
+      },
+      "endpoint_key": "delivery.orders\n",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "Python's `$` matches immediately before a trailing newline, so a `^…$` translation accepts a key this rule does not name. The two newline rules pull in opposite directions and a translation can get either wrong alone."
+    },
+    {
+      "name": "matches — no case folding, on the key",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.*"
+      },
+      "endpoint_key": "Delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "`FinRetail.*` matches nothing that `finretail.*` matches. Folding would reintroduce the divergence in the form nobody writes a test for, because the locale-sensitive way to fold sits a keystroke from the locale-independent one."
+    },
+    {
+      "name": "matches — no case folding, on the pattern",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "Delivery.*"
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false
+    },
+    {
+      "name": "matches — no Unicode normalisation",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "café.*"
+      },
+      "endpoint_key": "café.orders",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "`é` and `e` plus a combining acute (`́`) are canonically equivalent and are not the same key here. Normalising both sides to NFC is a habit picked up from path handling, and it makes the set of keys a rule covers depend on which form the operator's editor saved."
+    },
+    {
+      "name": "matches — the same form matches itself",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "café.*"
+      },
+      "endpoint_key": "café.orders",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true,
+      "note": "So the case above is a statement about normalisation rather than about the pattern being wrong."
+    },
+    {
+      "name": "matches — a question mark is a literal",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.?rders"
+      },
+      "endpoint_key": "delivery.orders",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "Every character but `*` is a literal — `?`, `[`, `]` and `\\` included — and there is no escape character."
+    },
+    {
+      "name": "matches — a question mark matches itself",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.?rders"
+      },
+      "endpoint_key": "delivery.?rders",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — a bracket expression is not a character class",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.[ab]"
+      },
+      "endpoint_key": "delivery.a",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "Python's fnmatch supports `[seq]` and `[!seq]` and folds case on some platforms, which is why it must not be used."
+    },
+    {
+      "name": "matches — a bracket expression matches itself",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.[ab]"
+      },
+      "endpoint_key": "delivery.[ab]",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — a backslash is a literal",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.a\\b"
+      },
+      "endpoint_key": "delivery.a\\b",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": true
+    },
+    {
+      "name": "matches — a backslash does not escape a star",
+      "condition": {
+        "field": "endpoint_key",
+        "operator": "matches",
+        "value": "delivery.a\\*"
+      },
+      "endpoint_key": "delivery.aX",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "holds": false,
+      "note": "There being no escape character means a literal `*` cannot be written; an endpoint key containing one is matched by `eq`."
+    },
+    {
+      "name": "an endpoint with no binding entry is subject to every policy",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "delivery.other",
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "Read the other way round it is a total loss of enforcement, which is why the contract states it twice."
+    },
+    {
+      "name": "a binding narrows to the policies it names",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "delivery.track_package",
+            "mode": "gated",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-000000000002"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000002",
+        "alerts": []
+      },
+      "note": "The low-score rule matches and is not in this endpoint's chain."
+    },
+    {
+      "name": "a binding in mode open narrows to nothing and the walk allows",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "delivery.track_package",
+            "mode": "open",
+            "policy_ids": []
+          }
+        ],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": []
+      },
+      "note": "**Do not fall back to the whole chain when narrowing empties it.** Rail Center has a fallback of exactly that shape and it belongs to the publishing side alone: it drops a binding whose policies are all absent or disabled before the bundle is written. Copying it here makes the two sides disagree — deny there, allow here."
+    },
+    {
+      "name": "a binding naming only a disabled policy narrows to nothing too",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": false
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "delivery.track_package",
+            "mode": "gated",
+            "policy_ids": [
+              "5c8f1e42-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": []
+      },
+      "note": "The same empty narrowing by the other route, and the one a publishing-side fallback would turn into a denial by the whole chain."
+    },
+    {
+      "name": "a bound id spelled non-canonically still narrows",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [
+          {
+            "endpoint_key": "delivery.track_package",
+            "mode": "gated",
+            "policy_ids": [
+              "5C8F1E42-0000-4000-8000-000000000002"
+            ]
+          }
+        ],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000002",
+        "alerts": []
+      },
+      "note": "Both sides of the membership test are canonicalised, so a non-canonically spelled id matches its policy rather than nothing."
+    },
+    {
+      "name": "the first matching denying policy wins and stops the walk",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "A lower priority number is genuinely higher precedence rather than merely earlier in a list that keeps being read."
+    },
+    {
+      "name": "priority 9 precedes priority 10",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 10,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 9,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "Numerically, not as text: a default string comparator gets this backwards."
+    },
+    {
+      "name": "equal priorities are separated by the canonical id",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 1,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "An implementation reading two equal priorities must not be free to choose, or the two sides disagree exactly where the policies conflict."
+    },
+    {
+      "name": "a non-canonically spelled id is reported canonically",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "{5C8F1E42-0000-4000-8000-000000000001}",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "A decision reporting the bundle's own spelling names the same policy two ways across a decision and its denial report."
+    },
+    {
+      "name": "the denial names the policy that actually matched",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "alert",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000002",
+        "alerts": [
+          "5c8f1e42-0000-4000-8000-000000000001"
+        ]
+      },
+      "note": "An implementation reporting the first rule in its chain produces a record that is wrong and that nothing downstream will contradict."
+    },
+    {
+      "name": "alerts that accumulated before a denial travel with it",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "alert",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "alert",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000003",
+            "name": "P-03",
+            "priority": 3,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000003",
+        "alerts": [
+          "5c8f1e42-0000-4000-8000-000000000001",
+          "5c8f1e42-0000-4000-8000-000000000002"
+        ]
+      },
+      "note": "An alert that matched on a request a later denial stopped is still something an operator asked to be told about."
+    },
+    {
+      "name": "alerts accumulate in evaluation order, not in the order the bundle listed them",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "alert",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000003",
+            "name": "P-03",
+            "priority": 3,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "alert",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "alert",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": [
+          "5c8f1e42-0000-4000-8000-000000000001",
+          "5c8f1e42-0000-4000-8000-000000000002",
+          "5c8f1e42-0000-4000-8000-000000000003"
+        ]
+      },
+      "note": "Listed at priorities [2, 3, 1] precisely so a reader that accumulates in bundle order fails it."
+    },
+    {
+      "name": "an alert never denies",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "alert",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": [
+          "5c8f1e42-0000-4000-8000-000000000001"
+        ]
+      }
+    },
+    {
+      "name": "any action that is not alert denies — an action this build cannot read",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "quarantine",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "The database constrains action to block or alert; an enforcement point builds policies from wire JSON where no such constraint reaches. A matched policy whose action cannot be read is still a matched policy."
+    },
+    {
+      "name": "any action that is not alert denies — the right action in the wrong case",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "BLOCK",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "The database constrains action to block or alert; an enforcement point builds policies from wire JSON where no such constraint reaches. A matched policy whose action cannot be read is still a matched policy."
+    },
+    {
+      "name": "any action that is not alert denies — a near miss for `alert`",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "alerts",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "The database constrains action to block or alert; an enforcement point builds policies from wire JSON where no such constraint reaches. A matched policy whose action cannot be read is still a matched policy."
+    },
+    {
+      "name": "any action that is not alert denies — no action at all",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": null,
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "The database constrains action to block or alert; an enforcement point builds policies from wire JSON where no such constraint reaches. A matched policy whose action cannot be read is still a matched policy."
+    },
+    {
+      "name": "any action that is not alert denies — an action that is not a string",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": 17,
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "The database constrains action to block or alert; an enforcement point builds policies from wire JSON where no such constraint reaches. A matched policy whose action cannot be read is still a matched policy."
+    },
+    {
+      "name": "a policy that matches nothing denies nothing",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 95
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": []
+      }
+    },
+    {
+      "name": "an empty chain allows",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": []
+      }
+    },
+    {
+      "name": "a chain of only disabled policies allows",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": false
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": []
+      },
+      "note": "A disabled policy is skipped, not evaluated and discarded."
+    },
+    {
+      "name": "a policy missing the enabled key is enabled",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block"
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "A rule an operator never switched off is one they expect to be running."
+    },
+    {
+      "name": "enabled must be exactly false to skip",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": []
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "Not merely falsy: `[]` is falsy in Python and truthy in JavaScript."
+    },
+    {
+      "name": "a disabled policy's condition is never read",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "invented_field",
+              "operator": "eq",
+              "value": "x"
+            },
+            "action": "block",
+            "enabled": false
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000002",
+        "alerts": []
+      },
+      "note": "The remedy for a rule nobody can read is to switch it off, and that only works if disabling is decided before interpreting."
+    },
+    {
+      "name": "a rule the walk never reaches changes nothing",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000009",
+            "name": "P-09",
+            "priority": 9,
+            "condition": {
+              "field": "invented_field",
+              "operator": "eq",
+              "value": "x"
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-000000000001",
+        "alerts": []
+      },
+      "note": "**The refusal is lazy.** The walk stops at the first match, so a rule at priority 9 is never reached once priority 1 has denied, and that request has a clean answer. Refusing the whole bundle up front turns one bad condition into a total outage and answers differently here."
+    },
+    {
+      "name": "a rule the walk does reach refuses the request, alerts and all",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "endpoint_key",
+              "operator": "matches",
+              "value": "*"
+            },
+            "action": "alert",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000009",
+            "name": "P-09",
+            "priority": 9,
+            "condition": {
+              "field": "invented_field",
+              "operator": "eq",
+              "value": "x"
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "refusal": "uninterpretable_condition",
+      "note": "What separates 'refuse the request' from 'refuse but keep the alerts' and from 'skip the rule and keep walking'. Alerts already accumulated are discarded with the decision: they were the first half of a verdict that was never reached."
+    },
+    {
+      "name": "a rule behind an unreadable one is never consulted",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000001",
+            "name": "P-01",
+            "priority": 1,
+            "condition": {
+              "field": "invented_field",
+              "operator": "eq",
+              "value": "x"
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-000000000002",
+            "name": "P-02",
+            "priority": 2,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 95
+      },
+      "refusal": "uninterpretable_condition",
+      "note": "The refusal comes first in the chain, so the walk ends there whatever the later rule would have answered."
+    },
+    {
+      "name": "the seeded chain denies a request carrying no ticket",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000f0",
+            "name": "P0 — Deny unknown agents",
+            "priority": 0,
+            "condition": {
+              "field": "x_rail_header",
+              "operator": "missing"
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000f1",
+            "name": "P1 — Deny critical-tier agents",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "header": null,
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-0000000000f0",
+        "alerts": []
+      },
+      "ticket_state": "absent"
+    },
+    {
+      "name": "the seeded chain denies a low-scoring agent by the rule for it",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000f0",
+            "name": "P0 — Deny unknown agents",
+            "priority": 0,
+            "condition": {
+              "field": "x_rail_header",
+              "operator": "missing"
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000f1",
+            "name": "P1 — Deny critical-tier agents",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 10
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-0000000000f1",
+        "alerts": []
+      }
+    },
+    {
+      "name": "the seeded chain allows a scored agent presenting a valid ticket",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000f0",
+            "name": "P0 — Deny unknown agents",
+            "priority": 0,
+            "condition": {
+              "field": "x_rail_header",
+              "operator": "missing"
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000f1",
+            "name": "P1 — Deny critical-tier agents",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": 95
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": []
+      }
+    },
+    {
+      "name": "an unscored agent is denied by a rule about an absent score",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000f1",
+            "name": "P1b — Deny an unscored agent",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "missing"
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": null
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "5c8f1e42-0000-4000-8000-0000000000f1",
+        "alerts": []
+      },
+      "note": "posture_score is null until scoring runs. A reader that lets a null read as present stops this rule firing on exactly the agents it exists for — and `lt 40` would not catch them either, since an ordered operator does not hold against an absence."
+    },
+    {
+      "name": "an unscored agent is not caught by the low-score rule",
+      "bundle": {
+        "version": "v-decide",
+        "policies": [
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000f0",
+            "name": "P0 — Deny unknown agents",
+            "priority": 0,
+            "condition": {
+              "field": "x_rail_header",
+              "operator": "missing"
+            },
+            "action": "block",
+            "enabled": true
+          },
+          {
+            "id": "5c8f1e42-0000-4000-8000-0000000000f1",
+            "name": "P1 — Deny critical-tier agents",
+            "priority": 1,
+            "condition": {
+              "field": "posture_score",
+              "operator": "lt",
+              "value": 40
+            },
+            "action": "block",
+            "enabled": true
+          }
+        ],
+        "bindings": [],
+        "rejected": []
+      },
+      "endpoint_key": "delivery.track_package",
+      "now": 1700000000,
+      "claims": {
+        "agent_id": "agent-1",
+        "exp": 4102444800,
+        "posture_score": null
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": []
+      },
+      "note": "The other half of the pair above, and why the seeded chain needs both rules rather than one."
+    }
+  ]
+}

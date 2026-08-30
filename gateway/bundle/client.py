@@ -151,6 +151,17 @@ def _sendable(headers: dict[str, str]) -> dict[str, str]:
     return headers
 
 
+def _reject_non_json_constant(name: str) -> Any:
+    """Refuse `NaN`, `Infinity` and `-Infinity` in a fetched bundle.
+
+    Named rather than a lambda so the `ValueError` it raises says which token
+    was refused, and so `_fetch`'s comment has something to point at. The same
+    guard sits on the ticket reader; both doors need it, because a number that
+    is not JSON is a divergence wherever it enters.
+    """
+    raise ValueError(f"{name} is not JSON")
+
+
 @dataclass(frozen=True)
 class RefreshOutcome:
     """What one attempt produced — for the log line, and for a test to assert on.
@@ -543,7 +554,22 @@ class BundleHolder:
                         f"{self._max_bytes} bytes this gateway reads"
                     )
                 chunks.append(chunk)
-            return json.loads(b"".join(chunks))
+            # `parse_constant` refuses `NaN`, `Infinity` and `-Infinity`, which
+            # Python's `json` accepts by default and the reference
+            # implementation's `JSON.parse` throws on. None of the three is
+            # JSON, and a policy operand carrying one is a shape the contract
+            # names outright: a `NaN` satisfies neither `lt 40` nor `gte 40`, so
+            # it escapes a threshold rule from both directions while every type
+            # check calls it a number. `gateway.ticket` refuses them at the
+            # other door for the same reason.
+            #
+            # This is **not** the rule about an operand that *overflows* to
+            # infinity. `1e400` is valid JSON, reads as `inf` on both sides, and
+            # is evaluated rather than refused; the literal `Infinity` is a
+            # different token and is not JSON at all.
+            return json.loads(
+                b"".join(chunks), parse_constant=_reject_non_json_constant
+            )
 
     def _unreachable(self, reason: str, held: str | None) -> RefreshOutcome:
         # Both halves are filtered, and both need to be. `held` is a version off
