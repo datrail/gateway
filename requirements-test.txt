@@ -1,0 +1,24 @@
+# The test environment: the runtime plus what exercises it. Kept separate from
+# requirements-dev.txt, which holds the linter alone — CI installs one or the
+# other depending on the job, and neither reaches the image.
+-r requirements.txt
+
+# 8.4.0 or newer is the floor, and not by preference: through 8.3.x an async
+# test missing its marker is skipped with a warning and the run still exits 0,
+# so the one place the strictness in pytest.ini matters — the CI job gating the
+# release — is the one place it would not have held. 8.4.0 replaced that skip
+# with a failure. The exact version below is for reproducibility, as everywhere
+# else in these files, not because 8.4 or 8.5 would be wrong.
+pytest==9.1.1
+pytest-asyncio==1.4.0
+httpx==0.28.1
+# The schemas under `schemas/` are published as a contract, so something has to
+# check they are valid JSON Schema and that the examples in them satisfy their
+# own rules. It arrives transitively through mcp either way; pinning it here
+# says the suite depends on it rather than borrowing it.
+jsonschema==4.26.0
+
+# Turns a hung test into a failure that names itself. Without it a test that
+# never returns is indistinguishable from a slow one until the job's own limit
+# fires, and the log says only that the job was cancelled.
+pytest-timeout==2.3.1

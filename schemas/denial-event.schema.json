@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/datrail/gateway/schemas/denial-event.schema.json",
+  "title": "Denial event",
+  "description": "The body of `POST /v1/denials` — one request an enforcement point refused, reported to the control plane.\n\nWhat this schema can express is shape. Four of the event's rules are about meaning and are stated here in prose because no schema carries them:\n\n1. **The `policy_id` names the policy that actually matched.** Rail Center records that attribution and does not re-derive it: every denial it serves carries `policy_attribution: \"reported\"`, and the alert raised beside one names the enforcement point as the source rather than asserting the verdict as its own. So there is nothing downstream to catch a wrong id. An implementation reporting the first rule in its chain, or a rule it was configured with rather than one it evaluated, produces a record that is wrong and that nothing will contradict.\n2. **A refusal is not a denial.** A request the ruleset could not be applied to — no bundle held, or a condition outside the reader's grammar — is answered `503` and reported here **not at all**. Naming a policy in a report is the only thing that makes it the policy that decided, so a report sent for a request no policy judged attributes a verdict nobody reached. The rule is the reporting side of the evaluation contract's `503`-and-no-denial paragraph.\n3. **A verdict is not reconstructable from a report.** `endpoint_key` travels — the *resolved* key, the same value the walk took and never a raw ingress path — while the ticket does not, and the claims a condition read are not among the fields below. The endpoint a call was refused against is on the record without the decision being re-derivable from it.\n4. **A claim off the ticket is the caller's, not the enforcement point's.** The `x-rail` ticket is unsigned, so `agent_id` and `posture_score` are chosen by whoever sent the request. They are reported because an operator reading a denial wants to know what was claimed, never because they are established. A reader treating either as identity has misread the ticket contract.\n\nOne field is a wire format rather than a label. `metadata[\"x-rail-status\"]` is read by Rail Center under that exact key with no fallback, and holds the **enforcement point's own** reading of the ticket. A verdict reported under any other name leaves the operator-facing column blank, and a caller's claimed status placed there would put forgeable text where an operator reads the decision that was made.\n\nA reporter is not conformant by validating against this file. `metadata` is unbounded by design here and on the receiving side, so what a reporter puts in it is a judgement this schema cannot make for it.\n\n**Two places this is deliberately stricter than the receiver.** `posture_score` is a number here, where the receiver also coerces a numeric string — a conformant reporter sends the number, and describing the coercion would document a latitude rather than the contract. And `metadata`'s three named keys are described but not required: a reporter that omits `x-rail-status` produces a record with a blank verdict column rather than a rejected one, so the receiver cannot refuse it and neither does this.",
+  "type": "object",
+  "required": [
+    "policy_id",
+    "denied_at"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "policy_id": {
+      "$ref": "#/$defs/uuid",
+      "description": "The policy that matched and denied. Canonical lowercase-hyphenated, the same spelling the decision reports — an implementation reporting a bundle's own non-canonical spelling names the same policy two ways across a decision and its report."
+    },
+    "denied_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the request was refused, as an absolute instant. A local-time value shifts every denial by the host's UTC offset, and a denial's time is what an operator correlates against everything else they are looking at."
+    },
+    "datasource_slug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "The data source this denial is against, named by the slug it was registered under. **Exactly one of `datasource_slug` and `datasource_id` is required** — a body naming neither is refused, while one naming a data source that does not resolve is recorded with the claim and no link. An enforcement point already holds the slug, since it is the segment it qualifies every endpoint key with, where a row id is a second value it has to be told and can hold a stale copy of."
+    },
+    "datasource_id": {
+      "$ref": "#/$defs/uuid",
+      "description": "The data source by row id, the alternative to `datasource_slug`. Exactly one of the two."
+    },
+    "endpoint_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The **resolved** endpoint key the walk was given — `<datasource_slug>.<tool_name>` — matched after any ingress rewrite and never the raw path. Null where the call named no endpoint: a message that names no tool by design, or one whose name could not be composed into a key. Those two are distinguishable in `metadata.endpoint_resolution` and deliberately not by an absent key, since drift must never masquerade as an endpoint with no rule."
+    },
+    "agent_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/uuid"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The agent the ticket claimed to be for. Off an unsigned ticket, so it is a claim rather than an identity. Omit it rather than send a spelling the receiver refuses: a rejected body is a denial that is not recorded at all, so a malformed claim costs a column while sending it costs the row."
+    },
+    "posture_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "The posture score the ticket claimed. A claim, on the same reasoning as `agent_id`. Must be finite — a non-finite value is not JSON, and `NaN` in particular satisfies neither `lt` nor `gte`, so it would record as a score no threshold describes."
+    },
+    "source_ip": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Where the refused request came from, if the enforcement point knows. Unbounded here and truncated by the receiver to fit its column, so an over-long value costs precision rather than the row."
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Context an operator reads beside the verdict. **Unbounded by design, on both sides**, so an enforcement point copying caller-supplied text into it is the last place a bound can be applied.",
+      "additionalProperties": true,
+      "properties": {
+        "x-rail-status": {
+          "type": "string",
+          "enum": [
+            "absent",
+            "undecodable",
+            "malformed",
+            "expired",
+            "valid"
+          ],
+          "description": "**The enforcement point's own reading of the `x-rail` header**, under the exact key the control plane reads. All four unusable states fold into one decision, and an operator still has to tell an expired ticket — a correctly formed credential that is simply too old — from one that could not be read at all. Never the caller's claimed status: anyone can set a request header, and this is the field an operator reads as the decision."
+        },
+        "claimed-x-rail-status": {
+          "type": "string",
+          "description": "What the caller said about why it supplied no ticket — a proxy sends one of `not-found`, `expired`, `issuer-unreachable`. **It proves nothing and identifies nobody**: the header is unauthenticated and its vocabulary is public, so anyone can send `not-found` on a request that was going to be denied anyway. Recorded as a self-description that is right in the ordinary case, which is why the key says `claimed` and why it is not the key above. Note `expired` means opposite things in the two: here the proxy is saying the ticket it held lapsed so it sent none, which reads as `absent` in the verdict."
+        },
+        "endpoint_resolution": {
+          "type": "string",
+          "description": "How the endpoint key was arrived at, reported beside the key and never inside it — so a call that resolved to nothing stays distinguishable from an endpoint with no rule."
+        }
+      }
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 255,
+      "description": "An optional sender-minted key, and a reporter is better off omitting it. With no key the receiver de-duplicates on an identity it derives itself, over the record it stores rather than over the body it was sent — what that identity covers, and which retries fall outside it, is documented by the receiver rather than promised here. **`denied_at` is part of it**, so a reporter must resend the body it built rather than rebuild it per attempt: a rebuilt report carries a fresh timestamp and is a different record. This key overrides that derivation and exists for two refusals that really are distinct and really are identical; spending one key on two different bodies is refused."
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "description": "A UUID. The canonical lowercase-hyphenated form is what an enforcement point reports; the braced, `urn:uuid:` and undashed 32-hex spellings are also read, and a spelling outside those four is refused with the whole body.",
+      "pattern": "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\}|urn:uuid:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32})$"
+    }
+  },
+  "examples": [
+    {
+      "policy_id": "11111111-0000-4000-8000-000000000001",
+      "datasource_slug": "delivery",
+      "endpoint_key": "delivery.track_package",
+      "denied_at": "2026-07-28T20:41:07.512247+00:00",
+      "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+      "posture_score": 12,
+      "metadata": {
+        "endpoint_resolution": "resolved",
+        "x-rail-status": "valid",
+        "claimed-x-rail-status": "not-found"
+      }
+    },
+    {
+      "policy_id": "11111111-0000-4000-8000-000000000000",
+      "datasource_slug": "delivery",
+      "endpoint_key": null,
+      "denied_at": "2026-07-28T20:41:09.004311+00:00",
+      "metadata": {
+        "endpoint_resolution": "keyless",
+        "x-rail-status": "absent"
+      }
+    }
+  ],
+  "oneOf": [
+    {
+      "required": [
+        "datasource_slug"
+      ],
+      "not": {
+        "required": [
+          "datasource_id"
+        ]
+      }
+    },
+    {
+      "required": [
+        "datasource_id"
+      ],
+      "not": {
+        "required": [
+          "datasource_slug"
+        ]
+      }
+    }
+  ]
+}

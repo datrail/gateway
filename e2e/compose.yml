@@ -1,0 +1,140 @@
+# The gateway, a control plane and an upstream, in containers, asserting what
+# actually crossed the wire. `docker compose up` is both the test and the
+# quickstart: it is the only path where someone with neither a Rail Center nor
+# an agent sees a policy fetched, a call refused and a denial reported.
+#
+#   docker compose -f e2e/compose.yml up --build --force-recreate --abort-on-container-exit --exit-code-from driver
+#   docker compose -f e2e/compose.yml down -v --remove-orphans
+#
+# The exit code of the first is the result, and `--force-recreate` is part of
+# the command rather than a nicety: the startup bundle-fetch count is read from
+# a journal that nothing resets, so a stub container surviving an earlier run
+# carries its fetches into this one and the count reads 4 rather than 2 —
+# blaming a gateway for a stub's state.
+
+name: datrail-gateway-e2e
+
+x-gateway: &gateway
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  healthcheck:
+    # Liveness, not readiness — and the distinction is why this is `/health`.
+    # `/ready` answers 503 until a bundle is held, except under
+    # `RAIL_TICKET_MODE=none` — the pass-through this anchor also serves —
+    # which builds no holder and so is ready at once. Waiting on `/ready` here
+    # would make the two evaluating gateways' startup depend on the control
+    # plane being up, which is the coupling the two routes exist to keep apart.
+    test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/health').read()"]
+    interval: 2s
+    timeout: 3s
+    retries: 15
+
+x-wiremock: &wiremock
+  # Pinned by digest as well as by tag, because a Docker Hub tag is mutable and
+  # this stack is a job on the release-gating path — `container-release.yml`
+  # gates publishing on the CI workflow this runs in. The tag stays for the
+  # reader; the digest is what is actually pulled. Nothing is forfeited by it:
+  # the floating regime `ci.yml` documents for actions is about picking up
+  # runner-compatibility fixes without a commit, which a stub server pinned to
+  # an exact patch version is not waiting on.
+  image: wiremock/wiremock:3.9.1@sha256:8fe02bc3f9b63deb1454d41750dbaf081adf4b3e8c74fd8e31f790bee5647b88
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://localhost:8080/__admin/health"]
+    interval: 2s
+    timeout: 3s
+    retries: 15
+
+services:
+  # Stands in for Rail Center: serves the policy bundle and accepts denials.
+  # Its request journal is what the driver asserts denials against — a log line
+  # says the gateway believes it reported one, the journal says one arrived.
+  rail-center:
+    <<: *wiremock
+    volumes:
+      - ./rc-mappings:/home/wiremock/mappings:ro
+
+  # Stands in for an MCP server, and records every request so the driver can
+  # assert on what was forwarded rather than on log output.
+  upstream:
+    <<: *wiremock
+    volumes:
+      - ./mcp-mappings:/home/wiremock/mappings:ro
+
+  # Enforcing: evaluates, refuses, and reports. The default mode, so this is
+  # also the one an unconfigured deployment runs.
+  gateway-enforce:
+    <<: *gateway
+    environment:
+      RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
+      RAIL_CENTER_URL: http://rail-center:8080
+      RAIL_DATASOURCE_SLUG: delivery
+      RAIL_TICKET_MODE: enforce
+      # An hour, so the refresh loop never fires during a run. The driver counts
+      # startup fetches to establish that the pass-through asks for nothing, and
+      # a refresh landing mid-count would turn that assertion into a race.
+      RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS: "3600"
+    depends_on:
+      rail-center: {condition: service_healthy}
+      upstream: {condition: service_healthy}
+
+  # Observing: the same walk, the same verdict in the log, and nothing acted on
+  # — no refusal and no denial reported. A dry run before enforcement is turned
+  # on, and the mode a deployment rolls back to.
+  gateway-observe:
+    <<: *gateway
+    environment:
+      RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
+      RAIL_CENTER_URL: http://rail-center:8080
+      RAIL_DATASOURCE_SLUG: delivery
+      RAIL_TICKET_MODE: observe
+      RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS: "3600"
+    depends_on:
+      rail-center: {condition: service_healthy}
+      upstream: {condition: service_healthy}
+
+  # A pass-through. No `RAIL_CENTER_URL` and no `RAIL_DATASOURCE_SLUG` are set,
+  # and that is the assertion rather than an omission: `none` builds no holder,
+  # so a deployment that turns enforcement off needs no control-plane
+  # configuration at all.
+  gateway-passthrough:
+    <<: *gateway
+    environment:
+      RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
+      RAIL_TICKET_MODE: none
+    depends_on:
+      upstream: {condition: service_healthy}
+
+  # The uid the image runs as, against the same build the three gateways use.
+  # This cannot be an assertion in driver.sh: the driver is a separate container
+  # and a uid is not visible across one, and reporting it from `/health` would
+  # be a production change made for a test.
+  #
+  # The healthcheck is the assertion and the driver waiting on it is the gate —
+  # a wrong uid never reports healthy, the run stops at "dependency failed to
+  # start", and the driver never executes. It sleeps rather than exiting because
+  # a container that exits trips --abort-on-container-exit and tears the stack
+  # down before the driver has run.
+  image-user:
+    <<: *gateway
+    # Nothing to flush, and `sleep` does not handle SIGTERM — without this,
+    # teardown waits out the full stop grace period on every run.
+    command: ["sleep", "infinity"]
+    stop_grace_period: 0s
+    healthcheck:
+      test: ["CMD", "sh", "-c", "test \"$(id -u)\" = 10001"]
+      interval: 1s
+      timeout: 2s
+      retries: 3
+
+  driver:
+    image: curlimages/curl:8.11.1@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+    env_file: ./tickets.env
+    volumes:
+      - ./driver.sh:/driver.sh:ro
+    entrypoint: ["sh", "/driver.sh"]
+    depends_on:
+      gateway-enforce: {condition: service_healthy}
+      gateway-observe: {condition: service_healthy}
+      gateway-passthrough: {condition: service_healthy}
+      image-user: {condition: service_healthy}

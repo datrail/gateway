@@ -1,0 +1,253 @@
+# Lint and test on every change, so a break surfaces on the pull request rather
+# than after a release tag exists.
+#
+# container-release.yml calls this workflow and gates publishing on it. A tag
+# can sit on any commit — including one that never went through a pull request
+# — so the release path re-runs these checks rather than trusting that they ran
+# earlier.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Commit-ish to check out. A called workflow's `github.ref` is the
+          caller's, which on workflow_dispatch is the branch the run was
+          launched from rather than the tag being published — so the release
+          path passes the resolved tag explicitly. Empty means "whatever
+          triggered this run", which is right for pull_request and push.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Two pinning regimes, deliberately. Python packages are pinned exactly, because
+# they are what the image ships and what a bug report is written against. The
+# actions below are pinned to a major tag, which floats: they build nothing that
+# is released, and a workflow that cannot pick up a runner-compatibility fix
+# without a commit is a workflow that breaks on GitHub's schedule rather than
+# this repository's. The trade is `contents: read` above, plus the actions cache
+# these jobs necessarily reach — and that one is not bounded by the ref: cache
+# writes are per-ref, but a run restores from its own branch *and* the default
+# branch, so anything written here on main is reachable from every later pull
+# request. Nothing secret goes there, and nothing here closes it: pip reuses a
+# cached wheel under its pinned version without checking it, so the exact pins
+# two files over do not help, and requirements.txt says itself that most of what
+# lands in that cache is unpinned anyway. Closing it wants hashes.
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      # requirements-dev.txt pins ruff exactly, so this runs the same tool at
+      # the same version a contributor runs locally.
+      - run: pip install -r requirements-dev.txt
+
+      # `ruff check` plus `ruff format --check`, per the Makefile.
+      - run: make lint
+
+  # Bounded because the default is six hours, and a stuck job holds a runner for
+  # an afternoon. Ten minutes rather than one: `pytest.ini` already fails an
+  # individual test at thirty seconds, so this is the ceiling on everything
+  # around the suite — checkout, the interpreter, a cold pip cache — none of
+  # which the suite's own five seconds predicts.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # Both ends of the supported range, because a defect that only exists at
+      # one end is invisible from the other and this project has shipped two.
+      # `ruff.toml` declares 3.10 the floor and the image ships 3.12, and ruff's
+      # target version gates syntax alone. `wait_for`'s cancellation semantics
+      # differ across that span, `gateway/bundle/client.py` calls it on every
+      # fetch, and which stdlib attributes exist differs across it too — that
+      # second one is why the same call is `wait_for` and not the
+      # `asyncio.timeout` block a reader of 3.12 alone would reach for. A
+      # linter reads neither. A single interpreter here checked whichever end
+      # it ran and called it the whole range.
+      #
+      # Moving the floor means moving `target-version` in `ruff.toml` with it;
+      # moving the ceiling means moving the Dockerfile. Neither is derivable
+      # from this file, so this list is written out rather than computed.
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          # Both files, because requirements-test.txt only `-r`s the other one:
+          # keyed on the including file alone, a runtime pin could move and the
+          # cache would not rotate.
+          cache-dependency-path: |
+            requirements-test.txt
+            requirements.txt
+
+      # requirements-test.txt includes requirements.txt, so the suite runs
+      # against the exact pins the image installs.
+      - run: pip install -r requirements-test.txt
+
+      # Unbuffered and verbose. `-q` to a pipe is block-buffered, so a run that
+      # hangs prints nothing at all and the log cannot say which test it
+      # stopped in — which is exactly what happened, for fifty-four minutes.
+      - run: make test
+        env:
+          PYTHONUNBUFFERED: "1"
+          # -vv, not -v. Verbosity is additive and ADDOPTS is prepended, so
+          # -v against the Makefile's -q nets zero and prints dots, which is
+          # the state this was meant to fix.
+          PYTEST_ADDOPTS: "-vv"
+
+
+  # Build-only, amd64 only. The question here is "does the image still build",
+  # which the arm64 leg answers no differently — it would just spend minutes
+  # doing it under emulation. Without this job the Dockerfile is first built by
+  # container-release.yml, on a tag, after the gate has already passed.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The scope the release build reads from. A literal name rather than
+      # `github.workflow`: when called from container-release.yml it resolves
+      # to the caller's name and would match, but this workflow also runs
+      # directly on main, where it resolves to `CI` — so those warm caches would
+      # never be visible to a release.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: gateway:ci
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,mode=max,scope=image
+
+      # `docker build` exiting 0 proves the image assembles, not that it runs:
+      # a CMD naming a module that does not exist builds cleanly and fails on
+      # start. This is the cheapest thing that tells the two apart.
+      # Both addresses are unresolvable, which is the point: this asks whether
+      # the image starts and tells the truth about itself while it can reach
+      # nothing, and that is the state every deployment is in for its first few
+      # seconds. A gateway that needed its control plane in order to come up
+      # would fail here rather than in production.
+      - name: The image starts, serves liveness, and reports itself unready
+        run: |
+          set -euo pipefail
+          # A non-default port on purpose. With 8080 this step passes against
+          # an image that validates RAIL_GATEWAY_PORT and then listens
+          # somewhere else, which is the defect it exists to catch.
+          # Every variable `.env.example` says this gateway needs, and the
+          # step exists to catch the day that list grows: a required variable
+          # added without a line here is a container that cannot start, and
+          # this is the only check that runs one. `RAIL_TICKET_MODE` is left
+          # unset on purpose, so the default path is the one exercised.
+          docker run -d --name gw -p 9100:9100 \
+            -e RAIL_GATEWAY_PORT=9100 \
+            -e RAIL_CENTER_URL=http://rail-center.invalid \
+            -e RAIL_DATASOURCE_SLUG=delivery \
+            -e RAIL_GATEWAY_UPSTREAM_URL=http://upstream.invalid/mcp gateway:ci
+
+          # Forty rather than twenty, for a wait that should be under six: the
+          # lifespan awaits its first bundle fetch before uvicorn serves
+          # anything, and that wait is bounded by STARTUP_FETCH_GRACE_SECONDS
+          # (5s) — not by the holder's own deadline, which a fetch left running
+          # past the grace goes on paying in the background. An unresolvable
+          # host fails in milliseconds in any case, so this margin is for the
+          # runner having a bad day rather than for the expected path.
+          live=""
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:9100/health >/dev/null; then
+              live=yes; break
+            fi
+            sleep 1
+          done
+          if [ -z "$live" ]; then
+            echo "::error::the image did not serve /health within 40s"
+            docker logs gw; docker rm -f gw >/dev/null; exit 1
+          fi
+          echo "liveness ok"
+
+          # `-o /dev/null -w` rather than `-f`: the expected answer is a 503,
+          # which `-f` turns into a non-zero exit and this step into a failure
+          # for the image behaving correctly.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9100/ready)
+          if [ "$code" != "503" ]; then
+            echo "::error::/ready answered $code holding no bundle, expected 503"
+            docker logs gw; docker rm -f gw >/dev/null; exit 1
+          fi
+          echo "readiness ok"
+          docker rm -f gw >/dev/null
+
+  # The e2e stack, which is the only gate that exercises a decision over the
+  # wire: the suite runs a real gateway against a real upstream, but its control
+  # plane is a mocked transport, so no test in it decides a call against a
+  # bundle that was fetched over the wire — and the `image` job above runs one
+  # container that reaches nothing. Neither can answer whether a policy fetched
+  # from a control plane refuses a real MCP call and reports it. Without this
+  # job that stack is a file nobody runs, and it would decay within a release or
+  # two while still reading as coverage.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      # `--exit-code-from driver` is what makes this a gate: it propagates the
+      # driver's exit code and, with `--abort-on-container-exit`, tears the rest
+      # of the stack down when it finishes. Without it compose reports its own
+      # success at bringing containers up, which is true of a run where every
+      # assertion failed.
+      #
+      # `--force-recreate` does nothing on a fresh runner, which has no
+      # container to reuse, and it is here anyway: it makes this the same string
+      # both READMEs and `e2e/compose.yml`'s header document, so the command a
+      # stranger copies is the command this gate runs. A quickstart that has
+      # drifted from the gate is green here and broken on every machine that
+      # follows it.
+      - name: A policy refuses a real call, and the denial is reported
+        run: |
+          set -euo pipefail
+          docker compose -f e2e/compose.yml up --build --force-recreate \
+            --abort-on-container-exit --exit-code-from driver
+
+      # The driver asserts against request journals, so a failure names which
+      # assertion went and nothing about why. These are where that lives.
+      - name: Logs, on failure
+        if: failure()
+        run: docker compose -f e2e/compose.yml logs --no-color
+
+      - name: Down
+        if: always()
+        run: docker compose -f e2e/compose.yml down -v --remove-orphans

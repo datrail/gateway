@@ -1,0 +1,14 @@
+{
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/v1/policy-bundle"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{\"version\": \"e2e-v1\", \"generated_at\": \"2026-01-01T00:00:00Z\", \"policies\": [{\"id\": \"11111111-0000-4000-8000-000000000000\", \"name\": \"P0 \\u2014 Deny unknown agents\", \"priority\": 0, \"condition\": {\"field\": \"x_rail_header\", \"operator\": \"missing\"}, \"action\": \"block\", \"enabled\": true}, {\"id\": \"11111111-0000-4000-8000-000000000001\", \"name\": \"P1 \\u2014 Deny critical-tier agents\", \"priority\": 1, \"condition\": {\"field\": \"posture_score\", \"operator\": \"lt\", \"value\": 40}, \"action\": \"block\", \"enabled\": true}, {\"id\": \"11111111-0000-4000-8000-000000000002\", \"name\": \"P2 \\u2014 Deny one endpoint outright\", \"priority\": 2, \"condition\": {\"field\": \"endpoint_key\", \"operator\": \"eq\", \"value\": \"delivery.forbidden_tool\"}, \"action\": \"block\", \"enabled\": true}, {\"id\": \"11111111-0000-4000-8000-000000000003\", \"name\": \"P3 \\u2014 Deny an agent without a matching skill\", \"priority\": 3, \"condition\": {\"field\": \"skill_match\", \"operator\": \"missing\"}, \"action\": \"block\", \"enabled\": true}], \"bindings\": [], \"rejected\": []}"
+  }
+}

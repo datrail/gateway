@@ -1,0 +1,23 @@
+# Runtime. The image installs this file and nothing else.
+#
+# Pinned exactly rather than floored, because republishing a version by hand is
+# a documented path and a floor would let one tag resolve to two different
+# direct dependencies.
+#
+# It does not make the build reproducible, and the SBOM container-release.yml
+# attaches should not be read as claiming so: these four pull in seventy-odd
+# transitive packages, every one of them ranged by its own parent. Closing that
+# needs a lock file, which this repository does not have.
+fastmcp==3.4.6
+uvicorn[standard]==0.52.1
+
+# Imported directly by gateway.server for JSONResponse and the ASGI types. It
+# arrives transitively through fastmcp as well, but a module that imports a
+# package names it: the transitive path is held in place by nothing this
+# repository controls.
+starlette==1.4.1
+
+# Imported directly by gateway.bundle.client, which is the only place this
+# gateway calls out to Rail Center. Same reasoning as starlette: it arrives
+# through fastmcp too, and a module that imports a package names it.
+httpx==0.28.1

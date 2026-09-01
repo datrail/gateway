@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/datrail/gateway/schemas/x-rail-ticket.schema.json",
+  "title": "x-rail ticket payload",
+  "description": "The decoded payload of the `x-rail` header — what Rail Center mints, as the thing an enforcement point reads. The header itself is urlsafe-base64 of this object, with no `Bearer` prefix and padding optional.\n\nThis is the *payload* contract. How to decode the header safely, how to classify what comes out, and what a claim resolving to absent means are the *reading* contract, and are deliberately not restated here: an implementation validating a payload against this schema has not thereby read a ticket correctly. In particular this schema describes a ticket the mint produced, and a reader must handle ones it did not — the forged, the truncated and the expired.\n\nWave 1 tickets are unsigned. Anyone able to construct JSON can produce one that satisfies this schema, so conformance here is a statement about shape and never about authenticity.",
+  "type": "object",
+  "required": [
+    "agent_id",
+    "sandbox_id",
+    "environment_fingerprint",
+    "sandbox_type",
+    "posture_score",
+    "tier",
+    "skills",
+    "scored_at",
+    "iat",
+    "exp"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "agent_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The agent this ticket is for, assigned by Rail Center at registration. `format` is an annotation in draft 2020-12 and most validators do not check it, so a reader that needs the id to be a UUID must say so itself."
+    },
+    "sandbox_id": {
+      "type": "string",
+      "description": "Derived identity: sha256(json([\"host-identity\", host_id, sandbox_name]))[:16] when the pair is known, else a hostname-derived fallback."
+    },
+    "environment_fingerprint": {
+      "type": "string",
+      "description": "sha256(sandbox_type:llm_provider:llm_model:skills_hash)[:16]. Changes when the agent's environment does."
+    },
+    "sandbox_type": {
+      "type": "string",
+      "description": "For example nemo_claw, kubernetes, bare_metal. Not an enumeration: a deployment may name a sandbox this schema has never heard of, and refusing it here would make an agent that registers cleanly impossible to admit."
+    },
+    "posture_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "null until scoring has run, and always null on the ticket that agent registration returns. A number here is a score, never a string: the evaluation contract's ordered operators compare numbers only, so \"30\" does not satisfy `lt 40`."
+    },
+    "tier": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "trusted at 80 or above, caution at 60, elevated_risk at 40, critical below. null until scored. Left unconstrained rather than enumerated for the same reason as sandbox_type — the bands are Rail Center's to change, and a reader that refused an unfamiliar one would deny an agent whose score is perfectly readable."
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Declared skill names, read by the skill_match derived field. An empty list is a present claim, not a missing one."
+    },
+    "scored_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When posture was last computed. Not a lifetime — that is exp."
+    },
+    "iat": {
+      "type": "integer",
+      "description": "Issued at: whole seconds since the Unix epoch, UTC."
+    },
+    "exp": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "description": "Expires at, in the same units. The ticket is dead *at* exp, not one second after. Bounded by ±(2^53 − 1) because JSON has no integer type: past that a double cannot separate adjacent integers, and two readers would take different instants from the same bytes."
+    }
+  },
+  "examples": [
+    {
+      "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+      "sandbox_id": "9f2c4b7e1a8d3056",
+      "environment_fingerprint": "c7d1e05a3b924f68",
+      "sandbox_type": "nemo_claw",
+      "posture_score": 100.0,
+      "tier": "trusted",
+      "skills": [
+        "package-tracking"
+      ],
+      "scored_at": "2026-07-31T18:04:23.881204+00:00",
+      "iat": 1785528262,
+      "exp": 1785529162
+    }
+  ]
+}
