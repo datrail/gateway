@@ -164,7 +164,7 @@ jobs:
           #
           # A literal name rather than `github.workflow`. Inside this run that
           # would work — a called workflow sees the caller's name — but ci.yml
-          # also runs directly on main, where it resolves to `CI`, so those
+          # also runs directly on master, where it resolves to `CI`, so those
           # warm caches would systematically never be visible to a release.
           cache-from: type=gha,scope=image
           cache-to: type=gha,mode=max,scope=image
