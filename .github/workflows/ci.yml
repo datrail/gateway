@@ -11,7 +11,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [master]
   workflow_call:
     inputs:
       ref:
@@ -36,7 +36,7 @@ permissions:
 # this repository's. The trade is `contents: read` above, plus the actions cache
 # these jobs necessarily reach — and that one is not bounded by the ref: cache
 # writes are per-ref, but a run restores from its own branch *and* the default
-# branch, so anything written here on main is reachable from every later pull
+# branch, so anything written here on master is reachable from every later pull
 # request. Nothing secret goes there, and nothing here closes it: pip reuses a
 # cached wheel under its pinned version without checking it, so the exact pins
 # two files over do not help, and requirements.txt says itself that most of what
@@ -139,7 +139,7 @@ jobs:
       # The scope the release build reads from. A literal name rather than
       # `github.workflow`: when called from container-release.yml it resolves
       # to the caller's name and would match, but this workflow also runs
-      # directly on main, where it resolves to `CI` — so those warm caches would
+      # directly on master, where it resolves to `CI` — so those warm caches would
       # never be visible to a release.
       - uses: docker/build-push-action@v6
         with:
