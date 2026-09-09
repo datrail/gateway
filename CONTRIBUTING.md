@@ -24,7 +24,7 @@ notices.
 
 - One coherent change per pull request, with a message that says *why* — the
   diff already says what.
-- Branch from `main`.
+- Branch from `master`.
 - **Sign off your commits** (`git commit -s`). We use the
   [Developer Certificate of Origin](https://developercertificate.org/); the
   sign-off is your statement that you wrote the change or have the right to
