@@ -6,6 +6,10 @@ Released versions correspond to published images at `ghcr.io/datrail/gateway`.
 
 ## [Unreleased]
 
+### Changed
+
+- Session and discovery messages — `initialize`, `ping`, `notifications/*`, `tools/list`, `prompts/list`, `resources/list`, `resources/templates/list` — are forwarded without a policy walk and reported to nobody. A binding cannot narrow a message that names no endpoint, so judging them let a rule bound to one endpoint close the whole session; enforcement is per `tools/call`. Other keyless methods (`resources/read`, `prompts/get`) are still judged.
+
 ### Added
 
 - An enforcement point that fronts an MCP server as a transparent proxy: admitted calls are forwarded and answered as though it were not there.

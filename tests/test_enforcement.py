@@ -185,7 +185,11 @@ def call(tool: str = "track_package") -> bytes:
     return json.dumps({"method": "tools/call", "params": {"name": tool}}).encode()
 
 
-KEYLESS = json.dumps({"method": "initialize"}).encode()
+KEYLESS = json.dumps({"method": "resources/read"}).encode()
+DISCOVERY = tuple(
+    json.dumps({"method": m}).encode()
+    for m in ("initialize", "notifications/initialized", "tools/list")
+)
 
 
 def deep_call(depth: int) -> bytes:
@@ -888,9 +892,9 @@ async def test_a_walk_that_raises_forwards_rather_than_refusing(caplog, monkeypa
 
 @pytest.mark.asyncio
 async def test_a_message_that_names_no_tool_by_design_keeps_the_narrowing():
-    """`initialize` and `tools/list` name no endpoint, so a rule keyed on one
-    asks a question with no subject and leaves the chain. Denying these would
-    stop every session opening for an agent whose skills are exactly right."""
+    """`resources/read` names no endpoint, so a rule keyed on one asks a
+    question with no subject and leaves the chain, while the rest still holds.
+    """
     enforcement, downstream, _ = layer(bundle(DENIES_UNMATCHED_SKILL))
 
     answer = await drive(enforcement, KEYLESS, headers=[(b"x-rail", ticket().encode())])
@@ -917,6 +921,55 @@ async def test_a_tools_call_this_gateway_could_not_resolve_faces_the_whole_chain
         )
         assert answer.status == 403, body
         assert downstream.calls == 0
+
+
+# --------------------------------------------------------------------------
+# A session message is not a call
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_session_message_passes_without_a_ticket_and_reports_nothing():
+    """`initialize`, `notifications/initialized` and `tools/list` open the
+    session and describe its surface. A bundle that denies every ticket has no
+    say over them: the call that follows is where the ticket is judged, and a
+    denial reported here would attribute a verdict no walk reached."""
+    for body in DISCOVERY:
+        enforcement, downstream, reports = layer(bundle(DENIES_EVERYTHING))
+        answer = await drive(enforcement, body)
+        assert answer.status == 200, body
+        assert downstream.calls == 1, body
+        await settled(reports, expecting=0)
+        assert reports.bodies == [], body
+
+
+@pytest.mark.asyncio
+async def test_a_session_message_passes_when_no_bundle_is_held():
+    """A gateway holding no ruleset refuses every call with 503, and still lets
+    a session open: the 503 is answered on the call, where it is meaningful."""
+    for body in DISCOVERY:
+        enforcement, downstream, _ = layer(None)
+        answer = await drive(enforcement, body)
+        assert answer.status == 200, body
+        assert downstream.calls == 1, body
+
+
+@pytest.mark.asyncio
+async def test_a_rule_bound_to_one_endpoint_does_not_close_the_session():
+    """The reason the pass exists. A rule denying every ticket, bound to one
+    endpoint, must leave `initialize` alone and still deny the call it names."""
+    narrowed = bundle(
+        DENIES_ANY_TICKET,
+        bindings=[{"endpoint_key": KEY, "mode": "gated", "policy_ids": [DENY_ID]}],
+    )
+    enforcement, downstream, _ = layer(narrowed)
+    opened = await drive(
+        enforcement, DISCOVERY[0], headers=[(b"x-rail", ticket().encode())]
+    )
+    assert opened.status == 200
+    called = await drive(enforcement, call(), headers=[(b"x-rail", ticket().encode())])
+    assert called.status == 403
+    assert downstream.calls == 1
 
 
 # --------------------------------------------------------------------------

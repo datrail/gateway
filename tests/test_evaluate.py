@@ -193,7 +193,7 @@ async def test_a_repeated_x_rail_header_is_undecodable(evaluating, caplog):
                         {
                             "jsonrpc": "2.0",
                             "id": 1,
-                            "method": "initialize",
+                            "method": "resources/read",
                             "params": {
                                 "protocolVersion": "2025-06-18",
                                 "capabilities": {},
@@ -203,9 +203,11 @@ async def test_a_repeated_x_rail_header_is_undecodable(evaluating, caplog):
                     ),
                 )
 
-    # Handled rather than refused before the middleware ran, which is what makes
-    # the line below evidence about the reader rather than about the transport.
-    assert response.status_code == 200, response.text
+    # Forwarded rather than refused: the MCP server answers a session-less
+    # `resources/read` with 400, and that answer arriving at all is what makes
+    # the line below evidence about the reader rather than about the transport —
+    # a refusal by the layer above would have been a 403 or 503 and no walk.
+    assert response.status_code not in (403, 503), response.text
     written = "\n".join(caplog.messages)
     assert "(ticket undecodable)" in written
     # Neither value alone: either one taken singly is a usable ticket, and that

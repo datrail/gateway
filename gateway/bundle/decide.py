@@ -119,8 +119,13 @@ def chain_for(
 
     Everything else still applies, which is the half worth keeping: ``deny
     unknown agents`` keys on the ticket rather than the endpoint, so a caller
-    with no ticket is still stopped at `initialize` rather than being let
-    through to enumerate the tool surface.
+    with no ticket is still stopped at the first keyless message that can
+    return content — ``resources/read``, ``prompts/get``. The session messages
+    themselves (``initialize``, ``tools/list`` and the rest of
+    `gateway.endpoint.DISCOVERY_METHODS`) never reach this walk: the
+    enforcement layer forwards them unjudged, because a binding cannot narrow a
+    message that names no endpoint, and judging one would let a rule bound to a
+    single endpoint close the whole session.
 
     **Rail Center's evaluator needs this rule too.** The contract takes no
     position on a call that names no endpoint, so until both sides carry it the

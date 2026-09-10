@@ -14,17 +14,26 @@ character, or it does not match at all. Dots inside a tool name stay ordinary
 characters: an endpoint key is an opaque string to the control plane, and
 inventing structure the other side does not parse would be a private dialect.
 
-**No key is not a pass**, and the two keyless outcomes are not judged alike.
-Admitting what could not be identified would let an unidentified caller
-enumerate the tool surface with ``tools/list``, so both still face a chain —
-but which chain is what the two are told apart for.
+**A session or discovery message is a pass**, and every other message without
+a key is not. ``initialize``, ``ping``, the ``notifications/*`` family and the
+four list methods (``tools/list``, ``prompts/list``, ``resources/list``,
+``resources/templates/list``) resolve to ``discovery`` and are forwarded
+unjudged: they open a session and describe the surface, and enforcement is per
+call, on the ``tools/call`` that follows. Judging them instead closes the
+session for every agent that a bound rule happens to match, because a message
+naming no endpoint cannot be narrowed by a binding — an agent refused at
+``initialize`` never reaches the endpoint the binding was written for. What a
+pass costs is that an unidentified caller can read the tool names and schemas;
+it can call none of them.
 
-``keyless`` names no tool *by design*, so a rule keyed on the endpoint has no
-subject to ask about and is dropped from the chain, while every other rule
-applies as it would anywhere. ``unrecognised`` is a ``tools/call`` that **did**
-name a tool, one this gateway declined to compose a key for, so nothing is
-dropped and the whole chain applies — a rule about the endpoint holds against
-it. `decide.chain_for` takes that as its ``keyless`` argument rather than
+The two remaining keyless outcomes are not judged alike. ``keyless`` is any
+other method that names no tool — ``resources/read``, ``prompts/get``,
+``completion/complete`` — which can return content, so it faces the chain: a
+rule keyed on the endpoint has no subject to ask about and is dropped, while
+every other rule applies as it would anywhere. ``unrecognised`` is a
+``tools/call`` that **did** name a tool, one this gateway declined to compose a
+key for, so nothing is dropped and the whole chain applies — a rule about the
+endpoint holds against it. `decide.chain_for` takes that as its ``keyless`` argument rather than
 reading it off the absent key: both outcomes reach it as ``None``, and deciding
 on the absence alone would let a caller shed every endpoint-derived rule by
 appending a newline to a tool name.
@@ -53,6 +62,28 @@ from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_character
 
 #: The MCP method that names a tool. Every other method is keyless.
 CALL_METHOD = "tools/call"
+
+#: Messages that open a session or describe its surface. Forwarded unjudged —
+#: see the module docstring for why a bound rule must not close a session.
+DISCOVERY_METHODS = frozenset(
+    {
+        "initialize",
+        "ping",
+        "tools/list",
+        "prompts/list",
+        "resources/list",
+        "resources/templates/list",
+    }
+)
+NOTIFICATION_PREFIX = "notifications/"
+
+
+def is_discovery(method: Any) -> bool:
+    """Whether `method` opens or describes a session rather than acting on it."""
+    return isinstance(method, str) and (
+        method in DISCOVERY_METHODS or method.startswith(NOTIFICATION_PREFIX)
+    )
+
 
 #: How deeply a request body's JSON may nest before it reads as ``unrecognised``.
 #:
@@ -91,7 +122,7 @@ _BACKSLASH = ord("\\")
 #:   unsafe to write into a log line, or long enough that no registered endpoint
 #:   could match it. Evidence of drift or garbage, reported distinctly from
 #:   "this endpoint has no rule".
-ResolutionStatus = Literal["resolved", "keyless", "unrecognised"]
+ResolutionStatus = Literal["resolved", "discovery", "keyless", "unrecognised"]
 
 
 @dataclass(frozen=True)
@@ -119,6 +150,8 @@ def resolve_endpoint_key(
     source was registered under, so both books are pinned to one value nobody
     re-types.
     """
+    if is_discovery(method):
+        return EndpointResolution(None, "discovery")
     if method != CALL_METHOD:
         return EndpointResolution(None, "keyless")
 

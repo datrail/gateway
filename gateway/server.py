@@ -538,7 +538,13 @@ class _Enforcement:
     values it is, where anything downstream has already collapsed them and
     destroyed the evidence the contract says to check before reading the value.
 
-    Three outcomes, and only one is a denial:
+    A session or discovery message — ``initialize``, ``tools/list`` and the
+    rest `gateway.endpoint.DISCOVERY_METHODS` names — is forwarded before any
+    of the below and reported to nobody: nothing in it is a call, and judging
+    it would let a rule bound to one endpoint close the session in which every
+    other endpoint is reached. Enforcement is per ``tools/call``.
+
+    Three outcomes for a call, and only one is a denial:
 
       * **A policy matched** — 403, and the denial reported to Rail Center naming
         the policy that actually matched. Under `observe` the same walk runs and
@@ -628,6 +634,14 @@ class _Enforcement:
         """
         resolution = resolve_from_body(body, self._slug)
         named = safe_for_log(resolution.key or resolution.status)
+        if resolution.status == "discovery":
+            # Not a call: it opens the session or lists what the session
+            # offers, and the ticket it carries is judged on the first
+            # `tools/call` instead. Passed ahead of the bundle check too — a
+            # gateway holding no ruleset can still let a session open, since
+            # every call that follows is refused with 503 on its own.
+            log.info("pass %s (session message, not judged)", named)
+            return None
         ticket = parse_rail_header(_x_rail_values(scope))
 
         bundle = self._holder.current()
