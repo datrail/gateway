@@ -32,6 +32,12 @@ reset_journals() {
 }
 
 forwarded_calls() { count "$UPSTREAM" '{"method":"POST","urlPath":"/mcp"}'; }
+# The session messages are forwarded unjudged, so "nothing reached the upstream"
+# is a claim about calls: what a refusal must keep from the upstream is the
+# `tools/call`, and that is what this counts.
+forwarded_tool_calls() {
+  count "$UPSTREAM" '{"method":"POST","urlPath":"/mcp","bodyPatterns":[{"matchesJsonPath":"$[?(@.method == '"'"'tools/call'"'"')]"}]}'
+}
 denials()         { count "$RAIL_CENTER" '{"method":"POST","urlPath":"/v1/denials"}'; }
 bundle_fetches()  { count "$RAIL_CENTER" '{"method":"GET","urlPath":"/v1/policy-bundle"}'; }
 
@@ -116,8 +122,10 @@ status() {
     -d "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":{}}}"
 }
 
-# `initialize` names no tool, so it is the keyless case: judged by every rule
-# that can ask about a message with no endpoint, and by no others.
+# `initialize` opens the session and is forwarded without a policy walk, whatever
+# the ticket says: a binding cannot narrow a message that names no endpoint, so
+# judging it would let a rule bound to one endpoint close the whole session.
+# The ticket is judged on the first `tools/call` instead.
 handshake_status() {
   host=$1; shift
   curl -s --max-time 15 -o /dev/null -w '%{http_code}' -X POST "http://$host:8080/mcp" \
@@ -151,10 +159,11 @@ done
 sleep 2  # long enough for a third fetch to have shown up if one were coming
 expect "exactly two gateways fetched a bundle" 2 "$(bundle_fetches)"
 
-printf '\n== enforce: a caller with no ticket is stopped at the handshake ==\n'
+printf '\n== enforce: a caller with no ticket opens a session and is stopped at its first call ==\n'
 reset_journals
-expect "initialize is refused 403" 403 "$(handshake_status gateway-enforce)"
-expect "nothing reached the upstream" 0 "$(forwarded_calls)"
+expect "initialize is not refused" 200 "$(handshake_status gateway-enforce)"
+expect "the call is refused 403" 403 "$(status gateway-enforce track_package)"
+expect "no call reached the upstream" 0 "$(forwarded_tool_calls)"
 expect "it named P0, the rule that matched" 1 \
   "$(await_denial 1 11111111-0000-4000-8000-000000000000)"
 # The total, after the scoped wait above has already established that a report
@@ -164,10 +173,12 @@ expect "it named P0, the rule that matched" 1 \
 sleep 2  # long enough for a second report to have shown up if one were coming
 expect "exactly one denial was reported" 1 "$(denials)"
 
-printf '\n== enforce: a low-posture ticket is stopped at the handshake too ==\n'
+printf '\n== enforce: a low-posture ticket opens a session and is stopped at its first call too ==\n'
 reset_journals
-expect "initialize is refused 403" 403 \
+expect "initialize is not refused" 200 \
   "$(handshake_status gateway-enforce -H "x-rail: $LOW_SCORE_TICKET")"
+expect "the call is refused 403" 403 \
+  "$(status gateway-enforce track_package -H "x-rail: $LOW_SCORE_TICKET")"
 expect "it named P1, not P0" 1 \
   "$(await_denial 1 11111111-0000-4000-8000-000000000001)"
 
