@@ -7,12 +7,13 @@ rule cannot be: the contract's `decide` is always handed an endpoint key, and
 absent. So no vector can express what happens when there is no key at all.
 
 MCP is why there is such a case. A call's identity lives in the message rather
-than the URL, and only `tools/call` names a tool — `initialize`,
-`notifications/initialized` and `tools/list` name none, and a `tools/call`
-whose tool name is unusable resolves to no key either. `gateway/endpoint.py`
-states the rule those land on: **no key is not a pass.** Both keyless outcomes
-are judged by the entire chain, because admitting what could not be identified
-would let an unidentified caller enumerate the tool surface with `tools/list`.
+than the URL, and only `tools/call` names a tool — `resources/read` and
+`prompts/get` name none, and a `tools/call` whose tool name is unusable
+resolves to no key either. (`initialize`, `tools/list` and the other session
+messages never reach this walk: `gateway/endpoint.py` resolves them to
+`discovery` and the enforcement layer forwards them.) The rule the rest land on:
+**no key is not a pass.** Both keyless outcomes are judged by the chain, because
+a message that can return content must not pass for lack of a name.
 
 What is deliberately *not* pinned here is what a `skill_match` rule should mean
 for a message naming no tool. A rule keyed on the endpoint declines to hold
@@ -93,11 +94,11 @@ def test_a_call_naming_no_endpoint_keeps_every_rule_that_can_ask_about_it():
     """No binding narrows a keyless message — there is no key to look one up
     with — and only the rules *about the endpoint* leave the chain.
 
-    Returning an empty chain instead would allow every message that is not a
-    `tools/call`: the handshake, and the `tools/list` an unidentified caller
-    would enumerate the tool surface with. Returning the whole chain would deny
-    the handshake for a conforming agent. This is the line between the two, and
-    both failures are one edit away in opposite directions."""
+    Returning an empty chain instead would allow every keyless message —
+    `resources/read` with no ticket at all. Returning the whole chain would deny
+    one for a conforming agent over a rule about an endpoint it did not name.
+    This is the line between the two, and both failures are one edit away in
+    opposite directions."""
     assert [p.id for p in chain_for(bundle(), None)] == [LOW_SCORE]
     assert len(chain_for(bundle(), KEY)) == 2
 
@@ -106,8 +107,8 @@ def test_a_keyless_call_is_denied_by_a_rule_about_the_ticket():
     """Every rule that can meaningfully ask about a keyless message still does.
 
     This is the half that must survive the narrowing: `deny unknown agents`
-    keys on the ticket, so a caller with no ticket is stopped at `initialize`
-    rather than let through to enumerate the tool surface."""
+    keys on the ticket, so a caller with no ticket is stopped at the first
+    keyless message that can return content."""
     verdict = decide(bundle(), request(None, ticket(posture_score=10)))
 
     assert verdict.allowed is False

@@ -7,7 +7,7 @@ vectors cannot reach*. No vector file covers any of this, which is why these
 are ordinary unit tests rather than cases in `tests/vectors/`.
 
 What they pin is the three-way split. A `resolved` key is judged by the rules
-bound to it; both keyless outcomes are judged by the whole chain and behave
+bound to it; both keyless outcomes are judged by the chain and behave
 identically for the caller. That last part is why the split is easy to erode —
 nothing a caller sees changes when `unrecognised` collapses into `keyless` —
 and it is exactly what an operator needs, because drift and garbage must never
@@ -74,16 +74,35 @@ def test_dots_inside_a_tool_name_stay_ordinary_characters():
     "method",
     [
         "initialize",
+        "ping",
         "notifications/initialized",
+        "notifications/cancelled",
         "tools/list",
+        "prompts/list",
+        "resources/list",
+        "resources/templates/list",
+    ],
+)
+def test_a_session_or_discovery_message_is_discovery(method):
+    """These open a session or describe its surface, and are forwarded without
+    a walk: a binding cannot narrow a message naming no endpoint, so judging one
+    lets a rule bound to a single endpoint close the whole session."""
+    assert resolve(method=method) == (None, "discovery")
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
         "resources/read",
+        "prompts/get",
+        "completion/complete",
         "",
         None,
     ],
 )
-def test_every_method_but_tools_call_is_keyless(method):
-    """`tools/call` is the only method that names a tool. Everything else has
-    no key to compose and is not evidence of anything being wrong."""
+def test_every_other_method_but_tools_call_is_keyless(method):
+    """`tools/call` is the only method that names a tool. What is left names no
+    key either, but can return content, so it still faces the chain."""
     assert resolve(method=method) == (None, "keyless")
 
 
