@@ -1,18 +1,20 @@
 """Holding the policy bundle: fetch it, keep it, refresh it — and never mistake
 a failed fetch for an empty ruleset.
 
-One rule shapes the whole file, and it is the contract's:
-
-> An enforcement point that cannot reach `GET /v1/policy-bundle` has no ruleset,
-> which is not the same as an empty one. It must keep serving the last bundle it
-> holds, and refuse traffic if it has never held one.
-
-An empty chain **allows**, so treating a failed fetch as a bundle with no rules
+One rule shapes the whole file: **an enforcement point that cannot reach `GET
+/v1/policy-bundle` has no ruleset, which is not the same as an empty one.** An
+empty chain **allows**, so treating a failed fetch as a bundle with no rules
 turns an outage of the control plane into an outage of enforcement — every
-request admitted, with nothing in the logs saying that is what happened. Every
+request admitted, with nothing in the logs saying that is what happened.
+
+So a failed fetch keeps what is held, always. **Having never held one is a
+different state and does not refuse** (RC-312): a gateway in it has been told no
+posture, and refusing there enforces a decision the control plane never made —
+it would also black-hole traffic on a gateway an operator has set to `none` or
+`observe`, which is the one thing those values promise not to do. What keeps
+traffic off it is `/ready`, which reports unready until a bundle is held. Every
 failure path below therefore ends in one of two places: keep what is held, or
-hold nothing and leave the caller to answer for it — which today means
-reporting it on `/ready`, not refusing. `current()` is where that stands.
+hold nothing and leave readiness to say so. `current()` is where that stands.
 
 The network and the clock are injected. Everything they touch is small and
 everything else is a pure function of what arrived, which is the only shape two
@@ -286,15 +288,19 @@ class BundleHolder:
 
         Never a bundle that failed validation, and never cleared by a failed
         fetch: the last usable bundle stays until a newer usable one replaces
-        it. None is the contract's *refuse*, and it is not the same as a bundle
-        with no policies, which allows. Two callers read it. Readiness reports
-        it on `/ready`, where holding nothing is what makes the gateway not
-        ready. `_judge` decides against it, and what it does with None is the
-        mode's answer rather than this holder's: under `enforce`, the default,
-        it refuses the request 503 without judging it, and under `observe` it
-        forwards it unjudged. So a holder that has never held a bundle is
-        refusing every call on an ordinary deployment — which is why nothing
-        here may describe the absence of a bundle as harmless.
+        it. None is *nothing was ever held*, and it is not the same as a bundle
+        with no policies, which allows.
+
+        Two callers read it, and neither refuses on None. Readiness reports it
+        on `/ready`, where holding nothing is the whole of what makes a gateway
+        not ready. `_judge` forwards the request unjudged and logs that it did,
+        because the posture arrives *in* the bundle and a gateway holding none
+        has been told nothing rather than told to enforce.
+
+        **That is why nothing here may describe the absence of a bundle as
+        harmless.** It is not refusing on this gateway's behalf; `/ready` is the
+        only thing standing between it and traffic, and readiness reports rather
+        than gates.
         """
         return self._held
 

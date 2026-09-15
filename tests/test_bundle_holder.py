@@ -1,14 +1,14 @@
 """Holding the policy bundle, and every way of failing to.
 
-The rule under test is one sentence of the evaluation contract:
-
-> An enforcement point that cannot reach `GET /v1/policy-bundle` has no ruleset,
-> which is not the same as an empty one. It must keep serving the last bundle it
-> holds, and refuse traffic if it has never held one.
+The rule under test is one clause of the evaluation contract: **an enforcement
+point that cannot reach `GET /v1/policy-bundle` has no ruleset, which is not the
+same as an empty one.**
 
 An empty chain **allows**, so every case below asks the same question in a
 different way: after this failure, is what is held still what was held — and
-when nothing was ever held, is it still nothing? A test that only checked the
+when nothing was ever held, is it still nothing? What the *caller* then does
+with nothing is not this file's subject and is not a refusal — see
+`BundleHolder.current`. A test that only checked the
 outcome's `kind` would pass on an implementation that cleared the bundle and
 reported the failure honestly, which is the bug this file exists to catch.
 """

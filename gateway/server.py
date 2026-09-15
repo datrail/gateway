@@ -683,7 +683,11 @@ class _Enforcement:
         if resolution.status == "discovery":
             # Not a call: it opens the session or lists what the session
             # offers, and the ticket it carries is judged on the first
-            # `tools/call` instead.
+            # `tools/call` instead. Passed ahead of the bundle check below too,
+            # which costs nothing now that holding no bundle forwards anyway —
+            # but keeps the two reasons distinct in the log, since a session
+            # message was never going to be judged and a `tools/call` in that
+            # window was.
             log.info("pass %s (session message, not judged)", named)
             return None
         ticket = parse_rail_header(_x_rail_values(scope))
