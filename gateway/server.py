@@ -128,7 +128,14 @@ from gateway.bundle.decide import decide
 from gateway.denial import build_report, report
 from gateway.endpoint import resolve_from_body
 from gateway.key_safety import safe_for_log
-from gateway.mode import TicketMode, describe, evaluates, ticket_mode
+from gateway.mode import (
+    Enrolment,
+    blocks,
+    describe_enrolment,
+    enrolment,
+    judges,
+    polls,
+)
 from gateway.ticket import parse_rail_header
 
 log = logging.getLogger("gateway")
@@ -262,36 +269,43 @@ def datasource_slug() -> str:
 def build_gateway(
     upstream_url: str | None = None,
     holder: BundleHolder | None = None,
-    mode: TicketMode | None = None,
+    enrolled: Enrolment | None = None,
 ) -> FastMCP:
     """The proxy that forwards to the upstream, plus liveness and readiness.
 
-    `holder` and `mode` are injected by the suite so its gateways answer to a
-    control plane the test holds, in a mode the test chose. The endpoint slug is
-    not needed here: composing keys is the enforcement layer's, and this builds
-    the MCP server that sits under it.
+    `holder` and `enrolled` are injected by the suite so its gateways answer to a
+    control plane the test holds. The endpoint slug is not needed here:
+    composing keys is the enforcement layer's, and this builds the MCP server
+    that sits under it.
 
-    **Under `RAIL_TICKET_MODE=none` no holder is built at all**, whether or not
-    one was passed, and `RAIL_CENTER_URL` is not read. A pass-through evaluates
-    nothing, so polling Rail Center on a timer for a bundle it will never read
-    would be load on the control plane bought for nothing — and requiring the
-    variable would be configuration a deployment must supply to a component that
-    cannot use it. An injected holder is ignored rather than honoured because
-    the mode is the stronger statement: a test asking for `none` is asking for a
-    gateway that does not fetch.
+    **Under `RAIL_TICKET_MODE=plugin` a holder is always built, whatever posture
+    the bundle turns out to carry** (RC-312). That is the inversion, and it
+    reads backwards until you ask what the alternative costs: a component that
+    declined to poll while its posture was `none` could never be told the
+    posture had moved, so an operator who disabled enforcement during an
+    incident would need a redeploy to undo it. Polling is what makes the switch
+    turn both ways, and the bundle it polls for is cheap.
+
+    **Under `none` no holder is built at all**, whether or not one was passed,
+    and `RAIL_CENTER_URL` is not read. That value now means *there is no control
+    plane here* rather than *do not enforce*, so there is nothing to poll and
+    requiring the variable would be configuration a deployment must supply to a
+    component with nothing to point it at. An injected holder is ignored rather
+    than honoured because enrolment is the stronger statement: a test asking for
+    `none` is asking for a gateway with no control plane.
     """
-    resolved_mode = mode if mode is not None else ticket_mode()
+    resolved_enrolment = enrolled if enrolled is not None else enrolment()
     url = _checked_url(
         "RAIL_GATEWAY_UPSTREAM_URL",
         upstream_url or _required("RAIL_GATEWAY_UPSTREAM_URL"),
     )
     # After the upstream, so a gateway pointed nowhere is refused for that
     # rather than for the Rail Center variable it also has not been given.
-    if not evaluates(resolved_mode):
+    if not polls(resolved_enrolment):
         bundle_holder = None
     else:
         bundle_holder = holder if holder is not None else _holder_from_environment()
-    log.info("%s", describe(resolved_mode))
+    log.info("%s", describe_enrolment(resolved_enrolment))
 
     clean_url, credential_headers = _split_credential(url)
     transport = StreamableHttpTransport(url=clean_url, headers=credential_headers)
@@ -340,11 +354,22 @@ def build_gateway(
         503 rather than a 200 carrying a false flag, because the code is the
         part every orchestrator and load balancer reads without being taught to.
 
-        **Under `RAIL_TICKET_MODE=none` it is unconditionally ready.** A
-        pass-through evaluates nothing, so it needs no bundle to do its whole
-        job, and reporting it unready would leave the deployment that turns
-        enforcement off as the one that never serves — a switch whose off
-        position takes the component down is not an off position.
+        **Under `RAIL_TICKET_MODE=none` it is unconditionally ready**, and after
+        RC-312 that is a statement about enrolment rather than about posture. A
+        component with no control plane has no bundle to wait for and never will
+        have, so waiting would leave it permanently unready.
+
+        **Under `plugin` it is 503 until a bundle arrives, at every posture.**
+        Not only the ones that act: a gateway told `enforcement=none` is one this
+        component knows is judging nothing, while a gateway holding nothing has
+        been told nothing at all, and those are different states even though both
+        forward every request. This route is the one place the difference is
+        visible to an orchestrator, which is what makes it worth 503 on a gateway
+        that is, for the moment, behaving exactly like a ready one.
+
+        It re-keys on the same expression it always did — the holder's absence —
+        because that absence now means *not enrolled* rather than *does not
+        enforce*. What changed is what the words mean, not what the code asks.
 
         **What it deliberately does not carry is the version held.** This route
         is unauthenticated and shares a port with the MCP surface, so a version
@@ -454,7 +479,7 @@ def _bundle_lifespan(holder: BundleHolder | None):
 def build_app(
     upstream_url: str | None = None,
     holder: BundleHolder | None = None,
-    mode: TicketMode | None = None,
+    enrolled: Enrolment | None = None,
     slug: str | None = None,
     *,
     rail_center: tuple[str, dict[str, str]] | None = None,
@@ -469,12 +494,19 @@ def build_app(
 
     `_Enforcement` wraps the MCP application rather than sitting inside it, for
     the reason its own docstring gives. Under `RAIL_TICKET_MODE=none` there is
-    nothing to wrap it with — no holder, no slug, no walk — and the app is served
-    bare.
+    nothing to wrap it with — no control plane, no holder, no slug, no walk —
+    and the app is served bare.
+
+    **Under `plugin` it is always wrapped, at every posture** (RC-312). What the
+    wrapper does with a call is read from the held bundle per request rather
+    than decided here, because the posture arrives on a poll and may change
+    between two of them; a wrapper installed only for the postures that act
+    would have to be installed or removed while the process runs, which is not a
+    thing an ASGI stack can do.
     """
-    resolved_mode = mode if mode is not None else ticket_mode()
-    if not evaluates(resolved_mode):
-        return build_gateway(upstream_url, None, resolved_mode).http_app(
+    resolved_enrolment = enrolled if enrolled is not None else enrolment()
+    if not polls(resolved_enrolment):
+        return build_gateway(upstream_url, None, resolved_enrolment).http_app(
             transport="streamable-http"
         )
 
@@ -484,12 +516,11 @@ def build_app(
         rail_center if rail_center is not None else rail_center_from_environment()
     )
 
-    gateway = build_gateway(upstream_url, resolved_holder, resolved_mode)
+    gateway = build_gateway(upstream_url, resolved_holder, resolved_enrolment)
     return _Enforcement(
         gateway.http_app(transport="streamable-http"),
         resolved_holder,
         resolved_slug,
-        blocking=resolved_mode == "enforce",
         rail_center_url=url,
         auth=auth,
         transport=report_transport,
@@ -572,7 +603,6 @@ class _Enforcement:
         holder: BundleHolder,
         slug: str,
         *,
-        blocking: bool,
         rail_center_url: str,
         auth: dict[str, str],
         transport: httpx.AsyncBaseTransport | None = None,
@@ -580,7 +610,6 @@ class _Enforcement:
         self._app = app
         self._holder = holder
         self._slug = slug
-        self._blocking = blocking
         self._rail_center_url = rail_center_url
         self._auth = auth
         self._transport = transport
@@ -646,12 +675,29 @@ class _Enforcement:
 
         bundle = self._holder.current()
         if bundle is None:
+            # **Forwarded, not refused** (RC-312). Holding no bundle used to be
+            # read against a posture fixed at start-up, and `enforce` refused
+            # every call. The posture now arrives *in* the bundle, so a gateway
+            # holding none has not been told to enforce — it has been told
+            # nothing, and refusing traffic on a ruleset nobody sent is enforcing
+            # a decision no operator made. What keeps traffic off a gateway in
+            # this state is `/ready`, which answers 503 until a bundle is held;
+            # where nothing honours readiness the window is real, and the
+            # contract says so rather than closing it here.
             log.error(
-                "no policy bundle held — %s went unjudged and was %s",
+                "no policy bundle held — %s went unjudged and was forwarded; "
+                "this gateway has been told no posture yet",
                 named,
-                "refused" if self._blocking else "forwarded",
             )
-            return (503, "policy ruleset cannot be applied") if self._blocking else None
+            return None
+
+        # Read here rather than at start-up, which is the whole of RC-312 on this
+        # side: an operator moving a gateway to `none` during an incident, and
+        # back afterwards, is two polls rather than two redeploys.
+        if not judges(bundle.enforcement):
+            log.info("pass %s (enforcement=none, judged nothing)", named)
+            return None
+        blocking = blocks(bundle.enforcement)
 
         try:
             decision = decide(
@@ -675,7 +721,7 @@ class _Enforcement:
                 safe_for_log(refusal.policy_id),
                 refusal.reason,
             )
-            return (503, "policy ruleset cannot be applied") if self._blocking else None
+            return (503, "policy ruleset cannot be applied") if blocking else None
         except Exception:
             log.exception("policy evaluation raised for %s; forwarding", named)
             return None
@@ -696,7 +742,7 @@ class _Enforcement:
             log.error("denied %s with no policy named; forwarding", named)
             return None
 
-        if not self._blocking:
+        if not blocking:
             log.warning(
                 "would deny %s by policy %s (ticket %s) — this mode enforces "
                 "nothing, so the request was forwarded",

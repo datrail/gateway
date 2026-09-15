@@ -1,37 +1,51 @@
-"""`RAIL_TICKET_MODE` — how much of the decision this gateway acts on.
+"""Whether this gateway has a control plane, and what that control plane tells it to do.
 
-Platform-wide rather than this component's own, so the proxy in front reads the
-same variable and one value configures a whole customer zone.
+Two questions. They were one variable until RC-312, and separating them is the
+whole of this module's job.
 
-The three values map onto two components, which two separate switches could not:
+**`RAIL_TICKET_MODE` answers the first and nothing else.** ``plugin`` means a
+Rail Center exists to poll; ``none`` means one does not. It is deploy-time
+configuration because it describes the estate rather than a policy decision: a
+component with no control plane to reach cannot be told to acquire one.
 
-===========  ==========================  ==========================================
-Value        Proxy                       Gateway
-===========  ==========================  ==========================================
-``none``     does not fetch or inject    does not evaluate; forwards what arrives
-``observe``  injects                     evaluates, logs every verdict, blocks none
-``enforce``  injects                     evaluates and blocks
-===========  ==========================  ==========================================
+**The bundle answers the second.** ``enforcement.mode`` — ``none``, ``observe``
+or ``enforce`` — arrives on every poll and may change between two of them, which
+is the point. Posture is an operator's decision and belongs where operators
+work, not in a variable that needs a redeploy to move.
 
-**`none` is a pass-through, not "ignore the ticket".** The alternative reading —
-where only ticket-derived conditions stop matching — makes `none` deny
-*everything*: a proxy in that mode injects no ticket, so ``x_rail_header``
-resolves to absent on every request and the seeded P0 rule matches all of them.
-A switch whose off position denies everything is not an off position. So the
-three states are don't look, look and log, look and act.
+==============  ===================================  ==========================
+State           Reached by                           Traffic
+==============  ===================================  ==========================
+no data path    ``RAIL_TICKET_MODE=none``            forwarded; never polls
+holding none    ``plugin``, nothing fetched yet      forwarded; polling
+``none``        ``plugin`` + bundle says ``none``    forwarded; polling
+``observe``     ``plugin`` + bundle says ``observe`` evaluated, logged, allowed
+``enforce``     ``plugin`` + bundle says ``enforce`` evaluated, acted on
+==============  ===================================  ==========================
 
-Two consequences of that follow this component around, and both are `none`'s:
-a gateway that does not evaluate must not need a policy bundle to report itself
-ready, and must not poll Rail Center for one it will never read. Both are
-implemented where they belong — in the readiness route and the holder's
-lifecycle — rather than being re-derived from the mode at each site.
+**Three of those five pass every request, and they are not each other.** The
+first was never given a control plane. The second has one and has not heard from
+it. The third has heard, and was told to judge nothing. Reporting any of them as
+another is the misreading design §5.2 exists to prevent: an operator looking at a
+gateway that forwards everything needs to know which of the three they have,
+because the remedy differs in each.
 
-**`enforce` is the default, and it blocks.** A deployment that has never set
-this variable evaluates every call and refuses the ones the walk denies, because
-a component whose default is not to enforce stops protecting anything the day an
-operator forgets a line. The startup line `describe` returns is what keeps that
-visible: an operator reading the log is told what this mode does to traffic
-rather than discovering it from a request that was refused.
+**A `plugin` component polls at every enforcement value, including `none`.** That
+is the inversion RC-312 makes, and it is the one rule here worth stating twice.
+A component that stopped polling at ``none`` could never be told it had been
+moved off ``none``, so the kill switch would turn one way only — the operator
+who disabled enforcement during an incident could not re-enable it without a
+redeploy. ``none`` is a posture held by a gateway in touch with its control
+plane, not a gateway that has stopped listening.
+
+**`enforce` is no longer the default, because there is no longer a default
+posture at all.** A component holding no bundle judges nothing — it has been
+told nothing, and inventing `enforce` there would refuse traffic on a ruleset it
+does not have. What protects a deployment during that window is ``/ready``,
+which reports 503 until a bundle is held; what protects it afterwards is the
+bundle. The default that remains is enrolment's: an unset ``RAIL_TICKET_MODE``
+is ``plugin``, so a deployment that forgets the line still asks Rail Center what
+to do rather than silently opting out of having a control plane.
 """
 
 from __future__ import annotations
@@ -39,81 +53,146 @@ from __future__ import annotations
 import os
 from typing import Final, Literal
 
-TicketMode = Literal["none", "observe", "enforce"]
+#: Whether a Rail Center exists for this component to poll. Deploy-time.
+Enrolment = Literal["none", "plugin"]
 
-#: The modes this component implements. Ordered as the rollout runs.
-TICKET_MODES: Final[tuple[TicketMode, ...]] = ("none", "observe", "enforce")
+ENROLMENTS: Final[tuple[Enrolment, ...]] = ("none", "plugin")
 
-#: What an unset variable means. `enforce`, because a component whose default
-#: is not to enforce is one that silently stops protecting anything the day a
-#: deployment forgets a line.
-DEFAULT_TICKET_MODE: Final[TicketMode] = "enforce"
+#: What an unset `RAIL_TICKET_MODE` means. `plugin`, so a deployment that
+#: forgets the line asks its control plane what to do rather than deciding for
+#: itself to have none.
+DEFAULT_ENROLMENT: Final[Enrolment] = "plugin"
+
+#: What the control plane says to do with a call. Read from the bundle, never
+#: from the environment.
+Enforcement = Literal["none", "observe", "enforce"]
+
+ENFORCEMENTS: Final[tuple[Enforcement, ...]] = ("none", "observe", "enforce")
+
+#: What a `plugin` component runs at before its first successful poll. It has
+#: been told nothing, so it judges nothing; `/ready` is what keeps traffic off
+#: it in that window wherever an orchestrator honours readiness.
+UNTOLD_ENFORCEMENT: Final[Enforcement] = "none"
+
+#: What happens to a call no binding matches, at `enforce` and nowhere else.
+Fallback = Literal["pass", "block"]
+
+FALLBACKS: Final[tuple[Fallback, ...]] = ("pass", "block")
+
+#: The fallback a bundle is read as carrying when it names none. `block` is the
+#: conservative half of a pair whose other half admits unbound endpoints, and a
+#: bundle without the field is one from a Rail Center older than RC-312.
+DEFAULT_FALLBACK: Final[Fallback] = "block"
 
 
 class TicketModeError(RuntimeError):
-    """The configured mode cannot be honoured. Fatal at startup, by design."""
+    """`RAIL_TICKET_MODE` cannot be honoured. Fatal at startup, by design."""
 
 
-def ticket_mode() -> TicketMode:
+def enrolment() -> Enrolment:
     """`RAIL_TICKET_MODE`, or the default.
 
-    Refused loudly rather than defaulted when it is set to something outside
-    the three. A typo that fell back to `enforce` would be a deployment
-    enforcing when its operator wrote `none`, and one that fell back to `none`
-    would be a deployment enforcing nothing while its operator believed it was.
-    Neither is a guess worth making on an operator's behalf.
+    **The three old values are refused rather than translated**, and that is a
+    deliberate break: a deployment carrying `RAIL_TICKET_MODE=enforce` today
+    stops starting until the line is changed. The alternative — reading
+    `observe` and `enforce` as `plugin` — would let a deployment go on declaring
+    a posture in a variable nothing reads any more, with the bundle quietly
+    overruling it and nobody told. A component that will not boot is the cheaper
+    of the two, because it is the one an operator sees.
 
-    **Case is folded, and that is what makes the variable platform-wide.** One
-    value configures a zone, and the proxy in front reads it through
-    ``.strip().lower()``. A gateway that matched exactly would refuse to start
-    on the ``NONE`` or ``Enforce`` its proxy resolved happily — one variable,
-    two vocabularies, and the disagreement surfaces as a component that will not
-    boot. The message names what the operator wrote rather than the folded form,
-    so a value refused for a reason other than its case still reads back to
-    them.
+    Case is folded for the reason it always was: the proxy in front reads the
+    same variable through `.strip().lower()`, and a gateway matching exactly
+    would refuse to start on the `NONE` its proxy resolved happily.
     """
     raw = (os.environ.get("RAIL_TICKET_MODE") or "").strip()
     if not raw:
-        return DEFAULT_TICKET_MODE
+        return DEFAULT_ENROLMENT
     folded = raw.lower()
-    if folded not in TICKET_MODES:
+    if folded not in ENROLMENTS:
+        retired = (
+            " RC-312 replaced the posture values: it now arrives in the policy bundle."
+            if folded in ENFORCEMENTS
+            else ""
+        )
         raise TicketModeError(
-            f"RAIL_TICKET_MODE must be one of {', '.join(TICKET_MODES)}, got: {raw}"
+            f"RAIL_TICKET_MODE must be one of {', '.join(ENROLMENTS)}, got: {raw}.{retired}"
         )
     return folded  # type: ignore[return-value]
 
 
-def evaluates(mode: TicketMode) -> bool:
-    """Whether this mode consults the policy bundle at all.
+def polls(enrolled: Enrolment) -> bool:
+    """Whether this component reaches a control plane at all.
 
     False only for `none`, and it is the single question the rest of the
-    component asks — readiness, the holder's lifecycle and the walk all turn on
-    it. Asking it here rather than comparing against the string at four sites is
-    what stops one of them being missed when a fourth mode is added.
+    component asks of enrolment — the holder's lifecycle and readiness both turn
+    on it. **It is not a question about posture**: a `plugin` component polls at
+    every enforcement value, `none` included.
     """
-    return mode != "none"
+    return enrolled != "none"
 
 
-def describe(mode: TicketMode) -> str:
-    """The startup line for this mode, naming what it does and does not do.
+def judges(enforcement: Enforcement) -> bool:
+    """Whether this enforcement value walks the chain.
 
-    Each line says what traffic will experience, because that is what an
-    operator is checking this against: `enforce` names both refusals and the
-    report, and `observe` says plainly that nothing is blocked, so a deployment
-    reading its own log learns which of the two it is before a request tells it.
+    False only for `none`. `observe` judges and acts on nothing, which is not
+    the same thing: a component that skipped the walk at `observe` would have
+    nothing to report and would have silently become `none`.
     """
-    if mode == "none":
+    return enforcement != "none"
+
+
+def blocks(enforcement: Enforcement) -> bool:
+    """Whether a denied call is refused rather than logged and forwarded."""
+    return enforcement == "enforce"
+
+
+def describe_enrolment(enrolled: Enrolment) -> str:
+    """The startup line, naming what this deployment is rather than what it does.
+
+    What it *does* is the bundle's to say and is not known at startup, so this
+    line deliberately promises nothing about traffic — an operator reading it
+    learns whether a control plane is in play, and looks at the gateway's posture
+    for the rest.
+    """
+    if enrolled == "none":
         return (
-            "RAIL_TICKET_MODE=none — this gateway evaluates no policy and "
-            "forwards every request; no policy bundle is fetched"
-        )
-    if mode == "observe":
-        return (
-            "RAIL_TICKET_MODE=observe — every request is evaluated and every "
-            "verdict logged; nothing is blocked"
+            "RAIL_TICKET_MODE=none — this gateway has no control plane: it "
+            "fetches no policy bundle, evaluates nothing, and forwards every "
+            "request"
         )
     return (
-        "RAIL_TICKET_MODE=enforce — every request is evaluated and every verdict "
+        "RAIL_TICKET_MODE=plugin — this gateway polls Rail Center for its policy "
+        "bundle and takes its enforcement posture from it; until the first "
+        "bundle arrives it judges nothing and reports itself unready"
+    )
+
+
+def describe_enforcement(enforcement: Enforcement, fallback: Fallback) -> str:
+    """The line logged when a poll changes the posture.
+
+    Says what traffic will experience, because that is what an operator is
+    checking it against — and names the fallback only where it is consulted, so
+    a line mentioning it is a line where it decides something.
+    """
+    if enforcement == "none":
+        return (
+            "enforcement=none — Rail Center says judge nothing; every request is "
+            "forwarded, and this gateway keeps polling so it is told when that "
+            "changes"
+        )
+    if enforcement == "observe":
+        return (
+            "enforcement=observe — every request is evaluated and every verdict "
+            "logged; nothing is blocked"
+        )
+    unbound = (
+        "an endpoint no binding matches is refused without consulting the chain"
+        if fallback == "block"
+        else "an endpoint no binding matches is judged by the whole chain rather than refused"
+    )
+    return (
+        "enforcement=enforce — every request is evaluated and every verdict "
         "logged; a denied request is refused with 403 and reported to Rail "
-        "Center, and one that cannot be judged is refused with 503"
+        f"Center, and one that cannot be judged is refused with 503. "
+        f"fallback={fallback}: {unbound}"
     )

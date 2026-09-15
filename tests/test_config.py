@@ -8,7 +8,14 @@ import httpx
 import pytest
 
 from gateway.auth import AuthConfigurationError
-from gateway.mode import TICKET_MODES, TicketModeError, describe, ticket_mode
+from gateway.mode import (
+    ENFORCEMENTS,
+    ENROLMENTS,
+    TicketModeError,
+    describe_enforcement,
+    describe_enrolment,
+    enrolment,
+)
 from gateway.server import (
     DEFAULT_PORT,
     _holder_from_environment,
@@ -299,95 +306,142 @@ def test_two_rail_center_credentials_are_refused_at_startup(monkeypatch):
         build_gateway()
 
 
-# --- RAIL_TICKET_MODE ------------------------------------------------------
+# --- RAIL_TICKET_MODE: enrolment, not posture ------------------------------
 #
-# `ticket_mode()` is the one enumerated variable nothing else in this suite
-# reaches: every other test injects `mode=` into `build_app`, which skips the
-# reader entirely. What that leaves unpinned is the whole of the function —
-# its default, its refusal, and the case folding that makes one platform-wide
-# value configure a zone.
+# RC-312 re-valued this variable. It answers *is there a control plane here* and
+# nothing else; what to do with a call arrives in the bundle. `enrolment()` is
+# the one enumerated reader nothing else in this suite reaches — every other
+# test injects `enrolled=` into `build_app`, which skips it — so its default,
+# its refusal and its case folding are pinned here or nowhere.
 
 
-def test_an_unset_ticket_mode_is_enforce(monkeypatch):
-    """The default is the strict one, so a deployment that forgets a line does
-    not silently stop protecting anything."""
+def test_an_unset_ticket_mode_is_plugin(monkeypatch):
+    """The default asks the control plane rather than deciding without one.
+
+    It is no longer `enforce`, because a posture is not what this variable says
+    any more. A deployment that forgets the line still polls, and what it then
+    does is whatever its operator set in Rail Center.
+    """
     monkeypatch.delenv("RAIL_TICKET_MODE", raising=False)
-    assert ticket_mode() == "enforce"
+    assert enrolment() == "plugin"
 
 
 @pytest.mark.parametrize("raw", ["", "   ", "\t\n"])
 def test_a_blank_ticket_mode_is_read_as_unset(monkeypatch, raw):
     monkeypatch.setenv("RAIL_TICKET_MODE", raw)
-    assert ticket_mode() == "enforce"
+    assert enrolment() == "plugin"
 
 
 @pytest.mark.parametrize(
-    "raw",
-    ["none", "observe", "enforce", " enforce ", "NONE", "None", "Enforce", "OBSERVE"],
+    "raw", ["none", "plugin", " plugin ", "NONE", "None", "Plugin"]
 )
 def test_the_ticket_mode_is_read_case_insensitively(monkeypatch, raw):
     """One variable, read by two components, so both must resolve the same set.
 
     The proxy in front reads `RAIL_TICKET_MODE` through `.strip().lower()`. A
-    gateway matching exactly would refuse to start on the `NONE` or `Enforce`
-    its proxy resolved happily — the zone is configured correctly in front and
-    the component behind it will not boot.
+    gateway matching exactly would refuse to start on the `NONE` its proxy
+    resolved happily — the zone configured correctly in front, and the component
+    behind it refusing to boot.
     """
     monkeypatch.setenv("RAIL_TICKET_MODE", raw)
-    assert ticket_mode() == raw.strip().lower()
+    assert enrolment() == raw.strip().lower()
 
 
-@pytest.mark.parametrize(
-    "raw", ["enforcing", "off", "block", "en force", "none;observe"]
-)
-def test_an_unrecognised_ticket_mode_refuses_to_start(monkeypatch, raw):
-    """Refused rather than defaulted. Falling back to `enforce` is a deployment
-    enforcing where its operator wrote `none`; falling back to `none` is one
-    enforcing nothing while its operator believes it is. Neither is a guess
-    worth making on an operator's behalf."""
+@pytest.mark.parametrize("raw", ["observe", "enforce", "Enforce", "OBSERVE"])
+def test_a_retired_posture_value_refuses_to_start_and_says_where_it_went(
+    monkeypatch, raw
+):
+    """The deliberate break, and the reason it is a break rather than a
+    translation.
+
+    Reading `enforce` as `plugin` would let a deployment go on declaring a
+    posture in a variable nothing reads, with the bundle quietly overruling it
+    and nobody told. A component that will not boot is the cheaper failure,
+    because it is the one an operator sees — and the message has to send them
+    somewhere, or they will set it back.
+    """
     monkeypatch.setenv("RAIL_TICKET_MODE", raw)
     with pytest.raises(TicketModeError, match="RAIL_TICKET_MODE must be one of"):
-        ticket_mode()
+        enrolment()
+    with pytest.raises(TicketModeError, match="arrives in the policy bundle"):
+        enrolment()
+
+
+@pytest.mark.parametrize("raw", ["plugged", "off", "block", "no ne", "none;plugin"])
+def test_an_unrecognised_ticket_mode_refuses_to_start(monkeypatch, raw):
+    """Refused rather than defaulted, and without the posture hint: a value that
+    was never one of the three is a typo, not a migration."""
+    monkeypatch.setenv("RAIL_TICKET_MODE", raw)
+    with pytest.raises(
+        TicketModeError, match="RAIL_TICKET_MODE must be one of"
+    ) as raised:
+        enrolment()
+    assert "arrives in the policy bundle" not in str(raised.value)
 
 
 def test_a_refused_ticket_mode_names_what_the_operator_wrote(monkeypatch):
     """The folded form is what is matched; the raw one is what is reported, so
     a value refused for some reason other than its case reads back to whoever
     set it."""
-    monkeypatch.setenv("RAIL_TICKET_MODE", "Enforcing")
-    with pytest.raises(TicketModeError, match="Enforcing"):
-        ticket_mode()
+    monkeypatch.setenv("RAIL_TICKET_MODE", "Plugged")
+    with pytest.raises(TicketModeError, match="Plugged"):
+        enrolment()
 
 
-# --- the startup line each mode writes -------------------------------------
+# --- the startup line, and the posture line --------------------------------
 #
-# `build_gateway` writes `describe(resolved_mode)` at INFO on every start, and
-# `mode.py` states what that line is for: an operator is told what this mode
-# does to traffic rather than discovering it from a request that was refused.
-# The one test that sees the banner — `test_readiness.py`'s control-plane-down
-# case — filters it out by `RAIL_TICKET_MODE=` prefix before asserting, so what
-# the line says has to be pinned here or nowhere.
+# Two lines now, written at two moments. `build_gateway` writes the enrolment
+# line at INFO on every start; the posture line is what a poll has to say when
+# the bundle moves. `test_readiness.py`'s control-plane-down case filters the
+# banner out by `RAIL_TICKET_MODE=` prefix, so what these say is pinned here.
 
 
-@pytest.mark.parametrize("mode", TICKET_MODES)
-def test_each_startup_line_names_the_mode_it_describes(mode):
-    """A line naming the wrong mode is worse than no line: it is the log an
+@pytest.mark.parametrize("enrolled", ENROLMENTS)
+def test_each_startup_line_names_the_enrolment_it_describes(enrolled):
+    """A line naming the wrong state is worse than no line: it is the log an
     operator checks *instead of* sending a request."""
-    assert describe(mode).startswith(f"RAIL_TICKET_MODE={mode} — ")
+    assert describe_enrolment(enrolled).startswith(f"RAIL_TICKET_MODE={enrolled} — ")
 
 
-def test_the_three_startup_lines_do_not_repeat_each_other():
-    """Three modes, three answers about traffic. A line shared between two of
-    them is one of the two lying, and nothing else in the log corrects it."""
-    assert len({describe(mode) for mode in TICKET_MODES}) == len(TICKET_MODES)
+def test_the_two_startup_lines_do_not_repeat_each_other():
+    assert describe_enrolment("none") != describe_enrolment("plugin")
+
+
+def test_the_plugin_line_promises_nothing_about_traffic():
+    """The line an unconfigured deployment now writes, and the claim it must not
+    make. What this gateway does to a request is the bundle's to say and is not
+    known at start-up, so a start-up line naming a posture would be a guess an
+    operator reads as a fact."""
+    line = describe_enrolment("plugin")
+
+    assert "polls Rail Center" in line
+    assert "judges nothing" in line and "unready" in line
+    assert "403" not in line and "blocked" not in line
+
+
+def test_the_none_line_says_there_is_no_control_plane():
+    """`none` means no control plane after RC-312, not "do not enforce". The
+    second half matters as much: an operator debugging a control plane this
+    gateway is not talking to needs to be told it never will."""
+    line = describe_enrolment("none")
+
+    assert "no control plane" in line
+    assert "forwards every request" in line
+    assert "fetches no policy bundle" in line
+
+
+@pytest.mark.parametrize("enforcement", ENFORCEMENTS)
+def test_each_posture_line_names_the_enforcement_it_describes(enforcement):
+    assert describe_enforcement(enforcement, "block").startswith(
+        f"enforcement={enforcement} — "
+    )
 
 
 def test_the_enforce_line_says_the_traffic_it_refuses():
-    """`enforce` is the default, so this is the line every unconfigured
-    deployment writes, on a build that answers 403 and 503. Both refusals are
-    named, and the claim this line used to carry — that enforcement is not
-    implemented and the mode behaves as observe — may not come back."""
-    line = describe("enforce")
+    """Both refusals named, and the claim this line used to carry — that
+    enforcement is not implemented and the mode behaves as observe — may not
+    come back."""
+    line = describe_enforcement("enforce", "block")
 
     assert "403" in line and "503" in line
     assert "reported to Rail Center" in line
@@ -396,21 +450,37 @@ def test_the_enforce_line_says_the_traffic_it_refuses():
 
 
 def test_the_observe_line_says_nothing_is_blocked():
-    """The half of the pair that must stay true of `observe` alone: it
-    evaluates and logs, and no request is refused for it."""
-    line = describe("observe")
+    line = describe_enforcement("observe", "block")
 
     assert "nothing is blocked" in line
     assert "403" not in line and "503" not in line
     assert "refus" not in line
 
 
-def test_the_none_line_says_nothing_is_evaluated():
-    """`none` is a pass-through, and the second half matters as much: a gateway
-    that will never read a bundle does not poll for one, and an operator
-    debugging a control plane it is not talking to needs to know that here."""
-    line = describe("none")
+def test_the_none_posture_line_says_it_keeps_polling():
+    """The half that is easy to leave out and is the whole of RC-312 on this
+    side: a gateway told `none` is still listening, so an operator can move it
+    back without a redeploy."""
+    line = describe_enforcement("none", "block")
 
-    assert "forwards every request" in line
-    assert "no policy bundle is fetched" in line
+    assert "forwarded" in line
+    assert "keeps polling" in line
     assert "403" not in line and "503" not in line
+
+
+@pytest.mark.parametrize("enforcement", ["none", "observe"])
+def test_the_fallback_is_named_only_where_it_decides_something(enforcement):
+    """It is consulted at `enforce` and nowhere else, so a line mentioning it
+    anywhere else invites an operator to think it applies there."""
+    assert "fallback" not in describe_enforcement(enforcement, "pass")
+
+
+def test_the_enforce_line_says_what_each_fallback_does_to_an_unbound_endpoint():
+    """The pair whose meaning RC-312 corrected, so the two lines must differ in
+    the direction the correction went: `pass` is not "unjudged"."""
+    blocked = describe_enforcement("enforce", "block")
+    passed = describe_enforcement("enforce", "pass")
+
+    assert "fallback=block" in blocked and "without consulting the chain" in blocked
+    assert "fallback=pass" in passed and "judged by the whole chain" in passed
+    assert "unjudged" not in passed

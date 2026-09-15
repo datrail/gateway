@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/datrail/gateway/schemas/policy-bundle.schema.json",
   "title": "Policy bundle",
-  "description": "The body of `GET /v1/policy-bundle` — the ruleset an enforcement point caches and evaluates every request against.\n\nWhat this schema can express is shape. Three of the bundle's rules are about meaning and are stated here in prose because no schema carries them:\n\n1. **An endpoint with no binding entry is subject to every policy in `policies`.** An empty `bindings` list means nothing is narrowed, not that nothing applies. Read the other way round it is a total loss of enforcement.\n2. **A failed fetch is not an empty bundle.** An empty chain allows, so a reader that treats an unreachable control plane as a bundle with no rules converts an outage of Rail Center into an outage of enforcement. Keep serving the last bundle held; refuse traffic if none was ever held.\n3. **A bundle valid against this schema can still be unusable.** Four classes: a policy id or a bound id in a spelling the contract does not name; a `version` carrying a character no log line can hold; a duplicate policy id; and two bindings for one endpoint. Three of the four are beyond what this file can say. Uniqueness across a list has no keyword at all. The version's character rule is defined by Unicode general category. `pattern` is ECMA-262, which can say that with `\\p{...}` under the `u` flag — but a reader validating with Python's `jsonschema` cannot, because it compiles patterns with `re`, and enumerating the code points instead would be a snapshot that a later Unicode revision silently invalidates. A rule half the readers of this file cannot evaluate is worse than one stated in prose. The id grammar *is* expressible as a `pattern`, and is deliberately not written as one: it would be a second copy of a rule that already lives in code and in vectors, and the loop that produced this file kept finding second copies that had stopped agreeing with the first. The `gated`/`open` arity rules are the one case where a schema rule is both expressible and cheap to keep true, so they are stated below.\n\nA reader is therefore not conformant by validating against this file. It is conformant by passing the vectors that accompany it.",
+  "description": "The body of `GET /v1/policy-bundle` \u2014 the ruleset an enforcement point caches and evaluates every request against.\n\nWhat this schema can express is shape. Three of the bundle's rules are about meaning and are stated here in prose because no schema carries them:\n\n1. **An endpoint with no binding entry is subject to every policy in `policies`.** An empty `bindings` list means nothing is narrowed, not that nothing applies. Read the other way round it is a total loss of enforcement.\n2. **A failed fetch is not an empty bundle.** An empty chain allows, so a reader that treats an unreachable control plane as a bundle with no rules converts an outage of Rail Center into an outage of enforcement. Keep serving the last bundle held; refuse traffic if none was ever held.\n3. **A bundle valid against this schema can still be unusable.** Four classes: a policy id or a bound id in a spelling the contract does not name; a `version` carrying a character no log line can hold; a duplicate policy id; and two bindings for one endpoint. Three of the four are beyond what this file can say. Uniqueness across a list has no keyword at all. The version's character rule is defined by Unicode general category. `pattern` is ECMA-262, which can say that with `\\p{...}` under the `u` flag \u2014 but a reader validating with Python's `jsonschema` cannot, because it compiles patterns with `re`, and enumerating the code points instead would be a snapshot that a later Unicode revision silently invalidates. A rule half the readers of this file cannot evaluate is worse than one stated in prose. The id grammar *is* expressible as a `pattern`, and is deliberately not written as one: it would be a second copy of a rule that already lives in code and in vectors, and the loop that produced this file kept finding second copies that had stopped agreeing with the first. The `gated`/`open` arity rules are the one case where a schema rule is both expressible and cheap to keep true, so they are stated below.\n\nA reader is therefore not conformant by validating against this file. It is conformant by passing the vectors that accompany it.",
   "type": "object",
   "required": [
     "version",
@@ -16,12 +16,12 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "description": "A content hash of the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy, and a version over the policies alone would let a reader hold a stale narrowing indefinitely.\n\nBounded, and refused if it carries a character no log line can hold — a control, a format character, a line or paragraph separator, or a lone surrogate: it is held for as long as the bundle is and re-echoed on every failed refresh after that, so one accepted once keeps arriving in an operator's log."
+      "description": "A content hash of the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy, and a version over the policies alone would let a reader hold a stale narrowing indefinitely.\n\nBounded, and refused if it carries a character no log line can hold \u2014 a control, a format character, a line or paragraph separator, or a lone surrogate: it is held for as long as the bundle is and re-echoed on every failed refresh after that, so one accepted once keeps arriving in an operator's log."
     },
     "generated_at": {
       "type": "string",
       "format": "date-time",
-      "description": "When Rail Center assembled this bundle. Informational — a reader caches on `version`, never on this. `format` is an annotation in draft 2020-12 and most validators do not check it; nothing turns on this value here."
+      "description": "When Rail Center assembled this bundle. Informational \u2014 a reader caches on `version`, never on this. `format` is an annotation in draft 2020-12 and most validators do not check it; nothing turns on this value here."
     },
     "policies": {
       "type": "array",
@@ -43,6 +43,33 @@
       "items": {
         "type": "object"
       }
+    },
+    "enforcement": {
+      "type": "object",
+      "description": "What Rail Center says to do with a call, and what to do with one no binding matches. Absent means a Rail Center older than RC-312, which a reader takes as judging nothing rather than as any posture in particular \u2014 inventing one enforces a decision the control plane never stated. Not in `required` for that reason.",
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "observe",
+            "enforce"
+          ],
+          "description": "none \u2014 judge nothing, and keep polling so a move off it arrives. observe \u2014 evaluate, log every verdict, block none. enforce \u2014 evaluate, act, report denials. A component polls at all three: one that stopped at `none` could never be told it had been moved off it."
+        },
+        "fallback": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "block"
+          ],
+          "description": "What happens to a call no binding matches, consulted only at `enforce`. block \u2014 refused, and the chain is not consulted, a refusal being something the chain cannot tighten. pass \u2014 judged by the whole chain rather than refused; it does not mean unjudged. Absent is read as `block`."
+        }
+      }
     }
   },
   "$defs": {
@@ -55,7 +82,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "A UUID. Five spellings must parse — canonical, uppercase, braced, URN and undashed — and are compared in the canonical lowercase-hyphenated form. Rail Center emits the canonical one; the others arise in a bundle assembled elsewhere, and refusing them makes the bundle unusable, which refuses traffic."
+          "description": "A UUID. Five spellings must parse \u2014 canonical, uppercase, braced, URN and undashed \u2014 and are compared in the canonical lowercase-hyphenated form. Rail Center emits the canonical one; the others arise in a bundle assembled elsewhere, and refusing them makes the bundle unusable, which refuses traffic."
         },
         "name": {
           "type": "string",
@@ -69,7 +96,7 @@
         },
         "enabled": {
           "type": "boolean",
-          "description": "Skipped when exactly `false`, never merely falsy — the falsy sets do not agree across languages. A policy carrying no `enabled` key is enabled: a rule nobody switched off is one an operator expects to be running. Settled before anything else is validated, so that switching a policy off is a working remedy for a bundle this reader cannot parse. A policy carrying `enabled: false` is exempt from the priority rule in `allOf` below, because refusing a disabled policy's priority would refuse exactly the bundle that switching one off produces — which is the remedy this ordering exists to keep working."
+          "description": "Skipped when exactly `false`, never merely falsy \u2014 the falsy sets do not agree across languages. A policy carrying no `enabled` key is enabled: a rule nobody switched off is one an operator expects to be running. Settled before anything else is validated, so that switching a policy off is a working remedy for a bundle this reader cannot parse. A policy carrying `enabled: false` is exempt from the priority rule in `allOf` below, because refusing a disabled policy's priority would refuse exactly the bundle that switching one off produces \u2014 which is the remedy this ordering exists to keep working."
         }
       },
       "allOf": [
@@ -94,7 +121,7 @@
                 "type": "integer",
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991,
-                "description": "Ascending: 1 is evaluated before 2. A whole number within ±(2^53 − 1), because a priority arrives as a double and past that bound two values one reader sees as distinct another sees as a tie — and the chains then order differently. `1.0` is the integer 1; `1.5` is not a priority, and `true` is not one either."
+                "description": "Ascending: 1 is evaluated before 2. A whole number within \u00b1(2^53 \u2212 1), because a priority arrives as a double and past that bound two values one reader sees as distinct another sees as a tie \u2014 and the chains then order differently. `1.0` is the integer 1; `1.5` is not a priority, and `true` is not one either."
               }
             }
           }
@@ -113,21 +140,21 @@
         "endpoint_key": {
           "type": "string",
           "maxLength": 255,
-          "description": "The endpoint this narrows — the *resolved* key, matched after any ingress rewrite, never the raw path. A rule written against a raw path is a rule a rewrite silently disarms. Must be a string: a language that coerces `123` narrows a request whose resolved key is the string \"123\"."
+          "description": "The endpoint this narrows \u2014 the *resolved* key, matched after any ingress rewrite, never the raw path. A rule written against a raw path is a rule a rewrite silently disarms. Must be a string: a language that coerces `123` narrows a request whose resolved key is the string \"123\"."
         },
         "mode": {
           "enum": [
             "gated",
             "open"
           ],
-          "description": "`gated` — only the policies in `policy_ids` apply. `open` — no policy applies to this endpoint, so nothing can deny and the request is allowed. Note *allowed*, not *skipped*: the bundle is still validated and the chain still ordered, because an unusable bundle is refused whatever any one endpoint's binding says. Anything else is refused, because the two guesses are \"the listed policies apply\" and \"none do\", which is the widest disagreement available."
+          "description": "`gated` \u2014 only the policies in `policy_ids` apply. `open` \u2014 no policy applies to this endpoint, so nothing can deny and the request is allowed. Note *allowed*, not *skipped*: the bundle is still validated and the chain still ordered, because an unusable bundle is refused whatever any one endpoint's binding says. Anything else is refused, because the two guesses are \"the listed policies apply\" and \"none do\", which is the widest disagreement available."
         },
         "policy_ids": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "UUIDs naming policies in `policies`, in any of the five spellings, normalised before comparison — a raw comparison against a non-canonical id matches no policy, and an endpoint matching no policy is gated by nothing. Non-empty when `mode` is `gated`, empty when it is `open`; a gated entry naming nothing is refused, since \"subject to nothing\" is spelled `open` and \"subject to everything\" is spelled by carrying no entry.\n\nAn id naming no policy, or a disabled one, binds nothing and is not an error. A binding whose every id resolves to nothing leaves an empty chain, and an empty chain allows — do not fall back to the whole chain when narrowing empties it."
+          "description": "UUIDs naming policies in `policies`, in any of the five spellings, normalised before comparison \u2014 a raw comparison against a non-canonical id matches no policy, and an endpoint matching no policy is gated by nothing. Non-empty when `mode` is `gated`, empty when it is `open`; a gated entry naming nothing is refused, since \"subject to nothing\" is spelled `open` and \"subject to everything\" is spelled by carrying no entry.\n\nAn id naming no policy, or a disabled one, binds nothing and is not an error. A binding whose every id resolves to nothing leaves an empty chain, and an empty chain allows \u2014 do not fall back to the whole chain when narrowing empties it."
         }
       },
       "allOf": [
@@ -179,7 +206,7 @@
       "policies": [
         {
           "id": "5c8f1e42-0000-4000-8000-0000000000a1",
-          "name": "P1 — Deny critical-tier agents",
+          "name": "P1 \u2014 Deny critical-tier agents",
           "priority": 1,
           "condition": {
             "field": "posture_score",

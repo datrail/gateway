@@ -31,6 +31,14 @@ from gateway.bundle.uuid import canonical_uuid
 from gateway.json_wire import MAX_SAFE_INTEGER
 from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_characters
 from gateway.key_safety import safe_for_log as _safe
+from gateway.mode import (
+    DEFAULT_FALLBACK,
+    ENFORCEMENTS,
+    FALLBACKS,
+    UNTOLD_ENFORCEMENT,
+    Enforcement,
+    Fallback,
+)
 
 
 def _q(value: object) -> str:
@@ -116,6 +124,18 @@ class UsableBundle:
     #: is how an operator sees a rule is not in force rather than inferring it
     #: from an absence.
     rejected: tuple[Any, ...]
+    #: What Rail Center says to do with a call, and what to do with one no
+    #: binding matches (RC-312). Read from the bundle on every poll rather than
+    #: from the environment at start-up, which is what lets an operator move a
+    #: gateway's posture and have it take effect on the next refresh.
+    #:
+    #: A bundle naming no `enforcement` is one from a Rail Center older than
+    #: RC-312, and is read as `none`/`block` — judge nothing, and carry the
+    #: conservative half of a pair whose other half admits unbound endpoints.
+    #: Judging nothing is the safe reading here and not the timid one: the
+    #: alternative is enforcing a posture the control plane never stated.
+    enforcement: Enforcement
+    fallback: Fallback
 
 
 def _usable_priority(value: object) -> bool:
@@ -286,6 +306,41 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
     return out
 
 
+def _posture(value: object) -> tuple[Enforcement, Fallback]:
+    """The enforcement value this bundle carries, or what an older one means.
+
+    **Absent is `none`/`block`, and present-but-wrong is refused.** The two are
+    not the same claim and must not collapse into one. An absent field is a Rail
+    Center that predates RC-312 and has said nothing about posture, which this
+    component reads as "judge nothing" — the alternative, inventing a posture,
+    enforces a decision no operator made. A field that is present and outside
+    the vocabulary is a responder disagreeing with the contract about what these
+    values are, and the contract's own rule for that is to refuse the bundle
+    rather than guess which of two opposite readings was meant.
+
+    Refusing costs an *update* rather than enforcement, because a reader keeps
+    serving the bundle it already holds — except on a first fetch, where there
+    is nothing to fall back to and the gateway reports itself unready.
+    """
+    if value is None:
+        return UNTOLD_ENFORCEMENT, DEFAULT_FALLBACK
+    if not isinstance(value, dict):
+        raise UnusableBundle("`enforcement` is not an object")
+    mode = value.get("mode")
+    if mode not in ENFORCEMENTS:
+        raise UnusableBundle(f"an enforcement mode outside the contract ({_q(mode)})")
+    # Read independently of the mode. It is consulted only at `enforce`, but a
+    # bundle carrying a malformed one at `observe` is still a responder that
+    # disagrees about the vocabulary — and the posture it disagrees about is one
+    # poll away from being the one that decides.
+    fallback = value.get("fallback")
+    if fallback is None:
+        return mode, DEFAULT_FALLBACK
+    if fallback not in FALLBACKS:
+        raise UnusableBundle(f"a fallback outside the contract ({_q(fallback)})")
+    return mode, fallback
+
+
 def validate_bundle(body: object) -> UsableBundle:
     """Validate a fetched bundle and return one that can be walked.
 
@@ -336,9 +391,13 @@ def validate_bundle(body: object) -> UsableBundle:
     if not isinstance(rejected, list):
         raise UnusableBundle("`rejected` is not a list")
 
+    enforcement, fallback = _posture(body.get("enforcement"))
+
     return UsableBundle(
         version=version,
         chain=_order(policies),
         bindings=MappingProxyType(_index(bindings)),
         rejected=tuple(rejected),
+        enforcement=enforcement,
+        fallback=fallback,
     )

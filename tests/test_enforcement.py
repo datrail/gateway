@@ -32,6 +32,7 @@ import base64
 import json
 import logging
 import time
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
@@ -70,13 +71,26 @@ def policy(pid: str, condition: dict[str, Any], *, priority: int = 1, action="bl
     }
 
 
-def bundle(*policies: dict[str, Any], bindings: list[dict[str, Any]] | None = None):
+def bundle(
+    *policies: dict[str, Any],
+    bindings: list[dict[str, Any]] | None = None,
+    enforcement: str = "enforce",
+    fallback: str = "block",
+):
+    """A validated bundle, at `enforce` unless a case asks otherwise.
+
+    The posture is part of the bundle after RC-312 rather than a flag on the
+    layer that reads it, which is why it is a parameter here: a case that wants
+    a verdict logged and not acted on asks for an `observe` bundle, the same way
+    an operator would.
+    """
     return validate_bundle(
         {
             "version": "v-enforce",
             "policies": list(policies),
             "bindings": bindings or [],
             "rejected": [],
+            "enforcement": {"mode": enforcement, "fallback": fallback},
         }
     )
 
@@ -208,6 +222,17 @@ def layer(
     reports: _Reports | None = None,
     app: _Downstream | None = None,
 ) -> tuple[_Enforcement, _Downstream, _Reports]:
+    """The enforcement layer over a held bundle.
+
+    **`blocking` sets the posture on the bundle rather than on the layer**
+    (RC-312). It is kept as a parameter because it is what these cases are
+    about — whether a denial is acted on — but the layer no longer takes such a
+    flag: it reads `enforcement.mode` off whatever is held, per request. Passing
+    `blocking=False` against a bundle that was built at `enforce` would
+    otherwise silently assert nothing.
+    """
+    if held is not None and not blocking and held.enforcement == "enforce":
+        held = replace(held, enforcement="observe")
     downstream = app or _Downstream()
     recorder = reports or _Reports()
     return (
@@ -215,7 +240,6 @@ def layer(
             downstream,
             _Holder(held),
             SLUG,
-            blocking=blocking,
             rail_center_url=RAIL_CENTER_URL,
             auth={"Authorization": "Bearer t"},
             transport=recorder.transport,
@@ -342,21 +366,55 @@ async def test_a_denied_call_is_refused_with_403_and_never_forwarded():
 async def test_a_call_that_could_not_be_judged_is_refused_with_503_not_403():
     """503 and 403 are different answers and must not collapse into one.
 
-    A 403 tells the caller their ticket was judged and rejected. Neither of
-    these was judged at all: one had no bundle to judge it against, the other
-    reached a rule outside this build's grammar. Answering 403 for either says a
-    policy decided something when none did."""
-    no_bundle, _, _ = layer(None)
-    assert (await drive(no_bundle, call())).status == 503
+    A 403 tells the caller their ticket was judged and rejected. This one was
+    not judged at all: it reached a rule outside this build's grammar, under a
+    posture that says refuse. Answering 403 would say a policy decided something
+    when none did.
 
+    **The other half of this pair moved in RC-312** and is
+    `test_a_gateway_holding_no_bundle_forwards_because_it_has_been_told_no_posture`
+    below. Holding no bundle used to be refused here too, against a posture read
+    from the environment at start-up; the posture now arrives *in* the bundle,
+    so a gateway holding none has not been told to enforce.
+    """
     undecidable, _, _ = layer(bundle(policy(BAD_ID, UNREADABLE)))
     assert (await drive(undecidable, call())).status == 503
 
 
 @pytest.mark.asyncio
+async def test_a_gateway_holding_no_bundle_forwards_because_it_has_been_told_no_posture():
+    """The half RC-312 inverted, and the one worth stating the reason for.
+
+    Refusing here would enforce a decision no operator made: the posture lives in
+    the bundle, so a gateway holding none has been told nothing rather than told
+    to refuse. What keeps traffic off a gateway in this state is `/ready`, which
+    answers 503 until a bundle arrives — a report an orchestrator acts on, rather
+    than a refusal the caller sees.
+
+    It is also what makes the first poll safe. Under the old rule a gateway
+    starting up refused every call until its first fetch landed, so a control
+    plane that was briefly slow was an outage of the protected service.
+    """
+    no_bundle, downstream, reports = layer(None)
+
+    answer = await drive(no_bundle, call())
+
+    assert answer.status == 200
+    assert downstream.calls == 1
+    # Nothing was judged, so nothing may be reported as judged.
+    await settled(reports, expecting=0)
+    assert reports.bodies == []
+
+
+@pytest.mark.asyncio
 async def test_neither_refusal_reaches_the_app_below():
-    """A refusal is answered *for* the upstream, so the upstream never sees it."""
-    for held in (None, bundle(policy(BAD_ID, UNREADABLE)), bundle(DENIES_EVERYTHING)):
+    """A refusal is answered *for* the upstream, so the upstream never sees it.
+
+    Two refusals, not three: holding no bundle stopped being one in RC-312, and
+    that case is asserted from the other side above — it forwards, and the
+    upstream *does* see it.
+    """
+    for held in (bundle(policy(BAD_ID, UNREADABLE)), bundle(DENIES_EVERYTHING)):
         enforcement, downstream, _ = layer(held)
         await drive(enforcement, call())
         assert downstream.calls == 0
@@ -457,12 +515,16 @@ async def test_observe_reports_nothing_it_would_have_denied():
 @pytest.mark.asyncio
 async def test_a_refusal_reports_nothing_because_no_policy_decided():
     """503, not 403, and therefore no row: naming a policy on a request the
-    ruleset could not be applied to attributes a verdict nobody reached."""
-    for held in (None, bundle(policy(BAD_ID, UNREADABLE))):
-        enforcement, _, reports = layer(held)
-        assert (await drive(enforcement, call())).status == 503
-        await settled(reports, expecting=0)
-        assert reports.bodies == []
+    ruleset could not be applied to attributes a verdict nobody reached.
+
+    The no-bundle case moved in RC-312 — it answers 200 now — but the half this
+    is about did not: whatever the status, a call no policy decided reports
+    nothing. Both are asserted, from their own sides.
+    """
+    enforcement, _, reports = layer(bundle(policy(BAD_ID, UNREADABLE)))
+    assert (await drive(enforcement, call())).status == 503
+    await settled(reports, expecting=0)
+    assert reports.bodies == []
 
 
 @pytest.mark.asyncio
