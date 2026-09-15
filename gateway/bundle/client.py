@@ -39,6 +39,20 @@ from gateway.mode import describe_enforcement
 
 logger = logging.getLogger("gateway.bundle")
 
+
+def _posture_line(bundle: UsableBundle) -> str:
+    """The posture as an operator will read it.
+
+    The rendered sentence rather than the values behind it, because that is
+    what `_refresh_once` measures a change against: the line names the
+    fallback only at `enforce`, and a move it cannot express is not a move an
+    operator can be told about.
+    """
+    return describe_enforcement(
+        bundle.enforcement, bundle.fallback, told=bundle.posture_told
+    )
+
+
 #: The route is the OpenAPI specification's, not a deployment's. Making it
 #: configurable would add a way to misconfigure it and buy nothing; what a
 #: deployment configures is `RAIL_CENTER_URL`.
@@ -374,9 +388,7 @@ class BundleHolder:
 
     async def _refresh_once(self) -> RefreshOutcome:
         held = self._held.version if self._held else None
-        previous_posture = (
-            (self._held.enforcement, self._held.fallback) if self._held else None
-        )
+        previous_line = _posture_line(self._held) if self._held else None
 
         try:
             body = await self._fetch()
@@ -416,7 +428,7 @@ class BundleHolder:
                 safe_for_log(fields.get("reason")),
             )
 
-        posture = (bundle.enforcement, bundle.fallback)
+        posture_line = _posture_line(bundle)
         self._held = bundle
         logger.info(
             "holding policy bundle version %s — %d enabled policies, "
@@ -437,8 +449,17 @@ class BundleHolder:
         # would bury the one that moved. A first bundle has no posture before
         # it, so it reports one — that poll is where this gateway is told what
         # to do for the first time.
-        if posture != previous_posture:
-            logger.info("%s", describe_enforcement(*posture))
+        #
+        # Compared as the rendered line rather than as the posture behind it,
+        # because the line names the fallback only at `enforce`. A fallback
+        # that moves at `none` or `observe` would otherwise fire this guard
+        # and emit a sentence byte-identical to the one before it — the
+        # burying the paragraph above exists to prevent, arriving by the one
+        # route it does not cover. The move still reports itself the moment
+        # the mode reaches `enforce`, which is where the line can express it
+        # and where the fallback decides anything.
+        if posture_line != previous_line:
+            logger.info("%s", posture_line)
         return RefreshOutcome("replaced", bundle.version)
 
     async def _fetch(self) -> Any:

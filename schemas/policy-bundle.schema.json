@@ -16,7 +16,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "description": "A content hash of the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy, and a version over the policies alone would let a reader hold a stale narrowing indefinitely.\n\nBounded, and refused if it carries a character no log line can hold — a control, a format character, a line or paragraph separator, or a lone surrogate: it is held for as long as the bundle is and re-echoed on every failed refresh after that, so one accepted once keeps arriving in an operator's log."
+      "description": "A content hash of the `enforcement`, the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy, and a version over the policies alone would let a reader hold a stale narrowing indefinitely. `enforcement` is covered for the same reason taken further: it changes what happens to every call while changing no rule at all, so a caller comparing a version that ignored it would take the `304` path across the one change an operator most needs to land.\n\nBounded, and refused if it carries a character no log line can hold — a control, a format character, a line or paragraph separator, or a lone surrogate: it is held for as long as the bundle is and re-echoed on every failed refresh after that, so one accepted once keeps arriving in an operator's log."
     },
     "generated_at": {
       "type": "string",

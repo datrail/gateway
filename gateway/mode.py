@@ -167,13 +167,32 @@ def describe_enrolment(enrolled: Enrolment) -> str:
     )
 
 
-def describe_enforcement(enforcement: Enforcement, fallback: Fallback) -> str:
+def describe_enforcement(
+    enforcement: Enforcement, fallback: Fallback, *, told: bool
+) -> str:
     """The line logged when a poll changes the posture.
 
     Says what traffic will experience, because that is what an operator is
     checking it against — and names the fallback only where it is consulted, so
     a line mentioning it is a line where it decides something.
+
+    **`told` is not a default, and that is the point of it.** A bundle naming no
+    `enforcement` resolves to the same `none`/`block` as one naming them, so the
+    posture alone cannot say whether Rail Center chose to judge nothing or said
+    nothing at all — and the line that reports the second as the first credits a
+    control plane with a decision it never made. Every caller has the answer to
+    hand; requiring it is what stops a fourth state being rendered as a third.
     """
+    if not told:
+        return (
+            "enforcement=none — this bundle carries no posture at all, so Rail "
+            "Center predates RC-312 and has said nothing about one; every "
+            "request is forwarded. Judging nothing is this gateway's reading of "
+            "that silence and not a decision an operator made, so a deployment "
+            "that means to enforce needs a Rail Center that sends the field. "
+            "This gateway keeps polling and reports a posture as soon as it is "
+            "told one"
+        )
     if enforcement == "none":
         return (
             "enforcement=none — Rail Center says judge nothing; every request is "

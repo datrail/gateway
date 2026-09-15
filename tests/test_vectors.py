@@ -24,7 +24,7 @@ from gateway.bundle.conditions import ConditionInput, UninterpretableCondition
 from gateway.bundle.decide import decide, refuses_unbound
 from gateway.bundle.validate import Binding, UnusableBundle, validate_bundle
 from gateway.key_safety import has_unsafe_key_characters
-from gateway.mode import blocks
+from gateway.mode import ENFORCEMENTS, FALLBACKS, blocks
 from gateway.ticket import parse_rail_header
 
 VECTORS = Path(__file__).parent / "vectors"
@@ -332,38 +332,161 @@ def test_a_bundle_naming_a_mode_and_no_fallback_blocks_the_unbound() -> None:
     assert resolved.fallback == "block"
 
 
-@pytest.mark.parametrize(
-    ("enforcement", "named"),
-    [
-        ({"mode": "halt"}, "halt"),
-        ({"mode": 17}, "17"),
-        ({"mode": "enforce", "fallback": "allow"}, "allow"),
-        # Read independently of the mode: a malformed fallback at `observe` is
-        # still a responder disagreeing about the vocabulary, one poll away
-        # from the posture where that fallback decides every unbound call.
-        ({"mode": "observe", "fallback": "allow"}, "allow"),
-        ("enforce", "not an object"),
-    ],
-)
-def test_a_posture_outside_the_contract_is_refused(
-    enforcement: Any, named: str
-) -> None:
-    """Present-but-wrong is refused, where absent is read as `none`/`block`.
+#: Every `mode` a bundle can carry, paired with how a refusal must name it, or
+#: `None` where the value is in the vocabulary and is accepted. `_ABSENT` is the
+#: object with no `mode` key, which reads as a null one.
+#:
+#: The rendering is `validate.py`'s: a value off the wire is quoted and made
+#: safe before it reaches a log line. Pairing each candidate with it pins that a
+#: refusal names *what* was wrong and not merely that something was.
+_MODES: list[tuple[Any, str | None]] = [
+    (_ABSENT, "`<null>`"),
+    (None, "`<null>`"),
+    ("none", None),
+    ("observe", None),
+    ("enforce", None),
+    ("halt", "`halt`"),
+    ("", "``"),
+    # Not folded. `RAIL_TICKET_MODE` is folded because a proxy reading the same
+    # variable folds it; a bundle is a document from one producer, and a
+    # producer shouting the value disagrees about the vocabulary like any other.
+    ("NONE", "`NONE`"),
+    (17, "`17`"),
+    (True, "`true`"),
+    ([], "`<array>`"),
+    ({}, "`<object>`"),
+]
 
-    The two are not the same claim. An absent field is a control plane that has
-    said nothing; a value outside the vocabulary is one that disagrees with the
+#: The same for `fallback`, where `None` covers two accepted classes rather than
+#: one: in the vocabulary, or absent and therefore defaulted.
+_FALLBACKS: list[tuple[Any, str | None]] = [
+    (_ABSENT, None),
+    (None, None),
+    ("pass", None),
+    ("block", None),
+    ("allow", "`allow`"),
+    ("", "``"),
+    ("PASS", "`PASS`"),
+    (17, "`17`"),
+    (True, "`true`"),
+    ([], "`<array>`"),
+]
+
+
+def test_the_posture_tables_hold_every_value_the_contract_names() -> None:
+    """The product below is a branch space only while these cover the vocabulary.
+
+    A value dropped from either table narrows the product silently, and a value
+    added to `ENFORCEMENTS` or `FALLBACKS` without a row here would never be
+    driven at all.
+    """
+    assert {mode for mode, named in _MODES if named is None} == set(ENFORCEMENTS)
+    accepted = {
+        fallback
+        for fallback, named in _FALLBACKS
+        if named is None and fallback is not _ABSENT and fallback is not None
+    }
+    assert accepted == set(FALLBACKS)
+
+
+def test_every_enforcement_object_resolves_or_is_refused() -> None:
+    """The posture guard driven over its branch space rather than over samples.
+
+    Present-but-wrong is refused where absent is read as `none`/`block`, and the
+    two are not the same claim: an absent field is a control plane that has said
+    nothing, while a value outside the vocabulary is one that disagrees with the
     contract about what these words are, and guessing which of two opposite
     readings it meant is the choice the contract refuses to make.
 
     `schemas/policy-bundle.schema.json` asserts the same vocabulary, but nothing
     under `gateway/` applies that schema at runtime — `validate_bundle` is
-    hand-rolled — so those assertions pin the published document rather than
-    this reader.
-    """
-    with pytest.raises(UnusableBundle) as refused:
-        validate_bundle(_postured(enforcement))
+    hand-rolled — so those assertions pin the published document rather than this
+    reader.
 
-    assert named in refused.value.reason
+    **Driven as a product because an enumeration of examples kept moving.** Two
+    rounds of review each closed on a list of cases and the next found cells
+    beside them: a malformed fallback at `none`, a list where a string had been
+    pinned, an object carrying no `mode`. A branch added to `_posture` now has to
+    be given a rule here, or some cell disagrees with it.
+
+    `{"enforcement": {}}` is the cell carrying the danger. The schema marks
+    `mode` required and this reader refuses present-but-wrong, so a producer that
+    emits the object and omits the mode is refused rather than read as
+    `none`/`block` — which would be a gateway judging nothing, reached by the one
+    path the refusal exists to close.
+    """
+    for mode, mode_named in _MODES:
+        for fallback, fallback_named in _FALLBACKS:
+            enforcement: dict[str, Any] = {}
+            if mode is not _ABSENT:
+                enforcement["mode"] = mode
+            if fallback is not _ABSENT:
+                enforcement["fallback"] = fallback
+            cell = f"mode={mode!r}, fallback={fallback!r}"
+
+            # The mode is read first, so a bundle wrong in both is refused for
+            # the mode. Naming one fault per refusal is the contract's shape.
+            expected = (
+                ("an enforcement mode outside the contract", mode_named)
+                if mode_named is not None
+                else ("a fallback outside the contract", fallback_named)
+                if fallback_named is not None
+                else None
+            )
+            if expected is not None:
+                prefix, named = expected
+                with pytest.raises(UnusableBundle) as refused:
+                    validate_bundle(_postured(enforcement))
+                reason = refused.value.reason
+                assert reason.startswith(prefix), (cell, reason)
+                assert named in reason, (cell, reason)
+                continue
+
+            resolved = validate_bundle(_postured(enforcement))
+            # Literals, not `UNTOLD_ENFORCEMENT`/`DEFAULT_FALLBACK`: expectations
+            # read off the constants would move with a mutation of them.
+            assert resolved.enforcement == mode, cell
+            defaulted = fallback is _ABSENT or fallback is None
+            assert resolved.fallback == ("block" if defaulted else fallback), cell
+            # However little of it was stated, it was stated. Only a bundle
+            # carrying no `enforcement` at all is untold.
+            assert resolved.posture_told is True, cell
+
+
+def test_an_enforcement_that_is_not_an_object_is_refused() -> None:
+    """Every shape that is neither a mapping nor absent.
+
+    A list is what widened this past the string a previous round pinned:
+    `["enforce"]` is what a producer emits having read the field as a set of
+    postures, and reading it as untold would leave a gateway judging nothing.
+    """
+    for value in ["enforce", "", ["enforce"], [], 17, 0, 1.5, True, False]:
+        with pytest.raises(UnusableBundle) as refused:
+            validate_bundle(_postured(value))
+
+        assert refused.value.reason == "`enforcement` is not an object", value
+
+
+def test_a_bundle_that_said_nothing_is_not_a_bundle_that_said_none() -> None:
+    """The one distinction the resolved posture cannot carry.
+
+    Both resolve to `none`/`block`, deliberately, so `posture_told` is the only
+    thing that separates a Rail Center older than RC-312 from one that chose to
+    judge nothing — and the contract refuses to name a safe universal reading of
+    the first, which makes reporting it as the second a claim about a control
+    plane that said nothing at all.
+
+    An explicit `null` sits with absence rather than with a stated posture: it
+    is the same claim, and a producer that serialises unset fields writes it.
+    """
+    for untold in (_postured(), _postured(None)):
+        resolved = validate_bundle(untold)
+        assert (resolved.enforcement, resolved.fallback) == ("none", "block")
+        assert resolved.posture_told is False
+
+    stated = validate_bundle(_postured({"mode": "none"}))
+    assert (stated.enforcement, stated.fallback) == ("none", "block")
+    assert stated.posture_told is True
 
 
 def test_the_bundle_file_is_worth_running() -> None:

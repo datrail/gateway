@@ -917,6 +917,121 @@ async def test_a_fallback_that_moves_under_one_mode_is_logged(
     assert "fallback=pass" in said
 
 
+@pytest.mark.asyncio
+async def test_a_fallback_that_moves_where_it_decides_nothing_is_not_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The line names the fallback only at `enforce`, so only there can it move.
+
+    Two polls disagreeing about a fallback at `observe` render one sentence
+    between them. Firing on the pair instead would emit it twice, byte for
+    byte, which is the burying the change guard exists to prevent arriving by
+    the one route comparing the pair does not cover.
+    """
+    h = holder(
+        httpx.Response(
+            200,
+            json={
+                **bundle("v1"),
+                "enforcement": {"mode": "observe", "fallback": "block"},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                **bundle("v2"),
+                "enforcement": {"mode": "observe", "fallback": "pass"},
+            },
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert said.count("enforcement=observe") == 1
+    assert said.count("holding policy bundle version") == 2
+    # Held, and reported the moment the mode reaches the posture that consults
+    # it — the move is deferred rather than dropped.
+    assert h.current().fallback == "pass"
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_held_silently_reports_itself_when_enforce_arrives(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of the rule above, and what makes deferring it safe."""
+    h = holder(
+        httpx.Response(
+            200,
+            json={
+                **bundle("v1"),
+                "enforcement": {"mode": "observe", "fallback": "pass"},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                **bundle("v2"),
+                "enforcement": {"mode": "enforce", "fallback": "pass"},
+            },
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        caplog.clear()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "enforcement=enforce" in said
+    assert "fallback=pass" in said
+
+
+@pytest.mark.asyncio
+async def test_a_bundle_naming_no_posture_does_not_report_one_rail_center_chose(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A Rail Center older than RC-312 has said nothing, not "judge nothing".
+
+    The posture resolves to `none` either way, so the line is the only place
+    the two are distinguishable — and the operator reading it is the one whose
+    gateway has just stopped judging anything on an upgrade.
+    """
+    h = holder(httpx.Response(200, json=bundle("old-rc")))
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "enforcement=none" in said
+    assert "Rail Center says judge nothing" not in said
+    assert "has said nothing" in said
+    assert h.current().enforcement == "none"
+
+
+@pytest.mark.asyncio
+async def test_a_rail_center_that_starts_naming_none_reports_that_it_spoke(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The upgrade this distinction exists for, and the poll it lands on.
+
+    The resolved posture does not move — `none`/`block` before and after — so a
+    guard reading the posture alone would log nothing, and the one event that
+    says the control plane is now on RC-312 would never reach an operator.
+    """
+    h = holder(
+        httpx.Response(200, json=bundle("v1")),
+        httpx.Response(200, json={**bundle("v2"), "enforcement": {"mode": "none"}}),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        caplog.clear()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "Rail Center says judge nothing" in said
+    assert "has said nothing" not in said
+
+
 # --- the request itself ---------------------------------------------------
 
 

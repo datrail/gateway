@@ -136,6 +136,17 @@ class UsableBundle:
     #: alternative is enforcing a posture the control plane never stated.
     enforcement: Enforcement
     fallback: Fallback
+    #: Whether the bundle *said* so. False only for a bundle naming no
+    #: `enforcement` at all, which resolves to the same `none`/`block` a bundle
+    #: naming them resolves to — so the posture alone cannot tell a control
+    #: plane that chose to judge nothing from one that has said nothing.
+    #:
+    #: Nothing decides traffic on this. It exists because the two states are
+    #: not equal in consequence to the operator being told about them: silence
+    #: means a Rail Center older than RC-312, and the contract refuses to name
+    #: a safe universal reading of it, so a line reporting that silence as a
+    #: decision attributes to Rail Center a posture it never stated.
+    posture_told: bool
 
 
 def _usable_priority(value: object) -> bool:
@@ -306,8 +317,12 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
     return out
 
 
-def _posture(value: object) -> tuple[Enforcement, Fallback]:
+def _posture(value: object) -> tuple[Enforcement, Fallback, bool]:
     """The enforcement value this bundle carries, or what an older one means.
+
+    Returns the posture and whether the bundle stated it. The third value is
+    the only thing that keeps the two apart downstream, since absent and an
+    explicit `none` resolve identically and deliberately so.
 
     **Absent is `none`/`block`, and present-but-wrong is refused.** The two are
     not the same claim and must not collapse into one. An absent field is a Rail
@@ -323,7 +338,7 @@ def _posture(value: object) -> tuple[Enforcement, Fallback]:
     is nothing to fall back to and the gateway reports itself unready.
     """
     if value is None:
-        return UNTOLD_ENFORCEMENT, DEFAULT_FALLBACK
+        return UNTOLD_ENFORCEMENT, DEFAULT_FALLBACK, False
     if not isinstance(value, dict):
         raise UnusableBundle("`enforcement` is not an object")
     mode = value.get("mode")
@@ -335,10 +350,10 @@ def _posture(value: object) -> tuple[Enforcement, Fallback]:
     # poll away from being the one that decides.
     fallback = value.get("fallback")
     if fallback is None:
-        return mode, DEFAULT_FALLBACK
+        return mode, DEFAULT_FALLBACK, True
     if fallback not in FALLBACKS:
         raise UnusableBundle(f"a fallback outside the contract ({_q(fallback)})")
-    return mode, fallback
+    return mode, fallback, True
 
 
 def validate_bundle(body: object) -> UsableBundle:
@@ -391,7 +406,7 @@ def validate_bundle(body: object) -> UsableBundle:
     if not isinstance(rejected, list):
         raise UnusableBundle("`rejected` is not a list")
 
-    enforcement, fallback = _posture(body.get("enforcement"))
+    enforcement, fallback, posture_told = _posture(body.get("enforcement"))
 
     return UsableBundle(
         version=version,
@@ -400,4 +415,5 @@ def validate_bundle(body: object) -> UsableBundle:
         rejected=tuple(rejected),
         enforcement=enforcement,
         fallback=fallback,
+        posture_told=posture_told,
     )
