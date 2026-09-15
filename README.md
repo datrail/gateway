@@ -41,10 +41,13 @@ flowchart LR
   gateway -->|denial event| center
 ```
 
-`RAIL_TICKET_MODE` selects `none`, `observe`, or `enforce`. Decisions use the
-last valid policy bundle, so a failed refresh does not silently become an empty
-policy. The schemas in [`schemas/`](schemas/) define the ticket, bundle, and
-denial-event wire shapes.
+`RAIL_TICKET_MODE` selects `none` or `plugin`: whether this gateway has a
+control plane at all. **How much of a decision it acts on is the bundle's to
+say, not the deployment's** — the bundle carries an `enforcement` posture, so
+moving a gateway between judging nothing, reporting and refusing is a poll
+rather than a redeploy. Decisions use the last valid policy bundle, so a failed
+refresh does not silently become an empty policy. The schemas in
+[`schemas/`](schemas/) define the ticket, bundle, and denial-event wire shapes.
 
 ## Security
 

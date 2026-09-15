@@ -226,7 +226,8 @@ def test_the_schemas_state_the_types_they_document() -> None:
 
     # The count, so that a `type` added without an assertion beside it fails
     # here rather than going unnoticed. Raise it when you add the assertion.
-    assert types(_schema("policy-bundle.schema.json")) == 16
+    # 16 → 19 with RC-312's `enforcement`: the object, and its two members.
+    assert types(_schema("policy-bundle.schema.json")) == 19
     assert types(_schema("x-rail-ticket.schema.json")) == 12
 
     bundle = Draft202012Validator(_schema("policy-bundle.schema.json"))
@@ -256,6 +257,22 @@ def test_the_schemas_state_the_types_they_document() -> None:
             "bindings": [{"endpoint_key": "e", "mode": "gated", "policy_ids": "abc"}],
         }
     )
+
+    # RC-312's three, each shown by a document that flips. `enforcement` is
+    # optional, so these say what it may *be* rather than that it is there —
+    # which is the half `required` would not cover even if it named it.
+    assert not bundle.is_valid({**base, "enforcement": "enforce"})
+    assert not bundle.is_valid({**base, "enforcement": {"mode": 17}})
+    assert not bundle.is_valid(
+        {**base, "enforcement": {"mode": "enforce", "fallback": 17}}
+    )
+    # And the vocabulary, which is the part a wrong reading acts on: a mode
+    # outside the three is not a posture this component can hold.
+    assert not bundle.is_valid({**base, "enforcement": {"mode": "halt"}})
+    assert not bundle.is_valid(
+        {**base, "enforcement": {"mode": "enforce", "fallback": "allow"}}
+    )
+    assert bundle.is_valid({**base, "enforcement": {"mode": "observe"}})
 
     ticket = Draft202012Validator(_schema("x-rail-ticket.schema.json"))
     good = _schema("x-rail-ticket.schema.json")["examples"][0]

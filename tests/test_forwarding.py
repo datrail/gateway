@@ -233,11 +233,10 @@ async def test_the_upstream_credential_still_travels(upstream, seen_headers):
         serve(
             build_app(
                 credentialed,
+                # Holds no bundle, so no posture has been stated and the call
+                # is forwarded unjudged — which is the request this test needs
+                # to arrive at the upstream.
                 holder_serving(unreachable),
-                # `observe`: this holds no bundle, and enforcing on one that
-                # cannot be judged answers 503 before the upstream is reached —
-                # which is the request this test needs to arrive.
-                mode="observe",
                 slug="delivery",
                 rail_center=RAIL_CENTER,
             ),

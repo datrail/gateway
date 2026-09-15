@@ -1,14 +1,14 @@
 """Holding the policy bundle, and every way of failing to.
 
-The rule under test is one sentence of the evaluation contract:
-
-> An enforcement point that cannot reach `GET /v1/policy-bundle` has no ruleset,
-> which is not the same as an empty one. It must keep serving the last bundle it
-> holds, and refuse traffic if it has never held one.
+The rule under test is one clause of the evaluation contract: **an enforcement
+point that cannot reach `GET /v1/policy-bundle` has no ruleset, which is not the
+same as an empty one.**
 
 An empty chain **allows**, so every case below asks the same question in a
 different way: after this failure, is what is held still what was held — and
-when nothing was ever held, is it still nothing? A test that only checked the
+when nothing was ever held, is it still nothing? What the *caller* then does
+with nothing is not this file's subject and is not a refusal — see
+`BundleHolder.current`. A test that only checked the
 outcome's `kind` would pass on an implementation that cleared the bundle and
 reported the failure honestly, which is the bug this file exists to catch.
 """
@@ -825,6 +825,211 @@ async def test_a_reason_never_carries_a_character_a_log_line_cannot_hold() -> No
     assert outcome.kind == "unreachable"
     assert not has_unsafe_key_characters(outcome.reason)
     assert "unprintable" in outcome.reason
+
+
+@pytest.mark.asyncio
+async def test_the_posture_is_logged_when_a_poll_moves_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Moving a gateway to `enforce` is what RC-312 exists to allow.
+
+    The holding line names a version, and a version is a content hash: nothing
+    in it says the gateway has started refusing calls. Without a line of its
+    own, `enforce` and `observe` are told apart only by inducing a verdict.
+    """
+    h = holder(
+        httpx.Response(200, json={**bundle("v-none"), "enforcement": {"mode": "none"}}),
+        httpx.Response(
+            200,
+            json={
+                **bundle("v-enforce"),
+                "enforcement": {"mode": "enforce", "fallback": "block"},
+            },
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        first = "\n".join(r.getMessage() for r in caplog.records)
+
+        caplog.clear()
+        await h.refresh()
+        second = "\n".join(r.getMessage() for r in caplog.records)
+
+    assert "enforcement=none" in first
+    assert "enforcement=enforce" in second
+    assert "fallback=block" in second
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_posture_is_not_repeated_on_every_poll(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A bundle arrives every interval and most say what the last one said.
+
+    A posture line on each would bury the one that moved, which is the only one
+    an operator is reading for.
+    """
+    body = {"enforcement": {"mode": "enforce", "fallback": "block"}}
+    h = holder(
+        httpx.Response(200, json={**bundle("v1"), **body}),
+        httpx.Response(200, json={**bundle("v2"), **body}),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert said.count("enforcement=enforce") == 1
+    assert said.count("holding policy bundle version") == 2
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_that_moves_under_one_mode_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """At `enforce` the fallback decides every call no binding matches.
+
+    Two bundles naming the same mode are not the same posture when they
+    disagree about that, so the mode alone is not what the line turns on.
+    """
+    h = holder(
+        httpx.Response(
+            200,
+            json={
+                **bundle("v1"),
+                "enforcement": {"mode": "enforce", "fallback": "block"},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                **bundle("v2"),
+                "enforcement": {"mode": "enforce", "fallback": "pass"},
+            },
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        caplog.clear()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "fallback=pass" in said
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_that_moves_where_it_decides_nothing_is_not_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The line names the fallback only at `enforce`, so only there can it move.
+
+    Two polls disagreeing about a fallback at `observe` render one sentence
+    between them. Firing on the pair instead would emit it twice, byte for
+    byte, which is the burying the change guard exists to prevent arriving by
+    the one route comparing the pair does not cover.
+    """
+    h = holder(
+        httpx.Response(
+            200,
+            json={
+                **bundle("v1"),
+                "enforcement": {"mode": "observe", "fallback": "block"},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                **bundle("v2"),
+                "enforcement": {"mode": "observe", "fallback": "pass"},
+            },
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert said.count("enforcement=observe") == 1
+    assert said.count("holding policy bundle version") == 2
+    # Held, and reported the moment the mode reaches the posture that consults
+    # it — the move is deferred rather than dropped.
+    assert h.current().fallback == "pass"
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_held_silently_reports_itself_when_enforce_arrives(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of the rule above, and what makes deferring it safe."""
+    h = holder(
+        httpx.Response(
+            200,
+            json={
+                **bundle("v1"),
+                "enforcement": {"mode": "observe", "fallback": "pass"},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                **bundle("v2"),
+                "enforcement": {"mode": "enforce", "fallback": "pass"},
+            },
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        caplog.clear()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "enforcement=enforce" in said
+    assert "fallback=pass" in said
+
+
+@pytest.mark.asyncio
+async def test_a_bundle_naming_no_posture_does_not_report_one_rail_center_chose(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A Rail Center older than RC-312 has said nothing, not "judge nothing".
+
+    The posture resolves to `none` either way, so the line is the only place
+    the two are distinguishable — and the operator reading it is the one whose
+    gateway has just stopped judging anything on an upgrade.
+    """
+    h = holder(httpx.Response(200, json=bundle("old-rc")))
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "enforcement=none" in said
+    assert "Rail Center says judge nothing" not in said
+    assert "has said nothing" in said
+    assert h.current().enforcement == "none"
+
+
+@pytest.mark.asyncio
+async def test_a_rail_center_that_starts_naming_none_reports_that_it_spoke(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The upgrade this distinction exists for, and the poll it lands on.
+
+    The resolved posture does not move — `none`/`block` before and after — so a
+    guard reading the posture alone would log nothing, and the one event that
+    says the control plane is now on RC-312 would never reach an operator.
+    """
+    h = holder(
+        httpx.Response(200, json=bundle("v1")),
+        httpx.Response(200, json={**bundle("v2"), "enforcement": {"mode": "none"}}),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        caplog.clear()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "Rail Center says judge nothing" in said
+    assert "has said nothing" not in said
 
 
 # --- the request itself ---------------------------------------------------

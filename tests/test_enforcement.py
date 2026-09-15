@@ -32,6 +32,7 @@ import base64
 import json
 import logging
 import time
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
@@ -70,13 +71,35 @@ def policy(pid: str, condition: dict[str, Any], *, priority: int = 1, action="bl
     }
 
 
-def bundle(*policies: dict[str, Any], bindings: list[dict[str, Any]] | None = None):
+def bundle(
+    *policies: dict[str, Any],
+    bindings: list[dict[str, Any]] | None = None,
+    enforcement: str = "enforce",
+    fallback: str = "pass",
+):
+    """A validated bundle, at `enforce`/`pass` unless a case asks otherwise.
+
+    The posture is part of the bundle after RC-312 rather than a flag on the
+    layer that reads it, which is why it is a parameter here: a case that wants
+    a verdict logged and not acted on asks for an `observe` bundle, the same way
+    an operator would.
+
+    **The fallback default is `pass` and Rail Center's is `block`**, which is a
+    deliberate disagreement rather than an oversight. Almost every case here is
+    about the walk — which policy denied, what the report names, what the caller
+    is told — and every one of them calls an endpoint with no binding entry,
+    because a binding is not what any of them is testing. Under `block` the
+    fallback would refuse each of those before the chain was reached, and the
+    file would pass while asserting nothing about the walk at all. The cases
+    that *are* about the fallback name it.
+    """
     return validate_bundle(
         {
             "version": "v-enforce",
             "policies": list(policies),
             "bindings": bindings or [],
             "rejected": [],
+            "enforcement": {"mode": enforcement, "fallback": fallback},
         }
     )
 
@@ -208,6 +231,17 @@ def layer(
     reports: _Reports | None = None,
     app: _Downstream | None = None,
 ) -> tuple[_Enforcement, _Downstream, _Reports]:
+    """The enforcement layer over a held bundle.
+
+    **`blocking` sets the posture on the bundle rather than on the layer**
+    (RC-312). It is kept as a parameter because it is what these cases are
+    about — whether a denial is acted on — but the layer no longer takes such a
+    flag: it reads `enforcement.mode` off whatever is held, per request. Passing
+    `blocking=False` against a bundle that was built at `enforce` would
+    otherwise silently assert nothing.
+    """
+    if held is not None and not blocking and held.enforcement == "enforce":
+        held = replace(held, enforcement="observe")
     downstream = app or _Downstream()
     recorder = reports or _Reports()
     return (
@@ -215,7 +249,6 @@ def layer(
             downstream,
             _Holder(held),
             SLUG,
-            blocking=blocking,
             rail_center_url=RAIL_CENTER_URL,
             auth={"Authorization": "Bearer t"},
             transport=recorder.transport,
@@ -342,21 +375,55 @@ async def test_a_denied_call_is_refused_with_403_and_never_forwarded():
 async def test_a_call_that_could_not_be_judged_is_refused_with_503_not_403():
     """503 and 403 are different answers and must not collapse into one.
 
-    A 403 tells the caller their ticket was judged and rejected. Neither of
-    these was judged at all: one had no bundle to judge it against, the other
-    reached a rule outside this build's grammar. Answering 403 for either says a
-    policy decided something when none did."""
-    no_bundle, _, _ = layer(None)
-    assert (await drive(no_bundle, call())).status == 503
+    A 403 tells the caller their ticket was judged and rejected. This one was
+    not judged at all: it reached a rule outside this build's grammar, under a
+    posture that says refuse. Answering 403 would say a policy decided something
+    when none did.
 
+    **The other half of this pair moved in RC-312** and is
+    `test_a_gateway_holding_no_bundle_forwards_because_it_has_been_told_no_posture`
+    below. Holding no bundle used to be refused here too, against a posture read
+    from the environment at start-up; the posture now arrives *in* the bundle,
+    so a gateway holding none has not been told to enforce.
+    """
     undecidable, _, _ = layer(bundle(policy(BAD_ID, UNREADABLE)))
     assert (await drive(undecidable, call())).status == 503
 
 
 @pytest.mark.asyncio
+async def test_a_gateway_holding_no_bundle_forwards_because_it_has_been_told_no_posture():
+    """The half RC-312 inverted, and the one worth stating the reason for.
+
+    Refusing here would enforce a decision no operator made: the posture lives in
+    the bundle, so a gateway holding none has been told nothing rather than told
+    to refuse. What keeps traffic off a gateway in this state is `/ready`, which
+    answers 503 until a bundle arrives — a report an orchestrator acts on, rather
+    than a refusal the caller sees.
+
+    It is also what makes the first poll safe. Under the old rule a gateway
+    starting up refused every call until its first fetch landed, so a control
+    plane that was briefly slow was an outage of the protected service.
+    """
+    no_bundle, downstream, reports = layer(None)
+
+    answer = await drive(no_bundle, call())
+
+    assert answer.status == 200
+    assert downstream.calls == 1
+    # Nothing was judged, so nothing may be reported as judged.
+    await settled(reports, expecting=0)
+    assert reports.bodies == []
+
+
+@pytest.mark.asyncio
 async def test_neither_refusal_reaches_the_app_below():
-    """A refusal is answered *for* the upstream, so the upstream never sees it."""
-    for held in (None, bundle(policy(BAD_ID, UNREADABLE)), bundle(DENIES_EVERYTHING)):
+    """A refusal is answered *for* the upstream, so the upstream never sees it.
+
+    Two refusals, not three: holding no bundle stopped being one in RC-312, and
+    that case is asserted from the other side above — it forwards, and the
+    upstream *does* see it.
+    """
+    for held in (bundle(policy(BAD_ID, UNREADABLE)), bundle(DENIES_EVERYTHING)):
         enforcement, downstream, _ = layer(held)
         await drive(enforcement, call())
         assert downstream.calls == 0
@@ -457,12 +524,16 @@ async def test_observe_reports_nothing_it_would_have_denied():
 @pytest.mark.asyncio
 async def test_a_refusal_reports_nothing_because_no_policy_decided():
     """503, not 403, and therefore no row: naming a policy on a request the
-    ruleset could not be applied to attributes a verdict nobody reached."""
-    for held in (None, bundle(policy(BAD_ID, UNREADABLE))):
-        enforcement, _, reports = layer(held)
-        assert (await drive(enforcement, call())).status == 503
-        await settled(reports, expecting=0)
-        assert reports.bodies == []
+    ruleset could not be applied to attributes a verdict nobody reached.
+
+    The no-bundle case moved in RC-312 — it answers 200 now — but the half this
+    is about did not: whatever the status, a call no policy decided reports
+    nothing. Both are asserted, from their own sides.
+    """
+    enforcement, _, reports = layer(bundle(policy(BAD_ID, UNREADABLE)))
+    assert (await drive(enforcement, call())).status == 503
+    await settled(reports, expecting=0)
+    assert reports.bodies == []
 
 
 @pytest.mark.asyncio
@@ -883,6 +954,191 @@ async def test_a_walk_that_raises_forwards_rather_than_refusing(caplog, monkeypa
     assert downstream.calls == 1
     assert reports.bodies == []
     assert "a defect in the walk" in caplog.text
+
+
+# --------------------------------------------------------------------------
+# PTH.G1 — `fallback`: what happens to a call no binding matches
+# --------------------------------------------------------------------------
+#
+# The half of RC-312 that changes what a caller gets. `enforcement.mode` decides
+# whether a verdict is acted on; `fallback` decides whether an endpoint nobody
+# bound reaches the chain at all. The contract composes the two additively, most
+# restrictive first, and scopes that to fallback-against-chain only — so `block`
+# refuses without walking, and `pass` is *not refused for being unbound* rather
+# than unjudged.
+#
+# Every case here calls an endpoint the bundle carries no binding for, which is
+# the only state the fallback speaks to.
+
+#: An alert on any ticket. It is in the chain so that a case can bind an
+#: endpoint to something without that something denying — what is being asserted
+#: is that the walk happened, not what it concluded.
+NOTES_ANY_TICKET = policy(
+    SKILL_ID, {"field": "agent_id", "operator": "present"}, action="alert"
+)
+
+#: `delivery.track_package`, gated to the one policy above. A binding *entry* is
+#: what the fallback looks for; which policies it names is the chain's business.
+BOUND = {"endpoint_key": KEY, "mode": "gated", "policy_ids": [SKILL_ID]}
+
+
+@pytest.mark.asyncio
+async def test_an_unbound_endpoint_is_refused_under_a_block_fallback():
+    """The chain is empty, so nothing in it can deny — and the call is still
+    refused. That is what makes the 403 the fallback's rather than a policy's.
+    """
+    enforcement, downstream, _ = layer(bundle(fallback="block"))
+
+    answer = await drive(enforcement, call(), headers=[(b"x-rail", ticket().encode())])
+
+    assert answer.status == 403
+    assert downstream.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_an_endpoint_with_a_binding_entry_is_judged_rather_than_refused():
+    """`block` refuses the *unbound*, and a bound endpoint is not that however
+    little its binding narrows to. A fallback that read the bundle's bindings as
+    a whitelist of keys to be walked would pass the case above and fail this
+    one."""
+    enforcement, downstream, _ = layer(
+        bundle(NOTES_ANY_TICKET, bindings=[BOUND], fallback="block")
+    )
+
+    answer = await drive(enforcement, call(), headers=[(b"x-rail", ticket().encode())])
+
+    assert answer.status == 200
+    assert downstream.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_a_pass_fallback_hands_an_unbound_endpoint_to_the_whole_chain():
+    """Both halves, because `pass` means *not refused for being unbound* and not
+    *unjudged*: the same unbound call is forwarded under a chain that allows and
+    refused under one that denies.
+    """
+    enforcement, downstream, _ = layer(bundle(fallback="pass"))
+    assert (
+        await drive(enforcement, call(), headers=[(b"x-rail", ticket().encode())])
+    ).status == 200
+    assert downstream.calls == 1
+
+    enforcement, downstream, _ = layer(bundle(DENIES_EVERYTHING, fallback="pass"))
+    assert (await drive(enforcement, call())).status == 403
+    assert downstream.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_a_block_fallback_is_consulted_at_enforce_and_nowhere_else():
+    """`observe` and `none` hold the same `block` and act on neither.
+
+    A gateway that refused here would have made `observe` block traffic, which
+    is the one thing an operator uses `observe` to be sure it will not do.
+    """
+    for mode in ("observe", "none"):
+        enforcement, downstream, _ = layer(bundle(enforcement=mode, fallback="block"))
+        answer = await drive(
+            enforcement, call(), headers=[(b"x-rail", ticket().encode())]
+        )
+        assert answer.status == 200, mode
+        assert downstream.calls == 1, mode
+
+
+@pytest.mark.asyncio
+async def test_the_caller_cannot_tell_a_fallback_refusal_from_a_policy_denial():
+    """Standard deny mechanics, and the reason is not tidiness.
+
+    A status or reason of its own here answers a question no caller is entitled
+    to ask: holding a tool name, anyone could learn whether this gateway has a
+    binding for it, one call at a time, and assemble a map of which of the
+    tenant's endpoints are covered. It is the leak the policy id is already
+    withheld to prevent, and a more useful one.
+    """
+    unbound, _, _ = layer(bundle(fallback="block"))
+    by_policy, _, _ = layer(bundle(DENIES_EVERYTHING, fallback="pass"))
+
+    one = await drive(unbound, call())
+    other = await drive(by_policy, call())
+
+    assert one.status == other.status == 403
+    assert one.body == other.body
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_refusal_reports_nothing_because_no_policy_decided():
+    """The other side of the trade the case above makes.
+
+    A report names the policy that matched and Rail Center records that
+    attribution without re-deriving it, so a refusal no policy reached has
+    nothing it could honestly name — and `policy_id` has no absent form. The
+    refusal is therefore in the gateway's log and nowhere else, which is a gap
+    on Rail Center's side of the wire rather than a decision taken here.
+    """
+    enforcement, _, reports = layer(bundle(fallback="block"))
+
+    assert (await drive(enforcement, call())).status == 403
+    await settled(reports, expecting=0)
+
+    assert reports.bodies == []
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_refusal_says_in_the_log_what_the_caller_is_not_told(
+    caplog,
+):
+    """The operator's half of the same trade: the log distinguishes what the
+    403 deliberately does not, and says that nothing was reported, so a denial
+    absent from Rail Center is not read as a request that was never refused."""
+    enforcement, _, _ = layer(bundle(fallback="block"))
+
+    with caplog.at_level(logging.WARNING, logger="gateway"):
+        await drive(enforcement, call())
+
+    written = "\n".join(caplog.messages)
+    assert KEY in written
+    assert "fallback=block" in written
+    assert "nothing was reported" in written
+
+
+@pytest.mark.asyncio
+async def test_a_message_naming_no_tool_by_design_is_not_an_unbound_endpoint():
+    """`resources/read` names no endpoint, so a fallback about endpoints has
+    nothing to refuse and the call is judged. Refusing it would let a `block`
+    fallback close the session messages that carry no tool name."""
+    enforcement, downstream, _ = layer(bundle(fallback="block"))
+
+    answer = await drive(enforcement, KEYLESS, headers=[(b"x-rail", ticket().encode())])
+
+    assert answer.status == 200
+    assert downstream.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_a_tools_call_that_resolved_to_nothing_is_refused_under_block():
+    """It named a tool this gateway declined to compose a key for, so no binding
+    can match it — and under a posture that refuses what nobody bound, the input
+    this gateway understands least is not the one that gets the benefit of the
+    doubt."""
+    enforcement, downstream, _ = layer(bundle(fallback="block"))
+
+    answer = await drive(
+        enforcement, call("track_package\n"), headers=[(b"x-rail", ticket().encode())]
+    )
+
+    assert answer.status == 403
+    assert downstream.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_a_session_message_is_not_refused_by_the_fallback():
+    """Discovery is passed before the bundle is even read, so the strictest
+    posture there is cannot stop a session from opening."""
+    enforcement, downstream, _ = layer(bundle(fallback="block"))
+
+    for body in DISCOVERY:
+        assert (await drive(enforcement, body)).status == 200
+
+    assert downstream.calls == len(DISCOVERY)
 
 
 # --------------------------------------------------------------------------

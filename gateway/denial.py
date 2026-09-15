@@ -181,7 +181,13 @@ def build_report(
     """The body of one denial report.
 
     `policy_id` is the policy that **matched**, which the caller is responsible
-    for having taken from the decision rather than from the chain.
+    for having taken from the decision rather than from the chain. It has no
+    absent form, here or in Rail Center's schema, and that is what leaves a
+    `fallback: block` refusal unreported: the call was refused for having no
+    binding entry, no policy judged it, and a report naming one would attribute
+    a verdict nobody reached. So an operator reading the denials sees every
+    refusal the chain produced and none of the ones the fallback did — a gap on
+    Rail Center's side of the wire, not something this function can close.
 
     `agent_id` and `posture_score` are passed through only when they are the
     shape Rail Center's schema declares — a UUID string and a finite number. The

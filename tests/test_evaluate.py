@@ -27,7 +27,14 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
 from gateway.server import build_app
-from tests.conftest import RAIL_CENTER, SLUG, _free_port, holder_serving, serve
+from tests.conftest import (
+    RAIL_CENTER,
+    SLUG,
+    _free_port,
+    holder_serving,
+    serve,
+    unreachable,
+)
 
 #: A chain with one rule of each action, so a single bundle exercises deny,
 #: alert and allow depending on the ticket presented.
@@ -60,6 +67,12 @@ BUNDLE = {
     ],
     "bindings": [],
     "rejected": [],
+    # The posture these tests run at, and it arrives here rather than in
+    # `build_app` because that is where it arrives in production (RC-312).
+    # `observe` evaluates every call and refuses none, which is what makes a
+    # would-deny assertable without a 403 standing in the way of the forward
+    # path most of these cases are checking.
+    "enforcement": {"mode": "observe", "fallback": "block"},
 }
 
 
@@ -90,11 +103,9 @@ def evaluating(upstream):
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
-    async def start(bundle=BUNDLE, mode="observe"):
+    async def start(bundle=BUNDLE):
         port = _free_port()
-        app = build_app(
-            upstream, serving(bundle), mode=mode, slug=SLUG, rail_center=RAIL_CENTER
-        )
+        app = build_app(upstream, serving(bundle), slug=SLUG, rail_center=RAIL_CENTER)
         async with serve(app, port):
             yield f"http://127.0.0.1:{port}"
 
@@ -282,7 +293,7 @@ async def test_none_evaluates_nothing_and_is_ready_without_a_bundle(upstream, ca
         # Built inside the capture: the mode's startup line is written by
         # `build_gateway`, so building it first would emit the one line this
         # case is about before anything was listening.
-        app = build_app(upstream, mode="none", slug=SLUG, rail_center=RAIL_CENTER)
+        app = build_app(upstream, enrolled="none", slug=SLUG, rail_center=RAIL_CENTER)
         async with serve(app, port):
             url = f"http://127.0.0.1:{port}"
             async with httpx.AsyncClient() as client:
@@ -291,7 +302,171 @@ async def test_none_evaluates_nothing_and_is_ready_without_a_bundle(upstream, ca
 
     assert answer == "delivered:77123"
     written = "\n".join(caplog.messages)
-    assert "evaluates no policy" in written
+    assert "no control plane" in written
+    assert "fetches no policy bundle" in written
     # Nothing was judged, so nothing may be reported as judged.
     assert "would deny" not in written
     assert "allow " not in written
+
+
+# --- RC-312: the posture arrives in the bundle, and moves without a restart ---
+#
+# PTH.G1's own Verify, and the reason the holder inversion exists. Before this,
+# `RAIL_TICKET_MODE` was read once at start-up and a gateway told `none` built no
+# holder at all — so the operator who disabled enforcement during an incident
+# needed a redeploy to undo it, and the kill switch turned one way only.
+
+
+def bundle_at(enforcement: str, fallback: str = "block"):
+    """`BUNDLE`, at the posture a case is about.
+
+    **The version moves with the posture, because in production it does.** Rail
+    Center hashes `enforcement` into `version` (RC-312), and a fixture that held
+    the version constant across a posture change would be modelling a control
+    plane that does not exist — one whose kill switch cannot arrive. That is not
+    a detail of this helper: it was written the other way first, and the Verify
+    below failed against it exactly as the plan says it would.
+    """
+    return {
+        **BUNDLE,
+        "version": f"v-evaluate-{enforcement}-{fallback}",
+        "enforcement": {"mode": enforcement, "fallback": fallback},
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_gateway_told_none_judges_nothing_and_keeps_its_bundle(
+    evaluating, caplog
+):
+    """`none` is a posture held by a gateway in touch with its control plane.
+
+    Two halves, and the second is the one that used to be false: nothing is
+    judged, **and** the gateway is ready — it holds a bundle, so it is listening
+    and can be told something else.
+    """
+    async with evaluating(bundle_at("none")) as url:
+        with caplog.at_level(logging.INFO, logger="gateway"):
+            answer = await call(url, {"x-rail": ticket(posture_score=10)})
+        async with httpx.AsyncClient() as client:
+            ready = await client.get(f"{url}/ready")
+
+    assert answer == "delivered:77123"
+    assert ready.status_code == 200, "a gateway at `none` holds a bundle and is ready"
+    written = "\n".join(caplog.messages)
+    assert "enforcement=none" in written
+    assert "would deny" not in written and "allow " not in written
+
+
+@pytest.mark.asyncio
+async def test_moving_the_posture_takes_effect_on_the_next_poll(upstream, caplog):
+    """The Verify, end to end: move a gateway in Rail Center and it acts on it.
+
+    One process, one holder, two polls. The first says `none` and the call is
+    forwarded unjudged; the second says `observe` and the same call is judged.
+    Nothing restarts, and no environment variable moves — which is the whole
+    claim RC-312 makes on this side.
+    """
+    posture = {"mode": "none"}
+    holder = holder_serving(
+        lambda: httpx.Response(200, json=bundle_at(posture["mode"]))
+    )
+    port = _free_port()
+    app = build_app(upstream, holder, slug=SLUG, rail_center=RAIL_CENTER)
+
+    async with serve(app, port):
+        url = f"http://127.0.0.1:{port}"
+        with caplog.at_level(logging.INFO, logger="gateway"):
+            await call(url, {"x-rail": ticket(posture_score=10)})
+            judged_at_none = "would deny" in "\n".join(caplog.messages)
+
+            posture["mode"] = "observe"
+            await holder.refresh()
+
+            caplog.clear()
+            await call(url, {"x-rail": ticket(posture_score=10)})
+            judged_at_observe = "would deny" in "\n".join(caplog.messages)
+
+    assert not judged_at_none, "a gateway told `none` judges nothing"
+    assert judged_at_observe, "the move reached the gateway on its next poll"
+
+
+@pytest.mark.asyncio
+async def test_the_three_pass_traffic_states_are_not_each_other(upstream):
+    """Three ways to forward every request, and an operator must be able to tell
+    which one they have — `/ready` is where the difference is visible.
+
+    No data path and `none` both forward and both report ready, and they are
+    still distinguishable: one polls and one does not, which is what the log
+    line says. Holding no bundle forwards too and reports **unready**, because
+    it is the only one of the three that is waiting for something.
+    """
+    async with httpx.AsyncClient() as client:
+
+        async def readiness(app):
+            port = _free_port()
+            async with serve(app, port):
+                return (await client.get(f"http://127.0.0.1:{port}/ready")).status_code
+
+        no_data_path = await readiness(
+            build_app(upstream, enrolled="none", slug=SLUG, rail_center=RAIL_CENTER)
+        )
+        holding_none = await readiness(
+            build_app(
+                upstream,
+                holder_serving(unreachable),
+                slug=SLUG,
+                rail_center=RAIL_CENTER,
+            )
+        )
+        told_none = await readiness(
+            build_app(
+                upstream, serving(bundle_at("none")), slug=SLUG, rail_center=RAIL_CENTER
+            )
+        )
+
+    assert no_data_path == 200, "nothing to wait for, and never will be"
+    assert holding_none == 503, "waiting for a first bundle"
+    assert told_none == 200, "holds a bundle, and was told to judge nothing"
+
+
+@pytest.mark.asyncio
+async def test_a_posture_change_under_an_unchanged_version_never_arrives(
+    upstream, caplog
+):
+    """The other side of the same coin, and the reason Rail Center hashes this.
+
+    A holder caches on `version`, so a control plane that moved a posture without
+    moving the version would be telling a gateway nothing at all — every poller
+    keeps what it holds and the change is silently dropped. This pins the
+    dependency from the gateway's side: it is not a Rail Center implementation
+    detail this component is indifferent to, it is the thing that makes the field
+    work at all.
+    """
+    posture = {"mode": "none"}
+    holder = holder_serving(
+        # Deliberately one version for both postures — the bug, reproduced.
+        lambda: httpx.Response(
+            200,
+            json={
+                **BUNDLE,
+                "enforcement": {"mode": posture["mode"], "fallback": "block"},
+            },
+        )
+    )
+    port = _free_port()
+    app = build_app(upstream, holder, slug=SLUG, rail_center=RAIL_CENTER)
+
+    async with serve(app, port):
+        url = f"http://127.0.0.1:{port}"
+        posture["mode"] = "observe"
+        await holder.refresh()
+        with caplog.at_level(logging.INFO, logger="gateway"):
+            await call(url, {"x-rail": ticket(posture_score=10)})
+
+    written = "\n".join(caplog.messages)
+    assert "would deny" not in written, (
+        "an unchanged version must not carry a posture change — if this starts "
+        "passing, the holder has stopped caching on version and the hash "
+        "argument in RC-312 needs revisiting"
+    )
+    assert "enforcement=none" in written

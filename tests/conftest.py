@@ -252,16 +252,14 @@ async def gateway_url(upstream):
     that on a fixture that is never ready is what makes it hard to wire the two
     together by accident later.
 
-    **`observe`, deliberately.** This fixture holds no bundle, and under
-    `enforce` a gateway that cannot judge a call refuses it — so every test here
-    would be asserting against a 503 rather than against the forward path it is
-    about. The mode that evaluates and blocks nothing is the one where "the
-    transport still works" is a question with an answer.
+    **No posture is chosen here, and after RC-312 none is needed.** The posture
+    arrives in the bundle, and this fixture holds none — so the gateway has been
+    told nothing and forwards, which is the forward path these tests are about.
+    Before RC-312 this had to ask for `observe` explicitly, because a posture
+    fixed at start-up meant `enforce` refused every call it could not judge.
     """
     port = _free_port()
     holder = holder_serving(unreachable)
-    app = build_app(
-        upstream, holder, mode="observe", slug=SLUG, rail_center=RAIL_CENTER
-    )
+    app = build_app(upstream, holder, slug=SLUG, rail_center=RAIL_CENTER)
     async with serve(app, port):
         yield f"http://127.0.0.1:{port}"

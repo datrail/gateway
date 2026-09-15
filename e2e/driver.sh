@@ -148,16 +148,22 @@ expect() {
 # because the holder serves a cached copy so that evaluating a call never waits
 # on the control plane. So *after* a reset nothing fetches, and "no bundle was
 # fetched" passes for the pass-through whether or not it ever asked. Counting
-# the startup fetches instead is the assertion that can fail: three gateways
-# start against the same control plane and exactly two of them ask, so a
-# pass-through that quietly fetched would read as 3 here.
-printf '\n== a bundle is fetched at startup, by the two gateways that evaluate ==\n'
+# the startup fetches instead is the assertion that can fail: four gateways
+# start against the same control plane and exactly three of them ask, so a
+# pass-through that quietly fetched would read as 4 here.
+#
+# **Three fetch, and one of the three is told to judge nothing** — that is
+# RC-312 rather than a count. Enrolment decides whether a gateway polls;
+# posture decides what it does with what arrives. A gateway that stopped
+# polling at `none` could not be told it had been moved off `none`, so the kill
+# switch would turn one way only.
+printf '\n== a bundle is fetched at startup, by the three gateways with a control plane ==\n'
 tries=0
-while [ "$(bundle_fetches)" -lt 2 ] && [ "$tries" -lt 40 ]; do
+while [ "$(bundle_fetches)" -lt 3 ] && [ "$tries" -lt 40 ]; do
   tries=$((tries + 1)); sleep 0.25
 done
-sleep 2  # long enough for a third fetch to have shown up if one were coming
-expect "exactly two gateways fetched a bundle" 2 "$(bundle_fetches)"
+sleep 2  # long enough for a fourth fetch to have shown up if one were coming
+expect "exactly three gateways fetched a bundle" 3 "$(bundle_fetches)"
 
 printf '\n== enforce: a caller with no ticket opens a session and is stopped at its first call ==\n'
 reset_journals
@@ -266,6 +272,39 @@ expect "no denial was reported" 0 "$(denials)"
 # That observe evaluates at all is established above, where its startup fetch
 # is one of the two counted. What is left for this block is the mode's own
 # claim: the walk reaches the same verdict and nothing is acted on.
+
+printf '\n== enforce with fallback block: an endpoint nobody bound is refused ==\n'
+# The other half of `enforcement`, and the only place a caller's answer turns on
+# something other than a policy. This gateway's bundle binds
+# `delivery.track_package` and nothing else.
+#
+# Both calls carry the good ticket, and the two status codes below are not what
+# separates the fallback from the chain. `gateway-enforce` — `fallback: pass`,
+# and no bindings at all — answers the same pair the same way: `track_package`
+# is forwarded, and `undeclared_tool` is refused 403 there too, by P3, the skill
+# rule. What a `block` fallback changes is *what* refused, so the assertion that
+# discriminates is the reported-denial count below rather than either code.
+reset_journals
+# A session, because this call is *allowed* and so reaches the MCP layer. Every
+# refusal in this file is answered above that layer, which is why the rest of
+# them need none.
+sid=$(open_session gateway-fallback -H "x-rail: $GOOD_TICKET") || sid=none
+expect "the bound endpoint is judged and allowed" 200 \
+  "$(status gateway-fallback track_package -H "Mcp-Session-Id: $sid" \
+      -H "x-rail: $GOOD_TICKET")"
+expect "the call reached the upstream" 1 "$(forwarded_tool_calls)"
+
+reset_journals
+expect "an endpoint with no binding entry is refused 403" 403 \
+  "$(status gateway-fallback undeclared_tool -H "x-rail: $GOOD_TICKET")"
+expect "no call reached the upstream" 0 "$(forwarded_tool_calls)"
+# **No policy judged it, so there is nothing a report could honestly name.** A
+# denial report names the policy that matched and Rail Center records that
+# attribution without re-deriving it; `policy_id` has no absent form. The
+# refusal is in the gateway's log and nowhere else, and this assertion is what
+# pins that rather than leaving it to be discovered from an empty denials table.
+sleep 2  # long enough for a report to have arrived if one were sent
+expect "no denial was reported" 0 "$(denials)"
 
 printf '\n== none: a pass-through that asks the control plane nothing ==\n'
 reset_journals
