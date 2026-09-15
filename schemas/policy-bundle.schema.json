@@ -231,7 +231,11 @@
           "policy_ids": []
         }
       ],
-      "rejected": []
+      "rejected": [],
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "block"
+      }
     }
   ]
 }

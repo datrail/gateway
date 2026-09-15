@@ -370,12 +370,19 @@ def build_gateway(
         have, so waiting would leave it permanently unready.
 
         **Under `plugin` it is 503 until a bundle arrives, at every posture.**
-        Not only the ones that act: a gateway told `enforcement=none` is one this
-        component knows is judging nothing, while a gateway holding nothing has
-        been told nothing at all, and those are different states even though both
+        Not only the ones that act: a gateway holding a bundle has a ruleset to
+        decide with whatever posture that bundle names, while a gateway holding
+        nothing has none, and those are different states even though both
         forward every request. This route is the one place the difference is
         visible to an orchestrator, which is what makes it worth 503 on a gateway
         that is, for the moment, behaving exactly like a ready one.
+
+        **What it does not separate is whether a posture was stated.** A bundle
+        naming no `enforcement` is held like any other, so this answers 200 for
+        it exactly as it does for a bundle saying `none` — one has been told
+        nothing and the other was told to judge nothing, and both have something
+        to decide with. What tells them apart is the posture line a poll logs,
+        not this status code.
 
         It re-keys on the same expression it always did — the holder's absence —
         because that absence now means *not enrolled* rather than *does not

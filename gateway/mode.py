@@ -18,17 +18,20 @@ State           Reached by                           Traffic
 ==============  ===================================  ==========================
 no data path    ``RAIL_TICKET_MODE=none``            forwarded; never polls
 holding none    ``plugin``, nothing fetched yet      forwarded; polling
+no posture      ``plugin`` + bundle says nothing     forwarded; polling
 ``none``        ``plugin`` + bundle says ``none``    forwarded; polling
 ``observe``     ``plugin`` + bundle says ``observe`` evaluated, logged, allowed
 ``enforce``     ``plugin`` + bundle says ``enforce`` evaluated, acted on
 ==============  ===================================  ==========================
 
-**Three of those five pass every request, and they are not each other.** The
-first was never given a control plane. The second has one and has not heard from
-it. The third has heard, and was told to judge nothing. Reporting any of them as
-another is the misreading design §5.2 exists to prevent: an operator looking at a
-gateway that forwards everything needs to know which of the three they have,
-because the remedy differs in each.
+**Four of those six pass every request, and they are not each other.** The
+first was never given a control plane. The second has one and has not heard
+from it. The third has heard, and was told nothing about posture — a Rail
+Center predating RC-312, whose silence this gateway reads as judging nothing
+rather than as a posture anyone chose. The fourth has heard, and was told to
+judge nothing. Reporting any of them as another is the misreading design §5.2
+exists to prevent: an operator looking at a gateway that forwards everything
+needs to know which of the four they have, because the remedy differs in each.
 
 **A `plugin` component polls at every enforcement value, including `none`.** That
 is the inversion RC-312 makes, and it is the one rule here worth stating twice.

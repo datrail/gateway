@@ -28,6 +28,7 @@ from gateway.mode import ENFORCEMENTS, FALLBACKS, blocks
 from gateway.ticket import parse_rail_header
 
 VECTORS = Path(__file__).parent / "vectors"
+SCHEMAS = Path(__file__).parent.parent / "schemas"
 
 #: "this key is not in the document", which `None` cannot say.
 _ABSENT = object()
@@ -387,6 +388,37 @@ def test_the_posture_tables_hold_every_value_the_contract_names() -> None:
         if named is None and fallback is not _ABSENT and fallback is not None
     }
     assert accepted == set(FALLBACKS)
+
+
+def test_the_published_posture_enums_are_the_vocabulary_this_reader_holds() -> None:
+    """`schemas/policy-bundle.schema.json`'s enums, against `mode.py`'s tuples.
+
+    The posture vocabulary is written twice on this branch — as those enums and
+    as `ENFORCEMENTS`/`FALLBACKS`, which is what the hand-rolled `_posture`
+    reads — and neither copy is generated from the other. The test above pins
+    the product tables against the module constants, so the code half cannot
+    narrow without failing; this one pins the published half against the same
+    constants, in both directions, because nothing else did.
+
+    **Narrowing the schema was the loose direction.** `tests/test_schemas.py`
+    asserts what these enums must *reject*, so a value added to either fails
+    there while a value removed passes. `mode: "none"` is what that costs. The
+    contract makes it the kill switch — "A component that stops polling at
+    `none` cannot be told it has been moved off `none`, so the kill switch only
+    turns one way, which is the whole of what the value is for" — so a
+    reimplementer building against a schema that had lost it would have no valid
+    way to spell the one posture an operator reaches for during an incident,
+    while `validate_bundle` went on accepting what that schema called invalid.
+
+    Compared as sets: order carries no meaning in a JSON Schema enum, and a
+    duplicate is already refused by `test_the_schema_is_valid_json_schema`.
+    """
+    published = json.loads(
+        (SCHEMAS / "policy-bundle.schema.json").read_text(encoding="utf-8")
+    )
+    enforcement = published["properties"]["enforcement"]["properties"]
+    assert set(enforcement["mode"]["enum"]) == set(ENFORCEMENTS)
+    assert set(enforcement["fallback"]["enum"]) == set(FALLBACKS)
 
 
 def test_every_enforcement_object_resolves_or_is_refused() -> None:
