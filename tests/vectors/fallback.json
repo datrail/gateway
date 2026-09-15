@@ -1,0 +1,199 @@
+{
+  "_comment": "Conformance vectors for `enforcement` — the posture a bundle carries, and what it does to a call no binding matches. They come from rail-center's docs/policy-evaluation-contract.md, under `Enforcement` and `How fallback composes with the chain`.\n\nThis is deliberately a file of its own rather than more cases in decide.json, because the rule it states is NOT part of the walk. `fallback` is consulted BEFORE the chain and instead of it: at `enforce`, a `block` fallback refuses an endpoint with no binding entry without the chain being consulted at all, so there is no verdict to assert and no policy to name. decide.json's cases all reach a decision; none of these do. An implementation that answered these by walking the chain and discarding the result would agree with every assertion here and still have the contract wrong — it would report a policy that was never bound to the endpoint it refused.\n\nEach case gives the posture (`mode` and `fallback`), the `bindings` the bundle carries, the `endpoint_key` of the call, and `refused`: whether the call is refused for being unbound. The two fields compose in one direction only — `fallback` is read at `enforce` and at no other mode — so `refused` is false for every `observe` and `none` case however strict the fallback is, and that is the half an implementation gets wrong: a gateway that refuses at `observe` has made the mode an operator uses to be SURE nothing is blocked into one that blocks.\n\n`refused: false` does not mean allowed. It means the call is judged — by the whole chain where nothing narrows, by the binding where something does — and decide.json carries what that judgement is. `pass` therefore stops meaning \"unjudged\" and means \"not refused for being unbound\".\n\n`keyless` says which kind of absent key a case with a null `endpoint_key` is about, and it is the one field here the contract does not state: the contract models `endpoint_key` as always present. `true` is a message that names no tool by design (`resources/read`), which has no endpoint for a fallback about endpoints to refuse. `false` is a `tools/call` that named a tool the reader declined to compose a key for, which named an endpoint no binding can match. This gateway's answer to both is here so a reimplementation can match it; a reader whose key composition never fails has no second case.",
+  "cases": [
+    {
+      "name": "enforce and block refuse an endpoint with no binding entry",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "block"
+      },
+      "bindings": [],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": true,
+      "note": "The rule the whole file is about. No entry, so the fallback answers and the chain is never reached."
+    },
+    {
+      "name": "enforce and block refuse it however many other endpoints are bound",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "block"
+      },
+      "bindings": [
+        {
+          "endpoint_key": "delivery.refund_order",
+          "mode": "gated",
+          "policy_ids": [
+            "5c8f1e42-0000-4000-8000-0000000000d1"
+          ]
+        }
+      ],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": true,
+      "note": "A bundle with bindings is not a bundle where every endpoint is bound. Reading a non-empty `bindings` as 'this bundle narrows, so walk it' refuses nothing here."
+    },
+    {
+      "name": "enforce and block do not refuse a gated endpoint",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "block"
+      },
+      "bindings": [
+        {
+          "endpoint_key": "delivery.track_package",
+          "mode": "gated",
+          "policy_ids": [
+            "5c8f1e42-0000-4000-8000-0000000000d1"
+          ]
+        }
+      ],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": false,
+      "note": "An entry exists, so the fallback has nothing to say and the binding narrows as it always does."
+    },
+    {
+      "name": "enforce and block do not refuse an open endpoint",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "block"
+      },
+      "bindings": [
+        {
+          "endpoint_key": "delivery.track_package",
+          "mode": "open",
+          "policy_ids": []
+        }
+      ],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": false,
+      "note": "`open` is an entry. An endpoint an operator deliberately exempted is not one nobody has reviewed, and the most restrictive posture must not convert the one into the other."
+    },
+    {
+      "name": "enforce and pass hand an unbound endpoint to the chain",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "pass"
+      },
+      "bindings": [],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": false,
+      "note": "Not refused for being unbound — which is not the same as unjudged. The whole chain still judges it, and may still deny."
+    },
+    {
+      "name": "enforce and pass change nothing for a bound endpoint",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "pass"
+      },
+      "bindings": [
+        {
+          "endpoint_key": "delivery.track_package",
+          "mode": "gated",
+          "policy_ids": [
+            "5c8f1e42-0000-4000-8000-0000000000d1"
+          ]
+        }
+      ],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": false
+    },
+    {
+      "name": "observe never consults a block fallback",
+      "enforcement": {
+        "mode": "observe",
+        "fallback": "block"
+      },
+      "bindings": [],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": false,
+      "note": "The half an implementation gets wrong. `observe` is what an operator uses to be sure nothing is blocked; a fallback consulted here blocks."
+    },
+    {
+      "name": "observe never consults a pass fallback either",
+      "enforcement": {
+        "mode": "observe",
+        "fallback": "pass"
+      },
+      "bindings": [],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": false
+    },
+    {
+      "name": "none never consults a block fallback",
+      "enforcement": {
+        "mode": "none",
+        "fallback": "block"
+      },
+      "bindings": [],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": false,
+      "note": "`none` judges nothing at all, so there is no point at which a fallback could be read."
+    },
+    {
+      "name": "none never consults a pass fallback either",
+      "enforcement": {
+        "mode": "none",
+        "fallback": "pass"
+      },
+      "bindings": [],
+      "endpoint_key": "delivery.track_package",
+      "keyless": true,
+      "refused": false
+    },
+    {
+      "name": "a message naming no tool by design is not an unbound endpoint",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "block"
+      },
+      "bindings": [],
+      "endpoint_key": null,
+      "keyless": true,
+      "refused": false,
+      "note": "There is no endpoint, so a fallback about endpoints has nothing to refuse. Refusing here would let the strictest posture close the messages a session opens with."
+    },
+    {
+      "name": "a call whose tool name resolved to no key is refused under block",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "block"
+      },
+      "bindings": [],
+      "endpoint_key": null,
+      "keyless": false,
+      "refused": true,
+      "note": "It named an endpoint; the reader declined to compose a key for it. No binding can match a key that was never composed, and the input a reader understands least is not the one to give the benefit of the doubt."
+    },
+    {
+      "name": "a call whose tool name resolved to no key is judged under pass",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "pass"
+      },
+      "bindings": [],
+      "endpoint_key": null,
+      "keyless": false,
+      "refused": false,
+      "note": "The other half: `pass` hands it to the whole chain, which is where the endpoint-derived rules catch it."
+    },
+    {
+      "name": "a message naming no tool by design is judged under pass too",
+      "enforcement": {
+        "mode": "enforce",
+        "fallback": "pass"
+      },
+      "bindings": [],
+      "endpoint_key": null,
+      "keyless": true,
+      "refused": false
+    }
+  ]
+}

@@ -2,10 +2,19 @@
 
 Every request is read and judged: the ticket is decoded, the endpoint key
 composed, the held bundle walked, and the answer written to the log. What
-happens next is `RAIL_TICKET_MODE`'s to say. Under `observe` the call goes
-upstream exactly as it would have without any of it. Under `enforce` a verdict
-is acted on — a denied call is answered 403 and reported to Rail Center, and one
-that could not be judged at all is answered 503 and reported to nobody.
+happens next is the **bundle's** to say, not this deployment's (RC-312): it
+carries `enforcement`, and an operator moving a gateway between postures is a
+poll rather than a redeploy. Under `observe` the call goes upstream exactly as
+it would have without any of it. Under `enforce` a verdict is acted on — a
+denied call is answered 403 and reported to Rail Center, and one that could not
+be judged at all is answered 503 and reported to nobody. Under `none` there is
+no walk to act on.
+
+**`enforce` also refuses what it was never given a rule about**, where the
+bundle's `fallback` says `block`: an endpoint carrying no binding entry is
+answered 403 before the chain is consulted. The caller is told what every denied
+caller is told, and Rail Center is told nothing, because no policy decided it
+and a report names the policy that matched.
 
 **403 and 503 are kept apart deliberately.** A 403 says the call was judged and
 rejected; a 503 says the ruleset could not be applied at all. Only the first
@@ -13,9 +22,9 @@ names a policy that decided anything, so only the first is reported — naming a
 policy on the second would attribute a verdict nobody reached.
 
 **Only `enforce` reports.** `observe` runs the same walk, logs the same verdict,
-forwards the request and sends nothing — a denial table filled from a mode that
-is explicitly not enforcing leaves an operator unable to tell which rows stopped
-traffic.
+forwards the request, never consults the fallback, and sends nothing — a denial
+table filled from a mode that is explicitly not enforcing leaves an operator
+unable to tell which rows stopped traffic.
 
 **`/ready` reports and does not gate**, and under `RAIL_TICKET_MODE=none` it is
 unconditionally ready: a pass-through evaluates nothing, needs no bundle to do
@@ -124,7 +133,7 @@ from starlette.types import ASGIApp
 from gateway.auth import auth_headers
 from gateway.bundle.client import BundleHolder, refresh_seconds
 from gateway.bundle.conditions import ConditionInput, UninterpretableCondition
-from gateway.bundle.decide import decide
+from gateway.bundle.decide import decide, refuses_unbound
 from gateway.denial import build_report, report
 from gateway.endpoint import resolve_from_body
 from gateway.key_safety import safe_for_log
@@ -259,9 +268,10 @@ def datasource_slug() -> str:
     bundle route takes no parameters and is single-tenant per deployment, so
     this names the data source whose endpoints the bundle's bindings are keyed
     on, and nothing else. A deployment that got it wrong composes keys matching
-    no binding, and every endpoint falls back to the whole chain — which denies
-    more than the operator wrote rather than less, but is still not what they
-    wrote.
+    no binding, and what that costs is the bundle's to say: under a `pass`
+    fallback every endpoint faces the whole chain, which denies more than the
+    operator wrote rather than less; under `block` every call is refused. Neither
+    is what they wrote.
     """
     return _required("RAIL_DATASOURCE_SLUG")
 
@@ -699,16 +709,40 @@ class _Enforcement:
             return None
         blocking = blocks(bundle.enforcement)
 
+        # **Asked instead of the walk, not before it as a filter.** `fallback`
+        # is consulted only at `enforce`, which is what `blocking` already
+        # means, and a `block` fallback refuses the call without the chain
+        # being consulted at all — so there is no verdict here, and nothing to
+        # report to Rail Center.
+        # **One reading, asked twice.** `resolution.key` is None for both keyless
+        # outcomes and only one of them earns the narrowing: a message that
+        # names no tool by design has no subject for an endpoint-derived rule,
+        # while an `unrecognised` `tools/call` named one this gateway declined
+        # to compose a key for and faces the whole chain. The fallback draws the
+        # same line for the same reason, so the two read one value rather than
+        # two spellings of it that can drift apart.
+        keyless = resolution.status == "keyless"
+
+        if blocking and refuses_unbound(bundle, resolution.key, keyless=keyless):
+            log.warning(
+                "denied %s (no binding entry, fallback=block; ticket %s); "
+                "no policy judged it, so nothing was reported",
+                named,
+                ticket.state,
+            )
+            # **The caller is told what any denied caller is told.** A distinct
+            # status or reason here would let anyone holding a tool name probe
+            # which endpoints this gateway has bindings for, one call at a
+            # time — the same leak the policy id is withheld to prevent, and a
+            # more useful one, because the answer is a map of the tenant's
+            # coverage rather than a single rule.
+            return 403, "denied by policy"
+
         try:
             decision = decide(
                 bundle,
                 ConditionInput(ticket=ticket, endpoint_key=resolution.key),
-                # `resolution.key` is None for both keyless outcomes, and only
-                # one of them earns the narrowing: a message that names no tool
-                # by design has no subject for an endpoint-derived rule, while
-                # an `unrecognised` `tools/call` named one this gateway declined
-                # to compose a key for and faces the whole chain.
-                keyless=resolution.status == "keyless",
+                keyless=keyless,
             )
         except UninterpretableCondition as refusal:
             # The policy is named because disabling it is the remedy the

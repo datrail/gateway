@@ -9,7 +9,7 @@
 # The exit code of the first is the result, and `--force-recreate` is part of
 # the command rather than a nicety: the startup bundle-fetch count is read from
 # a journal that nothing resets, so a stub container surviving an earlier run
-# carries its fetches into this one and the count reads 4 rather than 2 —
+# carries its fetches into this one and the count reads 6 rather than 3 —
 # blaming a gateway for a stub's state.
 
 name: datrail-gateway-e2e
@@ -61,15 +61,28 @@ services:
     volumes:
       - ./mcp-mappings:/home/wiremock/mappings:ro
 
-  # Enforcing: evaluates, refuses, and reports. The default mode, so this is
-  # also the one an unconfigured deployment runs.
+  # **The three evaluating gateways are configured identically** (RC-312), and
+  # that is the assertion rather than a tidy-up. Their postures differ only in
+  # the bundle each is served, and what selects the bundle is the credential each
+  # presents — which is how Rail Center resolves a gateway in production, and why
+  # `RAIL_TICKET_MODE` no longer spells a posture. An operator moving one of
+  # these from `enforce` to `none` changes a row in a control plane; none of
+  # these three containers is redeployed, restarted, or touched.
+  #
+  # `e2e-*` are stub credentials for a WireMock that matches on them and
+  # authenticates nothing. The stub `404`s a request carrying any other, which
+  # the driver's final unmatched-journal sweep catches.
+
+  # Enforcing: evaluates, refuses, and reports.
   gateway-enforce:
     <<: *gateway
     environment:
       RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
       RAIL_CENTER_URL: http://rail-center:8080
       RAIL_DATASOURCE_SLUG: delivery
-      RAIL_TICKET_MODE: enforce
+      RAIL_TICKET_MODE: plugin
+      RAIL_AUTH_MODE: bearer
+      RAIL_AUTH_TOKEN: e2e-enforce
       # An hour, so the refresh loop never fires during a run. The driver counts
       # startup fetches to establish that the pass-through asks for nothing, and
       # a refresh landing mid-count would turn that assertion into a race.
@@ -80,23 +93,46 @@ services:
 
   # Observing: the same walk, the same verdict in the log, and nothing acted on
   # — no refusal and no denial reported. A dry run before enforcement is turned
-  # on, and the mode a deployment rolls back to.
+  # on, and the posture a deployment rolls back to.
   gateway-observe:
     <<: *gateway
     environment:
       RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
       RAIL_CENTER_URL: http://rail-center:8080
       RAIL_DATASOURCE_SLUG: delivery
-      RAIL_TICKET_MODE: observe
+      RAIL_TICKET_MODE: plugin
+      RAIL_AUTH_MODE: bearer
+      RAIL_AUTH_TOKEN: e2e-observe
       RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS: "3600"
     depends_on:
       rail-center: {condition: service_healthy}
       upstream: {condition: service_healthy}
 
-  # A pass-through. No `RAIL_CENTER_URL` and no `RAIL_DATASOURCE_SLUG` are set,
-  # and that is the assertion rather than an omission: `none` builds no holder,
-  # so a deployment that turns enforcement off needs no control-plane
-  # configuration at all.
+  # Enforcing, with the other fallback: an endpoint carrying no binding entry is
+  # refused without the chain being consulted. Its bundle binds
+  # `delivery.track_package` and nothing else, so one call through this gateway
+  # is judged and every other is refused for never having been reviewed.
+  gateway-fallback:
+    <<: *gateway
+    environment:
+      RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
+      RAIL_CENTER_URL: http://rail-center:8080
+      RAIL_DATASOURCE_SLUG: delivery
+      RAIL_TICKET_MODE: plugin
+      RAIL_AUTH_MODE: bearer
+      RAIL_AUTH_TOKEN: e2e-fallback
+      RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS: "3600"
+    depends_on:
+      rail-center: {condition: service_healthy}
+      upstream: {condition: service_healthy}
+
+  # A pass-through, and the one gateway here whose posture is *not* the bundle's
+  # to say. No `RAIL_CENTER_URL` and no `RAIL_DATASOURCE_SLUG` are set, and that
+  # is the assertion rather than an omission: `RAIL_TICKET_MODE=none` is a
+  # deployment with no control plane at all, so it builds no holder and needs no
+  # control-plane configuration. It is not the same state as a gateway whose
+  # bundle says `enforcement.mode: none` — that one polls, and can be told
+  # something else.
   gateway-passthrough:
     <<: *gateway
     environment:
@@ -105,7 +141,7 @@ services:
     depends_on:
       upstream: {condition: service_healthy}
 
-  # The uid the image runs as, against the same build the three gateways use.
+  # The uid the image runs as, against the same build the four gateways use.
   # This cannot be an assertion in driver.sh: the driver is a separate container
   # and a uid is not visible across one, and reporting it from `/health` would
   # be a production change made for a test.
@@ -136,5 +172,6 @@ services:
     depends_on:
       gateway-enforce: {condition: service_healthy}
       gateway-observe: {condition: service_healthy}
+      gateway-fallback: {condition: service_healthy}
       gateway-passthrough: {condition: service_healthy}
       image-user: {condition: service_healthy}

@@ -21,9 +21,10 @@ from typing import Any
 import pytest
 
 from gateway.bundle.conditions import ConditionInput, UninterpretableCondition
-from gateway.bundle.decide import decide
+from gateway.bundle.decide import decide, refuses_unbound
 from gateway.bundle.validate import Binding, UnusableBundle, validate_bundle
 from gateway.key_safety import has_unsafe_key_characters
+from gateway.mode import blocks
 from gateway.ticket import parse_rail_header
 
 VECTORS = Path(__file__).parent / "vectors"
@@ -427,3 +428,85 @@ def test_the_decide_file_is_worth_running() -> None:
     for case in DECIDE_CASES:
         assert ("bundle" in case) ^ ("condition" in case), case["name"]
         assert ("header" in case) ^ ("claims" in case), case["name"]
+
+
+FALLBACK_CASES = _load("fallback.json")
+
+#: The one policy a `gated` binding in these cases names. What it says is
+#: irrelevant — the fallback looks for a binding *entry*, and which policies the
+#: entry names is the chain's business — but a binding naming an id no policy
+#: carries would be a bundle about nothing.
+FALLBACK_POLICY_ID = "5c8f1e42-0000-4000-8000-0000000000d1"
+
+
+def _fallback_bundle(case: dict[str, Any]):
+    return validate_bundle(
+        {
+            # The version moves with the posture because Rail Center hashes
+            # `enforcement` into it, and a file whose cases shared one version
+            # across four postures would describe a control plane whose kill
+            # switch cannot arrive.
+            "version": f"v-fallback-{case['enforcement']['mode']}"
+            f"-{case['enforcement']['fallback']}",
+            "policies": [
+                {
+                    "id": FALLBACK_POLICY_ID,
+                    "name": "something for a binding to name",
+                    "priority": 1,
+                    "condition": {"field": "agent_id", "operator": "present"},
+                    "action": "alert",
+                    "enabled": True,
+                }
+            ],
+            "bindings": case["bindings"],
+            "rejected": [],
+            "enforcement": case["enforcement"],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "case", FALLBACK_CASES, ids=[case["name"] for case in FALLBACK_CASES]
+)
+def test_fallback_vector(case: dict[str, Any]) -> None:
+    """**The composition is asserted, not `refuses_unbound` alone.**
+
+    `fallback` is read at `enforce` and at no other mode, and that half of the
+    rule lives in the caller rather than in the predicate — so a case run
+    against the predicate by itself would score a gateway that refuses at
+    `observe` as conformant on precisely the mode an operator uses to be sure
+    nothing is blocked. `blocks` and `refuses_unbound` are composed here the
+    same way `_Enforcement` composes them, which is what the vector is about.
+    """
+    bundle = _fallback_bundle(case)
+
+    refused = blocks(bundle.enforcement) and refuses_unbound(
+        bundle, case["endpoint_key"], keyless=case["keyless"]
+    )
+
+    assert refused == case["refused"]
+
+
+def test_the_fallback_file_is_worth_running() -> None:
+    """Every group can pass by being empty, and here the empty file is a real
+    hazard: a file of only `refused: false` cases passes against a reader that
+    has not implemented the fallback at all.
+    """
+    assert len(FALLBACK_CASES) >= 12
+    assert len({case["name"] for case in FALLBACK_CASES}) == len(FALLBACK_CASES)
+    assert sum(1 for case in FALLBACK_CASES if case["refused"]) >= 3
+    assert sum(1 for case in FALLBACK_CASES if not case["refused"]) >= 6
+
+    modes = {case["enforcement"]["mode"] for case in FALLBACK_CASES}
+    fallbacks = {case["enforcement"]["fallback"] for case in FALLBACK_CASES}
+    # Both halves of the composition are exercised over both of their values. A
+    # file covering only `enforce` would say nothing about the rule that makes
+    # `observe` safe to switch on.
+    assert modes == {"none", "observe", "enforce"}
+    assert fallbacks == {"pass", "block"}
+
+    # A case with a key and one without are different rules, and the second is
+    # this gateway's own — the contract models `endpoint_key` as always present.
+    assert any(case["endpoint_key"] is None for case in FALLBACK_CASES)
+    assert any(case["endpoint_key"] is not None for case in FALLBACK_CASES)
+    assert {case["keyless"] for case in FALLBACK_CASES} == {True, False}

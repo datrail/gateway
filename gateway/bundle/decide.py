@@ -15,6 +15,11 @@ apply. That is what leaves this file as short as it is, and it is also why the
 eager half of the contract's two refusal kinds does not appear here: a bundle
 that cannot be read never reaches the walk.
 
+One thing here is deliberately not the walk. `refuses_unbound` answers the
+bundle's `fallback` for a call no binding matches, and the contract puts that
+*before* the chain rather than in it — so it is a question the enforcement layer
+asks instead of walking, and `decide` neither takes a fallback nor consults one.
+
 What remains are the four rules the pseudocode carries in its comments, each of
 which has a natural wrong shape:
 
@@ -97,6 +102,12 @@ def chain_for(
     round it is a total loss of enforcement, which is why the contract states it
     twice and pins it with a vector.
 
+    That rule is about the calls that reach the walk, and at `enforce` a `block`
+    fallback is what decides which those are: `refuses_unbound` answers the
+    unbound call before this function is asked anything. So "subject to every
+    policy" holds for every call at `observe` and `none`, and at `enforce` for
+    the unbound ones only under `pass`.
+
     A binding whose every id resolves to nothing leaves an empty chain, and an
     empty chain allows. Do **not** fall back to the whole chain when narrowing
     empties it. Rail Center has a fallback of exactly that shape and it belongs
@@ -153,6 +164,42 @@ def chain_for(
     # `policy_ids` is empty for mode `open`, which narrows to nothing and lets
     # the loop below allow at the end of the walk rather than before it.
     return tuple(p for p in bundle.chain if p.id in binding.policy_ids)
+
+
+def refuses_unbound(
+    bundle: UsableBundle, endpoint_key: str | None, *, keyless: bool = True
+) -> bool:
+    """Whether `fallback` refuses this call before the chain is walked at all.
+
+    **Asked instead of the walk, never alongside it.** A `block` fallback is
+    maximally restrictive, so there is nothing the chain could add and the
+    contract says so explicitly: the call is refused *and the chain is not
+    consulted*. Walking it anyway to see what would have denied produces an
+    attribution to a policy that was never bound to this endpoint, on a request
+    that was refused for a different reason entirely.
+
+    **The posture is not read here.** `fallback` is consulted only at
+    `enforce`, and this function does not know the mode — the caller asks it
+    only where it is acting, which is the same place every other posture branch
+    lives. Reading `bundle.enforcement` here would put the mode in two places
+    and let them disagree.
+
+    `keyless` carries the distinction `chain_for` draws, and it decides the one
+    case the contract is silent on. A message that names no tool **by design**
+    has no endpoint for a fallback about endpoints to refuse, so it is judged.
+    An `unrecognised` `tools/call` **named** one — this gateway declined to
+    compose a key for it — and no binding can match a key that was never
+    composed, so under `block` it is refused. That is this gateway's own
+    answer, on the same footing as the keyless narrowing above it: the contract
+    models `endpoint_key` as always present and takes no position. It is the
+    conservative direction, and the alternative is a caller shedding a `block`
+    fallback by appending a newline to a tool name.
+    """
+    if bundle.fallback != "block":
+        return False
+    if endpoint_key is None:
+        return not keyless
+    return endpoint_key not in bundle.bindings
 
 
 def decide(
