@@ -675,6 +675,20 @@ FALLBACK_CASES = _load("fallback.json")
 FALLBACK_POLICY_ID = "5c8f1e42-0000-4000-8000-0000000000d1"
 
 
+#: The chain a case gets when it names none: one `alert` rule, which cannot deny
+#: and so cannot reach a verdict a fallback case was not asking about.
+INERT_CHAIN = [
+    {
+        "id": FALLBACK_POLICY_ID,
+        "name": "something for a binding to name",
+        "priority": 1,
+        "condition": {"field": "agent_id", "operator": "present"},
+        "action": "alert",
+        "enabled": True,
+    }
+]
+
+
 def _fallback_bundle(case: dict[str, Any]):
     return validate_bundle(
         {
@@ -684,16 +698,7 @@ def _fallback_bundle(case: dict[str, Any]):
             # switch cannot arrive.
             "version": f"v-fallback-{case['enforcement']['mode']}"
             f"-{case['enforcement']['fallback']}",
-            "policies": [
-                {
-                    "id": FALLBACK_POLICY_ID,
-                    "name": "something for a binding to name",
-                    "priority": 1,
-                    "condition": {"field": "agent_id", "operator": "present"},
-                    "action": "alert",
-                    "enabled": True,
-                }
-            ],
+            "policies": case.get("policies", INERT_CHAIN),
             "bindings": case["bindings"],
             "rejected": [],
             "enforcement": case["enforcement"],
@@ -722,6 +727,27 @@ def test_fallback_vector(case: dict[str, Any]) -> None:
 
     assert refused == case["refused"]
 
+    # **A case carrying `expect` asserts what the walk concluded**, and that is
+    # what stops `pass` being implemented as *unjudged*. Every `refused` in this
+    # file is answered correctly by a reader that forwards an unbound endpoint
+    # without walking it at all; only these cases can tell that reader apart
+    # from one that hands the call to the chain.
+    if "expect" not in case:
+        return
+    assert not refused, "a refused call reached no walk, so there is nothing to expect"
+    verdict = decide(
+        bundle,
+        ConditionInput(
+            ticket=parse_rail_header(_encoded(case["claims"]), case["now"]),
+            endpoint_key=case["endpoint_key"],
+        ),
+        keyless=case["keyless"],
+    )
+    assert verdict.allowed == case["expect"]["allowed"]
+    assert (verdict.denied_by.id if verdict.denied_by else None) == case["expect"][
+        "denied_by"
+    ]
+
 
 def test_the_fallback_file_is_worth_running() -> None:
     """Every group can pass by being empty, and here the empty file is a real
@@ -746,3 +772,15 @@ def test_the_fallback_file_is_worth_running() -> None:
     assert any(case["endpoint_key"] is None for case in FALLBACK_CASES)
     assert any(case["endpoint_key"] is not None for case in FALLBACK_CASES)
     assert {case["keyless"] for case in FALLBACK_CASES} == {True, False}
+
+    # **`pass` with a chain that matches and one that does not**, which is the
+    # pair PTH.G1 names. Without both, a reader that forwards an unbound
+    # endpoint unjudged passes this file: the matching case is what denies it,
+    # and the non-matching one is what stops the fix being `block` in disguise.
+    walked = [case for case in FALLBACK_CASES if "expect" in case]
+    assert sum(1 for case in walked if case["expect"]["allowed"]) >= 1
+    assert sum(1 for case in walked if not case["expect"]["allowed"]) >= 1
+    assert all(
+        case["enforcement"]["fallback"] == "pass" and not case["refused"]
+        for case in walked
+    )
