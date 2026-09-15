@@ -29,6 +29,9 @@ from gateway.ticket import parse_rail_header
 
 VECTORS = Path(__file__).parent / "vectors"
 
+#: "this key is not in the document", which `None` cannot say.
+_ABSENT = object()
+
 
 def _load(name: str) -> list[dict[str, Any]]:
     return json.loads((VECTORS / name).read_text(encoding="utf-8"))["cases"]
@@ -283,6 +286,84 @@ def test_a_refusal_names_the_value_it_refused() -> None:
         with pytest.raises(UnusableBundle) as caught:
             validate_bundle(payload)
         assert expected in caught.value.reason, (expected, caught.value.reason)
+
+
+def _postured(enforcement: Any = _ABSENT) -> dict[str, Any]:
+    """A minimal usable bundle, carrying the given `enforcement` or none at all.
+
+    `_ABSENT` rather than `None`, because a bundle carrying `"enforcement":
+    null` and one carrying no such key are the same claim here and a default
+    argument cannot tell them apart.
+    """
+    body: dict[str, Any] = {
+        "version": "v-posture",
+        "policies": [],
+        "bindings": [],
+        "rejected": [],
+    }
+    if enforcement is not _ABSENT:
+        body["enforcement"] = enforcement
+    return body
+
+
+def test_a_bundle_naming_no_enforcement_judges_nothing_and_blocks_the_unbound() -> None:
+    """The reading of a bundle from a Rail Center older than RC-312.
+
+    Both halves are a decision rather than an absence, and the dangerous
+    direction is the first: an untold posture of `enforce` would have every
+    pre-RC-312 bundle start refusing traffic on a posture no operator set.
+    """
+    resolved = validate_bundle(_postured())
+
+    assert resolved.enforcement == "none"
+    assert resolved.fallback == "block"
+
+
+def test_a_bundle_naming_a_mode_and_no_fallback_blocks_the_unbound() -> None:
+    """The fallback defaults on its own, under a posture that consults it.
+
+    `block` is the conservative half of a pair whose other half admits every
+    endpoint no binding matches, so a default of `pass` would quietly widen
+    what an `enforce` bundle allows.
+    """
+    resolved = validate_bundle(_postured({"mode": "enforce"}))
+
+    assert resolved.enforcement == "enforce"
+    assert resolved.fallback == "block"
+
+
+@pytest.mark.parametrize(
+    ("enforcement", "named"),
+    [
+        ({"mode": "halt"}, "halt"),
+        ({"mode": 17}, "17"),
+        ({"mode": "enforce", "fallback": "allow"}, "allow"),
+        # Read independently of the mode: a malformed fallback at `observe` is
+        # still a responder disagreeing about the vocabulary, one poll away
+        # from the posture where that fallback decides every unbound call.
+        ({"mode": "observe", "fallback": "allow"}, "allow"),
+        ("enforce", "not an object"),
+    ],
+)
+def test_a_posture_outside_the_contract_is_refused(
+    enforcement: Any, named: str
+) -> None:
+    """Present-but-wrong is refused, where absent is read as `none`/`block`.
+
+    The two are not the same claim. An absent field is a control plane that has
+    said nothing; a value outside the vocabulary is one that disagrees with the
+    contract about what these words are, and guessing which of two opposite
+    readings it meant is the choice the contract refuses to make.
+
+    `schemas/policy-bundle.schema.json` asserts the same vocabulary, but nothing
+    under `gateway/` applies that schema at runtime — `validate_bundle` is
+    hand-rolled — so those assertions pin the published document rather than
+    this reader.
+    """
+    with pytest.raises(UnusableBundle) as refused:
+        validate_bundle(_postured(enforcement))
+
+    assert named in refused.value.reason
 
 
 def test_the_bundle_file_is_worth_running() -> None:

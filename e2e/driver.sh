@@ -278,11 +278,12 @@ printf '\n== enforce with fallback block: an endpoint nobody bound is refused ==
 # something other than a policy. This gateway's bundle binds
 # `delivery.track_package` and nothing else.
 #
-# Both calls carry the good ticket, and under `gateway-enforce`'s `pass` bundle
-# both are allowed — `undeclared_tool` is refused there by P3, but
-# `track_package` is forwarded. So the pair below separates the fallback from
-# the chain: same code, same ticket, same policies, and a different answer
-# because a binding entry exists for one key and not the other.
+# Both calls carry the good ticket, and the two status codes below are not what
+# separates the fallback from the chain. `gateway-enforce` — `fallback: pass`,
+# and no bindings at all — answers the same pair the same way: `track_package`
+# is forwarded, and `undeclared_tool` is refused 403 there too, by P3, the skill
+# rule. What a `block` fallback changes is *what* refused, so the assertion that
+# discriminates is the reported-denial count below rather than either code.
 reset_journals
 # A session, because this call is *allowed* and so reaches the MCP layer. Every
 # refusal in this file is answered above that layer, which is why the rest of

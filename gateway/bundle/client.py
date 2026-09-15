@@ -35,6 +35,7 @@ import httpx
 
 from gateway.bundle.validate import UnusableBundle, UsableBundle, validate_bundle
 from gateway.key_safety import safe_for_log
+from gateway.mode import describe_enforcement
 
 logger = logging.getLogger("gateway.bundle")
 
@@ -373,6 +374,9 @@ class BundleHolder:
 
     async def _refresh_once(self) -> RefreshOutcome:
         held = self._held.version if self._held else None
+        previous_posture = (
+            (self._held.enforcement, self._held.fallback) if self._held else None
+        )
 
         try:
             body = await self._fetch()
@@ -412,6 +416,7 @@ class BundleHolder:
                 safe_for_log(fields.get("reason")),
             )
 
+        posture = (bundle.enforcement, bundle.fallback)
         self._held = bundle
         logger.info(
             "holding policy bundle version %s — %d enabled policies, "
@@ -421,6 +426,19 @@ class BundleHolder:
             len(bundle.bindings),
             len(bundle.rejected),
         )
+        # The line above names a version; it says nothing about what traffic
+        # will now experience. Posture is the one thing in a bundle an operator
+        # moves deliberately, and moving it without a redeploy is what RC-312
+        # exists to allow — so the move needs a line of its own, or `enforce`
+        # and `observe` are distinguishable only by inducing a verdict.
+        #
+        # On the change, never on the poll. A bundle is refetched every
+        # interval and most of them say what the last one said; logging each
+        # would bury the one that moved. A first bundle has no posture before
+        # it, so it reports one — that poll is where this gateway is told what
+        # to do for the first time.
+        if posture != previous_posture:
+            logger.info("%s", describe_enforcement(*posture))
         return RefreshOutcome("replaced", bundle.version)
 
     async def _fetch(self) -> Any:

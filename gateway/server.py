@@ -676,9 +676,7 @@ class _Enforcement:
         if resolution.status == "discovery":
             # Not a call: it opens the session or lists what the session
             # offers, and the ticket it carries is judged on the first
-            # `tools/call` instead. Passed ahead of the bundle check too — a
-            # gateway holding no ruleset can still let a session open, since
-            # every call that follows is refused with 503 on its own.
+            # `tools/call` instead.
             log.info("pass %s (session message, not judged)", named)
             return None
         ticket = parse_rail_header(_x_rail_values(scope))

@@ -827,6 +827,96 @@ async def test_a_reason_never_carries_a_character_a_log_line_cannot_hold() -> No
     assert "unprintable" in outcome.reason
 
 
+@pytest.mark.asyncio
+async def test_the_posture_is_logged_when_a_poll_moves_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Moving a gateway to `enforce` is what RC-312 exists to allow.
+
+    The holding line names a version, and a version is a content hash: nothing
+    in it says the gateway has started refusing calls. Without a line of its
+    own, `enforce` and `observe` are told apart only by inducing a verdict.
+    """
+    h = holder(
+        httpx.Response(200, json={**bundle("v-none"), "enforcement": {"mode": "none"}}),
+        httpx.Response(
+            200,
+            json={
+                **bundle("v-enforce"),
+                "enforcement": {"mode": "enforce", "fallback": "block"},
+            },
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        first = "\n".join(r.getMessage() for r in caplog.records)
+
+        caplog.clear()
+        await h.refresh()
+        second = "\n".join(r.getMessage() for r in caplog.records)
+
+    assert "enforcement=none" in first
+    assert "enforcement=enforce" in second
+    assert "fallback=block" in second
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_posture_is_not_repeated_on_every_poll(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A bundle arrives every interval and most say what the last one said.
+
+    A posture line on each would bury the one that moved, which is the only one
+    an operator is reading for.
+    """
+    body = {"enforcement": {"mode": "enforce", "fallback": "block"}}
+    h = holder(
+        httpx.Response(200, json={**bundle("v1"), **body}),
+        httpx.Response(200, json={**bundle("v2"), **body}),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert said.count("enforcement=enforce") == 1
+    assert said.count("holding policy bundle version") == 2
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_that_moves_under_one_mode_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """At `enforce` the fallback decides every call no binding matches.
+
+    Two bundles naming the same mode are not the same posture when they
+    disagree about that, so the mode alone is not what the line turns on.
+    """
+    h = holder(
+        httpx.Response(
+            200,
+            json={
+                **bundle("v1"),
+                "enforcement": {"mode": "enforce", "fallback": "block"},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                **bundle("v2"),
+                "enforcement": {"mode": "enforce", "fallback": "pass"},
+            },
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+        caplog.clear()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "fallback=pass" in said
+
+
 # --- the request itself ---------------------------------------------------
 
 
