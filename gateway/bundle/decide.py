@@ -171,18 +171,11 @@ def refuses_unbound(
 ) -> bool:
     """Whether `fallback` refuses this call before the chain is walked at all.
 
-    **Asked instead of the walk, never alongside it.** A `block` fallback is
-    maximally restrictive, so there is nothing the chain could add and the
-    contract says so explicitly: the call is refused *and the chain is not
-    consulted*. Walking it anyway to see what would have denied produces an
-    attribution to a policy that was never bound to this endpoint, on a request
-    that was refused for a different reason entirely.
-
-    **The posture is not read here.** `fallback` is consulted only at
-    `enforce`, and this function does not know the mode — the caller asks it
-    only where it is acting, which is the same place every other posture branch
-    lives. Reading `bundle.enforcement` here would put the mode in two places
-    and let them disagree.
+    **The posture is not read here.** This function answers what `block` says
+    about an unbound call and nothing about what the caller does with the
+    answer; the mode lives with the caller, alongside every other posture
+    branch. Reading `bundle.enforcement` here would put it in two places and
+    let them disagree.
 
     `keyless` carries the distinction `chain_for` draws, and it decides the one
     case the contract is silent on. A message that names no tool **by design**

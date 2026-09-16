@@ -68,8 +68,8 @@ BUNDLE = {
     ],
     "bindings": [],
     # Beside `bindings`, because it is what a call none of them matched is
-    # judged to be. No binding is declared here, so nothing reaches it at a
-    # posture that consults it.
+    # judged to be. No binding is declared here, so every call below is one it
+    # speaks to.
     "binding_fallback": "block",
     # The posture these tests run at, and it arrives here rather than in
     # `build_app` because that is where it arrives in production (RC-312).
@@ -145,7 +145,7 @@ async def test_an_allowed_call_says_so(evaluating, caplog):
     assert answer == "delivered:77123"
     written = "\n".join(caplog.messages)
     assert "allow" in written
-    # The fallback is evaluated at this posture and acted on at no posture, so a
+    # The fallback is evaluated at this posture and not acted on at it, so a
     # would-be refusal on an unbound endpoint is logged beside the allow rather
     # than instead of it. What must not appear is a refusal that was *acted* on.
     assert "denied " not in written

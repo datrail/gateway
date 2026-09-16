@@ -164,6 +164,25 @@ STARTUP_FETCH_GRACE_SECONDS = 5.0
 #: "Level <n>" for anything else, so a typo would set a level nobody chose.
 LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
 
+#: The most denial reports this gateway will hold in flight at once, past which
+#: a report is shed with a log rather than queued. The fallback refusal is
+#: reached without a ticket, without a valid tool name and without any binding
+#: existing, so anything that can reach this gateway can turn its own request
+#: rate into one bearer-authenticated POST to Rail Center per request. Shedding
+#: costs the record and not the enforcement — nothing the 403 is built from is
+#: read back out of a report — while a gateway that has run out of sockets
+#: reports nothing at all and stops refusing too.
+MAX_REPORTS_IN_FLIGHT = 64
+
+#: How much of that budget a report naming no policy may hold. The fallback
+#: refusal is the class reachable with nothing in hand, so sharing one budget
+#: first-come lets it evict the class that carries a verdict: a full set holds
+#: every rule-decided denial off Rail Center's record for as long as it stays
+#: full, and one slow Rail Center does the same with no caller meaning to.
+#: Reserving the remainder is a comparison and a count, where making room by
+#: cancelling a POST already in flight is neither.
+MAX_FALLBACK_REPORTS_IN_FLIGHT = 16
+
 
 def _required(name: str) -> str:
     """Read a variable that has no sensible default.
@@ -849,6 +868,11 @@ class _Enforcement:
         # mid-flight and simply never arrive — a missing row with nothing in the
         # log to say why.
         self._reports: set[asyncio.Task[Any]] = set()
+        # The subset of those carrying no policy id — the fallback refusal,
+        # which is the class reachable without a ticket, a tool name or a
+        # binding. Counted apart from the whole so that class cannot spend the
+        # budget the class carrying a verdict needs.
+        self._unruled_reports: set[asyncio.Task[Any]] = set()
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http" or scope.get("method") != "POST":
@@ -958,7 +982,7 @@ class _Enforcement:
             # to preview. The walk below still runs, so an operator sees both
             # what the fallback would do and what the chain says about the same
             # call.
-            log.info(
+            log.warning(
                 "would deny %s (no binding entry, fallback=block; ticket %s) — "
                 "this mode enforces nothing, so it was forwarded",
                 named,
@@ -1066,7 +1090,29 @@ class _Enforcement:
         slug-less form this gateway composed, which is all there is. The
         receiver resolves the data source from the reporting gateway and
         whichever it gets.
+
+        **The budget is reserved by class.** A fallback refusal is reachable
+        with nothing in hand — no ticket, no tool name, no binding — while a
+        denial naming a policy took a rule that matched, so one shared budget
+        makes the first class an eviction lever over the second: fill it with
+        arbitrary bytes and every rule-decided denial is shed. A Rail Center
+        slow enough to hold the tasks open reaches the same state with nobody
+        meaning to. The policy-less class is held to
+        `MAX_FALLBACK_REPORTS_IN_FLIGHT` of the `MAX_REPORTS_IN_FLIGHT` total,
+        so the remainder is headroom a denial that names a rule always has.
         """
+        unruled = policy is None
+        if len(self._reports) >= MAX_REPORTS_IN_FLIGHT or (
+            unruled and len(self._unruled_reports) >= MAX_FALLBACK_REPORTS_IN_FLIGHT
+        ):
+            log.warning(
+                "denial report not sent — %d already in flight, %d of them "
+                "naming no policy; this refusal stands and is absent from "
+                "Rail Center",
+                len(self._reports),
+                len(self._unruled_reports),
+            )
+            return
         claims = ticket.token or {}
         body = build_report(
             policy_id=policy.id if policy is not None else None,
@@ -1082,6 +1128,9 @@ class _Enforcement:
         )
         self._reports.add(task)
         task.add_done_callback(self._reports.discard)
+        if unruled:
+            self._unruled_reports.add(task)
+            task.add_done_callback(self._unruled_reports.discard)
 
 
 def _reportable_key(bundle, composed: str | None) -> str | None:

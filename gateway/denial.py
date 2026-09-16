@@ -264,7 +264,8 @@ async def report(
             response = await client.post(url, json=body, headers=headers)
     except Exception as exc:  # noqa: BLE001 - a report may not break a refusal
         logger.warning(
-            "denial report for policy %s could not be sent: %s: %s",
+            "denial report for %s (policy %s) could not be sent: %s: %s",
+            safe_for_log(body.get("endpoint_key")),
             safe_for_log(body.get("policy_id")),
             type(exc).__name__,
             exc,
@@ -275,7 +276,8 @@ async def report(
         # Named rather than swallowed: a 422 here means this gateway and Rail
         # Center disagree about the shape of a denial, and the row is missing.
         logger.warning(
-            "denial report for policy %s was refused: HTTP %d",
+            "denial report for %s (policy %s) was refused: HTTP %d",
+            safe_for_log(body.get("endpoint_key")),
             safe_for_log(body.get("policy_id")),
             response.status_code,
         )

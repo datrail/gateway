@@ -42,7 +42,11 @@ import pytest
 from gateway.bundle.validate import validate_bundle
 from gateway.endpoint import MAX_BODY_NESTING_DEPTH
 from gateway.key_safety import MAX_LOGGED_LENGTH
-from gateway.server import _Enforcement
+from gateway.server import (
+    MAX_FALLBACK_REPORTS_IN_FLIGHT,
+    MAX_REPORTS_IN_FLIGHT,
+    _Enforcement,
+)
 
 SLUG = "delivery"
 KEY = "/mcp#tools/call#track_package"
@@ -868,6 +872,36 @@ async def test_a_report_rail_center_refuses_is_named_in_the_log(caplog):
     written = "\n".join(reported(caplog))
     assert "422" in written
     assert DENY_ID in written
+    assert KEY in written, "the line names the denial, not only the rule"
+
+
+@pytest.mark.asyncio
+async def test_a_report_that_never_left_names_the_denial_it_describes(caplog):
+    """A fallback refusal carries no `policy_id`, so a line identified by the
+    rule alone identifies nothing at all — and sends an operator chasing a
+    policy that does not exist. The endpoint key is what the whole class of
+    refusals reached without a rule has, and it is what an operator reading a
+    gap in the denials table is holding."""
+
+    def unreachable(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    enforcement = _Enforcement(
+        _Downstream(),
+        _Holder(bundle(fallback="block")),
+        rail_center_url=RAIL_CENTER_URL,
+        auth={"Authorization": "Bearer t"},
+        transport=httpx.MockTransport(unreachable),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="gateway.denial"):
+        assert (await drive(enforcement, call())).status == 403
+        for _ in range(200):
+            await asyncio.sleep(0)
+
+    written = "\n".join(reported(caplog))
+    assert "ConnectError" in written
+    assert KEY in written
 
 
 @pytest.mark.asyncio
@@ -1056,6 +1090,31 @@ async def test_a_block_fallback_is_consulted_at_enforce_and_nowhere_else():
 
 
 @pytest.mark.asyncio
+async def test_an_enforcing_gateway_refuses_without_previewing_the_same_call(caplog):
+    """The log tells a preview from a refusal, and one call earns one of them.
+
+    `observe` says what `block` would refuse and `enforce` refuses it — the
+    posture is the whole of the difference, and the log is the only place an
+    operator can see which one they are running. A gateway writing both for one
+    request puts "this mode enforces nothing, so it was forwarded" directly
+    above the line recording that it was refused, which is a false statement
+    about the request beside a true one.
+    """
+    enforcement, downstream, _ = layer(bundle(fallback="block"))
+
+    with caplog.at_level(logging.INFO, logger="gateway"):
+        answer = await drive(
+            enforcement, call(), headers=[(b"x-rail", ticket().encode())]
+        )
+
+    assert answer.status == 403
+    assert downstream.calls == 0
+    written = "\n".join(caplog.messages)
+    assert "denied" in written and "fallback=block" in written
+    assert "would deny" not in written
+
+
+@pytest.mark.asyncio
 async def test_the_caller_cannot_tell_a_fallback_refusal_from_a_policy_denial():
     """Standard deny mechanics, and the reason is not tidiness.
 
@@ -1095,6 +1154,150 @@ async def test_a_fallback_refusal_is_reported_as_a_denial_carrying_no_policy() -
     assert "policy_id" not in body
     assert body["endpoint_key"] == KEY
     assert body["metadata"]["endpoint_resolution"] == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_reports_past_the_fallback_cap_are_shed_rather_than_queued(caplog):
+    """The fallback refusal is the one reachable with nothing in hand.
+
+    It needs no ticket, no tool name this gateway recognises and no binding, so
+    arbitrary bytes produce one bearer-authenticated POST to Rail Center each —
+    and an uncapped task set turns a caller's request rate into Rail Center's
+    ingest rate and into this gateway's socket count. Shedding costs the record
+    and not the enforcement — nothing the 403 is built from is read back out of
+    a report — so the 403 is unchanged and nothing is forwarded.
+
+    This class is capped below the whole budget, which is what the assertion
+    reads: `MAX_FALLBACK_REPORTS_IN_FLIGHT` arrive, not `MAX_REPORTS_IN_FLIGHT`.
+    """
+    held = asyncio.Event()
+    reports = _Reports(hold=held)
+    enforcement, downstream, _ = layer(bundle(fallback="block"), reports=reports)
+
+    with caplog.at_level(logging.WARNING, logger="gateway"):
+        for n in range(MAX_REPORTS_IN_FLIGHT + 10):
+            answer = await drive(enforcement, b"not json at all %d" % n)
+            assert answer.status == 403, n
+        for _ in range(500):
+            await asyncio.sleep(0)
+
+        assert len(reports.bodies) == MAX_FALLBACK_REPORTS_IN_FLIGHT
+        assert any("already in flight" in m for m in caplog.messages)
+
+    assert downstream.calls == 0
+    held.set()
+    await settled(reports, expecting=MAX_FALLBACK_REPORTS_IN_FLIGHT)
+
+
+@pytest.mark.asyncio
+async def test_a_rule_decided_denial_is_reported_with_the_unruled_class_full():
+    """The budget is reserved by class, so the cheap class cannot evict the other.
+
+    One shared budget shed first-come makes the reports reachable with nothing
+    in hand — no ticket, no tool name, no binding — a lever over the reports
+    that carry a verdict: hold the set full and every rule-decided denial is
+    absent from Rail Center's record, including the attacker's own once it
+    starts sending well-formed calls. A Rail Center slow enough to hold the
+    tasks open produces the same loss with nobody meaning to.
+
+    So: fill the policy-less class past its sub-cap with unparseable bytes while
+    Rail Center holds every report open, then deny a call by a rule that
+    matched. The denial that names a policy is still reported.
+    """
+    bound_to_the_denying_rule = {
+        "endpoint_key": FULL_KEY,
+        "mode": "gated",
+        "policy_ids": [DENY_ID],
+    }
+    held = asyncio.Event()
+    reports = _Reports(hold=held)
+    enforcement, downstream, _ = layer(
+        bundle(
+            DENIES_EVERYTHING,
+            bindings=[bound_to_the_denying_rule],
+            fallback="block",
+        ),
+        reports=reports,
+    )
+
+    for n in range(MAX_FALLBACK_REPORTS_IN_FLIGHT + 10):
+        assert (await drive(enforcement, b"not json at all %d" % n)).status == 403, n
+    for _ in range(500):
+        await asyncio.sleep(0)
+    assert len(reports.bodies) == MAX_FALLBACK_REPORTS_IN_FLIGHT
+    assert all("policy_id" not in body for body in reports.bodies)
+
+    assert (await drive(enforcement, call())).status == 403
+
+    await settled(reports, expecting=MAX_FALLBACK_REPORTS_IN_FLIGHT + 1)
+    assert len(reports.bodies) == MAX_FALLBACK_REPORTS_IN_FLIGHT + 1
+    assert reports.bodies[-1]["policy_id"] == DENY_ID
+
+    assert downstream.calls == 0
+    held.set()
+
+
+@pytest.mark.asyncio
+async def test_reports_past_the_total_cap_are_shed_whatever_decided_them():
+    """The total bounds every report, including the ones a rule decided.
+
+    The sub-cap holds only the policy-less class, so nothing it does limits how
+    many bearer-authenticated POSTs to Rail Center a caller who can reach one
+    denying rule holds open at once — those name a policy and are counted
+    against the total alone. A Rail Center slow enough to hold each report open
+    is what makes the difference visible: the reports accumulate, and the total
+    is the only thing that stops them.
+    """
+    held = asyncio.Event()
+    reports = _Reports(hold=held)
+    enforcement, downstream, _ = layer(bundle(DENIES_EVERYTHING), reports=reports)
+
+    for n in range(MAX_REPORTS_IN_FLIGHT + 10):
+        assert (await drive(enforcement, call())).status == 403, n
+    for _ in range(500):
+        await asyncio.sleep(0)
+
+    assert len(reports.bodies) == MAX_REPORTS_IN_FLIGHT
+    # Every one of them names the rule that denied it, so the sub-cap on the
+    # policy-less class is not what shed the rest.
+    assert all(body["policy_id"] == DENY_ID for body in reports.bodies)
+
+    assert downstream.calls == 0
+    held.set()
+    await settled(reports, expecting=MAX_REPORTS_IN_FLIGHT)
+
+
+@pytest.mark.asyncio
+async def test_the_policy_less_class_frees_its_budget_as_each_report_lands():
+    """The sub-cap bounds what is in flight, not what a process may ever send.
+
+    A report leaves the policy-less set when its task finishes, so a gateway
+    that has already sent `MAX_FALLBACK_REPORTS_IN_FLIGHT` fallback reports and
+    seen every one of them land reports the next one too. A set that never
+    drained would make the sub-cap a lifetime limit instead: past the
+    sixteenth, every refusal of an endpoint nobody bound is answered 403 and
+    absent from Rail Center for the life of the process — silently, since the
+    caller is refused either way, and permanently rather than for as long as
+    the set stays full.
+
+    So: no hold, and `settled` between the two halves, which is what makes this
+    a drained set rather than a full one.
+    """
+    reports = _Reports()
+    enforcement, downstream, _ = layer(bundle(fallback="block"), reports=reports)
+
+    for n in range(MAX_FALLBACK_REPORTS_IN_FLIGHT):
+        assert (await drive(enforcement, b"not json at all %d" % n)).status == 403, n
+    await settled(reports, expecting=MAX_FALLBACK_REPORTS_IN_FLIGHT)
+    assert len(reports.bodies) == MAX_FALLBACK_REPORTS_IN_FLIGHT
+
+    assert (await drive(enforcement, b"one more that nothing bound")).status == 403
+
+    await settled(reports, expecting=MAX_FALLBACK_REPORTS_IN_FLIGHT + 1)
+    assert len(reports.bodies) == MAX_FALLBACK_REPORTS_IN_FLIGHT + 1
+    assert "policy_id" not in reports.bodies[-1]
+
+    assert downstream.calls == 0
 
 
 @pytest.mark.asyncio
@@ -1526,7 +1729,10 @@ async def test_observe_says_what_block_would_refuse_and_still_walks(caplog) -> N
         bundle(DENIES_EVERYTHING, fallback="block"), blocking=False
     )
 
-    with caplog.at_level(logging.INFO, logger="gateway"):
+    # Captured at WARNING, which `RAIL_GATEWAY_LOG_LEVEL` accepts: the preview
+    # an operator reads before turning `block` on has to survive the level they
+    # are most likely to run, and the policy preview beside it already does.
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         answer = await drive(enforcement, call())
 
     assert answer.status == 200, "observe acts on nothing, the fallback included"
@@ -1536,3 +1742,4 @@ async def test_observe_says_what_block_would_refuse_and_still_walks(caplog) -> N
         "the chain was walked as well, so its verdict is in the log too"
     )
     await settled(reports, expecting=0)
+    assert reports.bodies == [], "a report is an action, and observe takes none"
