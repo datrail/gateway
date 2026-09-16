@@ -1134,7 +1134,26 @@ class _Enforcement:
 
 
 def _reportable_key(bundle, composed: str | None) -> str | None:
-    """The full key where a binding matched, the composed one where none did."""
+    """The full key where a binding matched, the composed one where none did.
+
+    Reporting the binding's own key rather than the one this gateway composed
+    hands the receiver an attribution it would otherwise re-derive: the whole
+    key is the contract's, names one endpoint unambiguously, and arrived in the
+    bundle rather than being guessed at here.
+
+    **What it cannot promise is that the slug names the upstream the call
+    reached.** The lookup is by the composed key, which has no data source in
+    it — so where two upstreams behind this gateway share a stripped key and
+    only one of them is bound, a call to either is reported under that one
+    binding's slug. That is this implementation's stripped-key limitation
+    showing up in the report rather than in the verdict, and it is the same
+    limitation `bundle.validate` states at the collision refusal. A gateway
+    resolving the data source from the route would match on the whole key and
+    have neither face of it.
+
+    Reporting the slug-less form instead is the alternative, and it is worse:
+    it would lose an attribution that is correct in every case but this one.
+    """
     if bundle is None or composed is None:
         return composed
     binding = bundle.bindings.get(composed)

@@ -87,16 +87,25 @@ otherwise produce two keys for one row.
 method carries none, is matched against no binding, and is never reached by the
 fallback.
 
-**Endpoint keys must be unique within one gateway once the slug is stripped.**
-Two data sources behind one gateway, both serving `/mcp`, both with a `search`
-tool, reach this gateway as one key. Rail Center does not enforce this and is not
+**This implementation requires endpoint keys to be unique within one gateway
+once the slug is stripped.** The contract is the whole key — Rail Center
+publishes `<slug>#<path>#<method>#<call>` and it identifies one endpoint
+unambiguously — but this gateway composes no slug, so it can only match on the
+last three parts. Two data sources behind one gateway, both serving `/mcp`, both
+with a `search` tool, therefore reach it as one key. A gateway that resolved the
+data source from the route a call arrived on would match on the whole key and
+carry no such constraint; nothing in the contract prevents that, and this is
+where the limitation would be lifted. Rail Center does not enforce it and is not
 asked to.
 
 **What the gateway refuses is a bundle that binds both of them.** Two bindings
 whose keys are one key once the slug is stripped are refused together, naming
 both full keys, because serving either would be the gateway choosing on your
-behalf. A binding whose key cannot be read at all is logged and skipped instead —
-it narrows one endpoint and says nothing about the others.
+behalf. A refused bundle leaves the one already held in place — the gateway goes
+on enforcing the last ruleset it understood — and only a first fetch leaves it
+holding nothing, where `/ready` answers 503. A binding whose key cannot be read
+at all is logged and skipped instead: it narrows one endpoint and says nothing
+about the others.
 
 **A bundle that binds only one of them is served, and it covers both.** The
 refusal compares bindings against each other, so it cannot see a collision only
@@ -106,6 +115,13 @@ refusal and no log line, and an `open` binding on one therefore opens the other.
 Nothing in a routes file or a key names a data source, so the gateway has no way
 to tell the two apart — **keep the constraint above whether or not you bind both
 sides.**
+
+**And a denial names the binding's data source, not the caller's.** The same
+limitation seen from the report rather than from the verdict: a refusal on a
+shared key is reported under the slug of whichever binding matched, so a call to
+one upstream can be recorded against another. The gateway matched on a key with
+no data source in it and has nothing better to send — reporting the slug-less
+form instead would lose an attribution that is correct in every other case.
 
 ## Architecture
 
