@@ -21,3 +21,9 @@ starlette==1.4.1
 # gateway calls out to Rail Center. Same reasoning as starlette: it arrives
 # through fastmcp too, and a module that imports a package names it.
 httpx==0.28.1
+
+# Imported directly by gateway.routes, which reads the file naming the upstreams
+# this gateway fronts. The same version the proxy pins, because the two read the
+# same document and a parser difference between them would be a difference in
+# what an operator's file means.
+pyyaml==6.0.1

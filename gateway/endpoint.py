@@ -63,6 +63,16 @@ from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_character
 #: The MCP method that names a tool. Every other method is keyless.
 CALL_METHOD = "tools/call"
 
+#: What joins an endpoint key's parts, on both sides of the wire.
+#:
+#: **Not a dot**, which the old two-part key used and which a tool name may
+#: legitimately contain — and not a character a data source slug may hold
+#: either, since the slug is the first segment and the gateway finds the
+#: boundary by splitting once from the left. Rail Center's `SLUG_PATTERN`
+#: excludes it for exactly that reason; a tool name may contain it freely, which
+#: is why nothing splits a key more than once.
+SEPARATOR = "#"
+
 #: Messages that open a session or describe its surface. Forwarded unjudged —
 #: see the module docstring for why a bound rule must not close a session.
 DISCOVERY_METHODS = frozenset(
@@ -134,9 +144,9 @@ class EndpointResolution:
 
 
 def resolve_endpoint_key(
-    method: Any, tool_name: Any, datasource_slug: str
+    method: Any, tool_name: Any, upstream_path: str
 ) -> EndpointResolution:
-    """Resolve one MCP message to an endpoint key.
+    """Resolve one MCP message to the *comparable* endpoint key.
 
     `method` and `tool_name` are taken off the parsed message rather than a
     body, because that is what a middleware is handed — by the time this runs,
@@ -145,10 +155,23 @@ def resolve_endpoint_key(
     and a resolver that trusts its caller's types is one that raises where a
     decision belongs.
 
-    `datasource_slug` is ``RAIL_DATASOURCE_SLUG``, the data source this gateway
-    fronts. Rail Center composes an endpoint's key from the same slug the data
-    source was registered under, so both books are pinned to one value nobody
-    re-types.
+    **`<path>#<method>#<call>`, and no slug.** Rail Center composes
+    `<slug>#<path>#<method>#<call>` and publishes that whole key; this gateway
+    holds no slug to compose one with, so it builds the three parts it can and
+    the bundle's keys are stripped of their first segment to meet it. See
+    `gateway.bundle.validate`, which does the stripping and refuses a bundle
+    whose keys collide once stripped.
+
+    `upstream_path` is the path **as the upstream will see it** — the route
+    prefix this gateway matched has already been removed by `gateway.routes`.
+    That is what keeps one endpoint to one key: Rail Center stores one row per
+    endpoint, and the same MCP server behind two gateways mounted at different
+    prefixes would otherwise produce two keys for one row.
+
+    **Only a `tools/call` composes a key**, which is not a rule this function
+    adds so much as one it already had: an endpoint is a tool, so every other
+    method carries no key, is matched against no binding, and is never reached
+    by the fallback.
     """
     if is_discovery(method):
         return EndpointResolution(None, "discovery")
@@ -157,15 +180,15 @@ def resolve_endpoint_key(
 
     if not isinstance(tool_name, str) or not tool_name:
         # A `tools/call` naming no tool has no key to compose. Absence stays
-        # absence: a half-composed key — the slug and a trailing dot — would
-        # read downstream as a key that exists.
+        # absence: a half-composed key — the path and a trailing separator —
+        # would read downstream as a key that exists.
         return EndpointResolution(None, "unrecognised")
     if has_unsafe_key_characters(tool_name):
         # The tool name is chosen by the caller and the composed key is written
         # verbatim into a log line, and into a denial report once one is sent.
         return EndpointResolution(None, "unrecognised")
 
-    key = f"{datasource_slug}.{tool_name}"
+    key = f"{upstream_path}{SEPARATOR}{CALL_METHOD}{SEPARATOR}{tool_name}"
     if len(key) > MAX_ENDPOINT_KEY_LENGTH:
         # Past the control plane's cap the key can never match a registered
         # endpoint, and an unbounded tool name would otherwise ride into every

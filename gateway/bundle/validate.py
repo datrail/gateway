@@ -30,6 +30,7 @@ from types import MappingProxyType
 from typing import Any, Final, Literal
 
 from gateway.bundle.uuid import canonical_uuid
+from gateway.endpoint import SEPARATOR
 from gateway.json_wire import MAX_SAFE_INTEGER
 from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_characters
 from gateway.key_safety import safe_for_log as _safe
@@ -290,6 +291,28 @@ def _order(policies: list[Any]) -> tuple[Policy, ...]:
     return tuple(sorted(chain, key=lambda p: (p.priority, p.id)))
 
 
+def strip_slug(full_key: str) -> str:
+    """A bundle's key, reduced to the form this gateway can compose.
+
+    Rail Center publishes `<slug>#<path>#<method>#<call>`. This gateway holds no
+    data source slug — one gateway fronts several data sources and a data source
+    may sit behind several gateways, so nothing local can name that relationship
+    — and composes `<path>#<method>#<call>` from the request. The two meet here.
+
+    **Split once, from the left.** Rail Center's slug pattern excludes the
+    separator, so the first one is unambiguously the slug boundary; a tool name
+    may contain it freely, which is why nothing splits further. A `rpartition`,
+    or a split with no bound, mangles exactly the keys whose tool names carry
+    one.
+
+    A key with no separator at all is returned unchanged rather than emptied. It
+    is a producer this gateway cannot read keys from, and a binding that matches
+    nothing is a safer reading of that than a binding that matches everything.
+    """
+    _slug, separator, rest = full_key.partition(SEPARATOR)
+    return rest if separator else full_key
+
+
 def _index(bindings: list[Any]) -> dict[str, Binding]:
     """The binding index, or a refusal.
 
@@ -307,6 +330,8 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
     presents no ticket — without anyone having written ``open``.
     """
     out: dict[str, Binding] = {}
+    #: The full key each stripped one came from, so a collision can name both.
+    first_seen: dict[str, str] = {}
 
     for entry in bindings:
         if not isinstance(entry, dict):
@@ -319,8 +344,19 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
             raise UnusableBundle(
                 f"a binding whose endpoint_key is not a string ({_q(key)})"
             )
-        if key in out:
-            raise UnusableBundle(f"two bindings for endpoint {_q(key)}")
+        comparable = strip_slug(key)
+        if comparable in out:
+            # **Both full keys, because neither alone identifies the fault.**
+            # The stripped form is what collided and the slugs are what an
+            # operator has to change, so a message naming only one of the three
+            # sends them to a file that looks correct.
+            raise UnusableBundle(
+                f"two bindings reach this gateway as {_q(comparable)} — "
+                f"{_q(first_seen[comparable])} and {_q(key)}. Endpoint keys "
+                f"must be unique within a gateway once the data source slug is "
+                f"stripped, because this gateway composes no slug of its own"
+            )
+        first_seen[comparable] = key
 
         mode = entry.get("mode")
         if mode not in ("gated", "open"):
@@ -361,7 +397,7 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
                 )
             canonical.add(resolved)
 
-        out[key] = Binding(mode=mode, policy_ids=frozenset(canonical))
+        out[comparable] = Binding(mode=mode, policy_ids=frozenset(canonical))
 
     return out
 
