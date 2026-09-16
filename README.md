@@ -90,10 +90,22 @@ fallback.
 **Endpoint keys must be unique within one gateway once the slug is stripped.**
 Two data sources behind one gateway, both serving `/mcp`, both with a `search`
 tool, reach this gateway as one key. Rail Center does not enforce this and is not
-asked to; **this gateway refuses a bundle that violates it**, naming both full
-keys, because serving either binding would be the gateway choosing on your
+asked to.
+
+**What the gateway refuses is a bundle that binds both of them.** Two bindings
+whose keys are one key once the slug is stripped are refused together, naming
+both full keys, because serving either would be the gateway choosing on your
 behalf. A binding whose key cannot be read at all is logged and skipped instead —
 it narrows one endpoint and says nothing about the others.
+
+**A bundle that binds only one of them is served, and it covers both.** The
+refusal compares bindings against each other, so it cannot see a collision only
+one side of which is bound: a binding published for one data source narrows the
+identically-named tool on every other upstream behind the same gateway, with no
+refusal and no log line, and an `open` binding on one therefore opens the other.
+Nothing in a routes file or a key names a data source, so the gateway has no way
+to tell the two apart — **keep the constraint above whether or not you bind both
+sides.**
 
 ## Architecture
 

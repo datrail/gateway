@@ -309,6 +309,44 @@ def test_a_refusal_names_the_value_it_refused() -> None:
         assert expected in caught.value.reason, (expected, caught.value.reason)
 
 
+def test_two_data_sources_reaching_one_key_are_refused_naming_both() -> None:
+    """The collision refusal, on the only axis it has.
+
+    Two bindings with the *same* full key collide whichever form the index is
+    keyed on, so the case that pins this one is two different data sources whose
+    keys are one key once the slug is stripped — which is the case the rule
+    exists for, and the shape a gateway fronting several data sources creates.
+    Comparing the full keys instead accepts this bundle and indexes it as one
+    entry, the second silently replacing the first, so the gated data source's
+    endpoint is served under the other's `open` binding.
+
+    Both full keys are asserted in the reason, not just the refusal: the stripped
+    form is what collided and the slugs are what an operator has to change.
+    """
+    gated = "delivery#/mcp#tools/call#whoami"
+    opened = "finretail#/mcp#tools/call#whoami"
+    with pytest.raises(UnusableBundle) as caught:
+        validate_bundle(
+            {
+                "schema_version": "1.0",
+                "content_hash": "v",
+                "policies": [],
+                "bindings": [
+                    {
+                        "endpoint_key": gated,
+                        "mode": "gated",
+                        "policy_ids": ["5c8f1e42-0000-4000-8000-0000000000a1"],
+                    },
+                    {"endpoint_key": opened, "mode": "open", "policy_ids": []},
+                ],
+            }
+        )
+
+    reason = caught.value.reason
+    assert gated in reason, reason
+    assert opened in reason, reason
+
+
 def test_an_unreadable_shape_is_refused_before_anything_beneath_it() -> None:
     """Which of two refusals an operator is sent to act on.
 

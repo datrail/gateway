@@ -344,6 +344,18 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
             # The stripped form is what collided and the slugs are what an
             # operator has to change, so a message naming only one of the three
             # sends them to a file that looks correct.
+            #
+            # **This compares bindings against each other, and that is the whole
+            # reach it has.** The cost is written down rather than designed
+            # around, as the widening at `conditions.strip_slug` for a ticket's
+            # skills is: a collision only one side of which is bound is not
+            # visible here, so a binding published for one data source narrows
+            # the identically-named tool on every other upstream behind this
+            # gateway, and an `open` one opens it. Closing that would need a
+            # route-to-data-source relationship the routes file deliberately
+            # does not carry, or a discriminator in the key — which is why the
+            # constraint is stated to the operator in the README rather than
+            # enforced in full here.
             raise UnusableBundle(
                 f"two bindings reach this gateway as {_q(comparable)} — "
                 f"{_q(first_seen[comparable])} and {_q(key)}. Endpoint keys "

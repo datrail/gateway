@@ -210,11 +210,6 @@ def build_report(
 
     report: dict[str, Any] = {
         "policy_id": policy_id,
-        # The slug rather than the row id: this gateway already holds the slug —
-        # it is the segment it qualifies every endpoint key with — where an id
-        # is a second value it would have to be told and could hold a stale copy
-        # of. Exactly one of the two is required, and this is the one that costs
-        # nothing.
         # **No `datasource_slug`.** This gateway holds none: it fronts several
         # data sources and composes a key with no slug in it, so naming one here
         # would mean asserting a value it does not have. The schema requires

@@ -24,11 +24,11 @@
       "minLength": 1,
       "maxLength": 64,
       "pattern": "^[A-Za-z0-9_-]+$",
-      "description": "The data source this denial is against, named by the slug it was registered under. **Exactly one of `datasource_slug` and `datasource_id` is required** — a body naming neither is refused, while one naming a data source that does not resolve is recorded with the claim and no link. An enforcement point already holds the slug, since it is the segment it qualifies every endpoint key with, where a row id is a second value it has to be told and can hold a stale copy of."
+      "description": "The data source this denial is against, named by the slug it was registered under. **Never both `datasource_slug` and `datasource_id`** — a body naming both is refused, while a body naming neither is valid and one naming a data source that does not resolve is recorded with the claim and no link. Where an enforcement point holds a slug at all, this is the cheaper of the two to send: a row id is a second value it has to be told and can hold a stale copy of."
     },
     "datasource_id": {
       "$ref": "#/$defs/uuid",
-      "description": "The data source by row id, the alternative to `datasource_slug`. Exactly one of the two."
+      "description": "The data source by row id, the alternative to `datasource_slug`. Never both, and a report naming neither is valid."
     },
     "endpoint_key": {
       "type": [
