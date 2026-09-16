@@ -45,7 +45,7 @@ from gateway.key_safety import MAX_LOGGED_LENGTH
 from gateway.server import _Enforcement
 
 SLUG = "delivery"
-KEY = f"{SLUG}.track_package"
+KEY = "/mcp#tools/call#track_package"
 RAIL_CENTER_URL = "http://rail-center.test"
 
 DENY_ID = "5c8f1e42-0000-4000-8000-0000000000d1"
@@ -249,7 +249,6 @@ def layer(
         _Enforcement(
             downstream,
             _Holder(held),
-            SLUG,
             rail_center_url=RAIL_CENTER_URL,
             auth={"Authorization": "Bearer t"},
             transport=recorder.transport,
@@ -557,7 +556,7 @@ async def test_an_allowed_call_reports_nothing():
 
 
 @pytest.mark.asyncio
-async def test_the_report_names_the_endpoint_the_slug_and_the_policy():
+async def test_the_report_names_the_endpoint_and_the_policy_and_no_data_source():
     enforcement, _, reports = layer(bundle(DENIES_EVERYTHING))
 
     await drive(enforcement, call())
@@ -568,7 +567,12 @@ async def test_the_report_names_the_endpoint_the_slug_and_the_policy():
     assert body["endpoint_key"] == KEY
     # Verbatim. Rail Center resolves the data source by this string, so a
     # gateway that folds its case names one nothing is registered under.
-    assert body["datasource_slug"] == SLUG
+    # **No data source is named, and that is the report's shape now.** This
+    # gateway fronts several and composes a key with no slug in it, so naming
+    # one would assert a value it does not hold; the receiver resolves the data
+    # source from the reporting gateway and the key.
+    assert "datasource_slug" not in body
+    assert "datasource_id" not in body
     assert body["metadata"]["endpoint_resolution"] == "resolved"
 
 
@@ -978,9 +982,15 @@ NOTES_ANY_TICKET = policy(
     SKILL_ID, {"field": "agent_id", "operator": "present"}, action="alert"
 )
 
-#: `delivery.track_package`, gated to the one policy above. A binding *entry* is
-#: what the fallback looks for; which policies it names is the chain's business.
-BOUND = {"endpoint_key": KEY, "mode": "gated", "policy_ids": [SKILL_ID]}
+#: `delivery#/mcp#tools/call#track_package`, gated to the one policy above. A
+#: binding *entry* is what the fallback looks for; which policies it names is the
+#: chain's business. A binding as the bundle carries it — the **full** key, with
+#: the data source slug Rail Center composed it from. The gateway strips that
+#: first segment and matches the rest against what it composed from the request,
+#: so a fixture carrying the comparable form would pass while testing nothing
+#: about the strip.
+FULL_KEY = f"{SLUG}#{KEY}"
+BOUND = {"endpoint_key": FULL_KEY, "mode": "gated", "policy_ids": [SKILL_ID]}
 
 
 @pytest.mark.asyncio
@@ -1282,10 +1292,10 @@ async def test_a_disconnect_is_not_the_end_of_a_body():
 # F-027 — a body that never finished arriving is not a call
 # --------------------------------------------------------------------------
 
-#: `delivery.track_package` exempt from every rule in the chain — mode `open`
+#: `/mcp#tools/call#track_package` exempt from every rule in the chain — `open`
 #: narrows to nothing. It is what makes the two halves below differ: the same
 #: agent, the same bytes, and a verdict that turns on whether the body finished.
-EXEMPT = [{"endpoint_key": KEY, "mode": "open", "policy_ids": []}]
+EXEMPT = [{"endpoint_key": FULL_KEY, "mode": "open", "policy_ids": []}]
 
 
 @pytest.mark.asyncio

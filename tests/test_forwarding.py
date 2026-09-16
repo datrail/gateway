@@ -9,6 +9,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 
 from gateway.server import build_app
+from tests.conftest import one_route
 
 
 @pytest.mark.asyncio
@@ -22,14 +23,16 @@ async def test_a_call_reaches_the_upstream_and_its_answer_comes_back(gateway_url
 
 @pytest.mark.asyncio
 async def test_tool_names_are_not_rewritten(gateway_url):
-    """An endpoint key is `<datasource_slug>.<tool_name>`, and the agents were
-    prompted with the upstream's names.
+    """An endpoint key ends in the tool's own name, and the agents were prompted
+    with the upstream's names.
 
     `FastMCP.mount` prefixes an upstream's tools when it is given a namespace,
-    which is right for a proxy fronting several servers and wrong here. Serving
-    the proxy directly is the shape that cannot acquire a prefix later; a
-    renamed tool matches no endpoint the control plane registered, and shows up
-    as a policy that silently never applies rather than as an error.
+    which rewrites the one field the key is composed from. Several upstreams are
+    told apart by the prefix a request arrived under instead, which leaves the
+    message untouched; serving each proxy directly is the shape that cannot
+    acquire a namespace later. A renamed tool matches no endpoint the control
+    plane registered, and shows up as a policy that silently never applies
+    rather than as an error.
     """
     async with Client(StreamableHttpTransport(url=f"{gateway_url}/mcp")) as client:
         names = sorted(tool.name for tool in await client.list_tools())
@@ -166,6 +169,7 @@ async def test_an_upstream_failure_does_not_hand_the_caller_its_credential():
         RAIL_CENTER,
         _free_port,
         holder_serving,
+        one_route,
         serve,
         unreachable,
     )
@@ -182,10 +186,9 @@ async def test_an_upstream_failure_does_not_hand_the_caller_its_credential():
         serve(refusing, upstream_port),
         serve(
             build_app(
-                secret_url,
+                [one_route(secret_url)],
                 holder_serving(unreachable),
                 plugin=True,
-                slug="delivery",
                 rail_center=RAIL_CENTER,
             ),
             gateway_port,
@@ -233,13 +236,12 @@ async def test_the_upstream_credential_still_travels(upstream, seen_headers):
     async with (
         serve(
             build_app(
-                credentialed,
+                [one_route(credentialed)],
                 # Holds no bundle, so no posture has been stated and the call
                 # is forwarded unjudged — which is the request this test needs
                 # to arrive at the upstream.
                 holder_serving(unreachable),
                 plugin=True,
-                slug="delivery",
                 rail_center=RAIL_CENTER,
             ),
             port,

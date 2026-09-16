@@ -16,13 +16,13 @@ from gateway.mode import (
     describe_plugin,
     plugin_enabled,
 )
+from gateway.routes import Route, RoutesError
 from gateway.server import (
     DEFAULT_PORT,
     _Enforcement,
     _holder_from_environment,
     build_app,
     build_gateway,
-    datasource_slug,
     gateway_slug,
     port,
 )
@@ -43,25 +43,21 @@ def enrolled(monkeypatch):
     monkeypatch.setenv("RAIL_GATEWAY_SLUG", "edge")
 
 
-def test_a_missing_upstream_url_refuses_to_start(monkeypatch):
-    """A gateway pointed at nothing forwards nothing while reporting healthy."""
-    monkeypatch.delenv("RAIL_GATEWAY_UPSTREAM_URL", raising=False)
-
-    with pytest.raises(RuntimeError, match="RAIL_GATEWAY_UPSTREAM_URL is required"):
-        build_gateway()
-
-
-def test_an_empty_upstream_url_is_the_same_as_a_missing_one(monkeypatch):
-    """A variable set to whitespace is an operator who meant to set it."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "   ")
-
-    with pytest.raises(RuntimeError, match="RAIL_GATEWAY_UPSTREAM_URL is required"):
-        build_gateway()
+#: A well-formed upstream, for the tests whose subject is some other variable.
+UPSTREAM = "http://upstream.invalid/mcp"
 
 
 def test_port_defaults(monkeypatch):
+    """8080, with the literal asserted beside the constant.
+
+    `EXPOSE 8080` in the Dockerfile, `-p 8080:8080` in the README and the e2e
+    health checks all name it, so the default is a contract with the image
+    rather than an internal choice. `port() == DEFAULT_PORT` alone moves with the
+    constant and pins nothing: it holds just as well at 9091, with every one of
+    those four out of step.
+    """
     monkeypatch.delenv("RAIL_GATEWAY_PORT", raising=False)
-    assert port() == DEFAULT_PORT
+    assert port() == DEFAULT_PORT == 8080
 
 
 @pytest.mark.parametrize("raw", ["nope", "8080.5"])
@@ -92,21 +88,28 @@ def test_a_port_outside_the_range_is_refused(monkeypatch, raw):
 @pytest.mark.parametrize("url", ["http://", "http://user:pw@", "https://"])
 def test_an_upstream_url_with_no_host_refuses_to_start(url):
     """Both parse, and a gateway built on either starts and answers /health
-    while able to forward nothing — the condition the required-variable check
-    exists to prevent, reached by a different door."""
+    while able to forward nothing — the condition this check exists to prevent,
+    and it is per route now that a gateway fronts several."""
     with pytest.raises(RuntimeError, match="names no host"):
-        build_gateway(url)
+        build_gateway(Route(name="delivery", url=url, prefix="/"))
+
+
+def test_a_refused_upstream_url_names_the_route_that_carries_it():
+    """One gateway fronts several upstreams, so a message naming the variable
+    would name nothing an operator could go and fix. The route's own label is
+    what they wrote in the file."""
+    with pytest.raises(RuntimeError, match="finretail"):
+        build_gateway(Route(name="finretail", url="http://", prefix="/fr"))
 
 
 def test_a_missing_rail_center_url_refuses_to_start(monkeypatch):
     """The same rule as the upstream, and the failure it prevents is worse: a
     gateway that cannot resolve where its control plane is fetches no bundle
     ever, and reports that in the log as a control plane which is down."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.delenv("RAIL_CENTER_URL", raising=False)
 
     with pytest.raises(RuntimeError, match="RAIL_CENTER_URL is required"):
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
 @pytest.mark.parametrize("raw", [None, "", "   "])
@@ -120,7 +123,6 @@ def test_a_missing_gateway_slug_refuses_to_start(monkeypatch, raw):
     fallback against its own traffic. Whitespace counts as missing for the reason
     every other required variable does: it is an operator who meant to set it.
     """
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://rail-center.test")
     if raw is None:
         monkeypatch.delenv("RAIL_GATEWAY_SLUG", raising=False)
@@ -130,29 +132,15 @@ def test_a_missing_gateway_slug_refuses_to_start(monkeypatch, raw):
     with pytest.raises(RuntimeError, match="RAIL_GATEWAY_SLUG is required"):
         gateway_slug()
     with pytest.raises(RuntimeError, match="RAIL_GATEWAY_SLUG is required"):
-        build_gateway()
-
-
-def test_the_gateway_slug_is_not_the_data_source_slug(monkeypatch):
-    """Two variables, and a gateway that read one for the other fetches wrongly.
-
-    A gateway fronts several data sources and a data source may sit behind
-    several gateways, so neither value can stand in for the other.
-    """
-    monkeypatch.setenv("RAIL_GATEWAY_SLUG", "edge-1")
-    monkeypatch.setenv("RAIL_DATASOURCE_SLUG", "delivery")
-
-    assert gateway_slug() == "edge-1"
-    assert datasource_slug() == "delivery"
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
 @pytest.mark.parametrize("url", ["http://", "http://user:pw@", "https://"])
 def test_a_rail_center_url_with_no_host_refuses_to_start(monkeypatch, url):
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", url)
 
     with pytest.raises(RuntimeError, match="RAIL_CENTER_URL names no host"):
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
 def test_a_rail_center_url_with_no_scheme_keeps_its_credential_out_of_the_error(
@@ -163,13 +151,12 @@ def test_a_rail_center_url_with_no_scheme_keeps_its_credential_out_of_the_error(
     with the rest as path, so there is no host and no netloc either — and a
     redaction that rebuilds from the netloc has nothing to strip and hands back
     the password whole, into the stderr of a failed start."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv(
         "RAIL_CENTER_URL", "svcuser:s3cret-rc-password@rail-center.test/"
     )
 
     with pytest.raises(RuntimeError) as raised:
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
     message = str(raised.value)
     assert "RAIL_CENTER_URL names no host" in message
@@ -184,21 +171,20 @@ def test_an_unparseable_upstream_url_names_the_upstream():
     it was given, so what an operator is told is which of the two they mistyped
     — and that is the whole reason the message is not a constant."""
     with pytest.raises(
-        RuntimeError, match="RAIL_GATEWAY_UPSTREAM_URL is not a URL that can be parsed"
+        RuntimeError, match="upstream 'delivery' is not a URL that can be parsed"
     ):
-        build_gateway("http://[::1")
+        build_gateway(Route(name="delivery", url="http://[::1", prefix="/"))
 
 
 def test_an_unparseable_rail_center_url_names_the_control_plane(monkeypatch):
     """The other half of the same helper. Named separately because a message
     hardcoded to either variable passes the case for that one."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://[::1")
 
     with pytest.raises(
         RuntimeError, match="RAIL_CENTER_URL is not a URL that can be parsed"
     ):
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
 def test_an_unparseable_url_carrying_no_credential_keeps_its_diagnostic(monkeypatch):
@@ -206,11 +192,10 @@ def test_an_unparseable_url_carrying_no_credential_keeps_its_diagnostic(monkeypa
     no userinfo to remove, `str.replace("", "***")` would put the marker between
     every character of the message — `***I***n***v***a***l***i***d***…` — and
     the operator loses the half of it that says what they mistyped."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://[::1")
 
     with pytest.raises(RuntimeError) as raised:
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
     message = str(raised.value)
     assert message.endswith(": Invalid IPv6 URL")
@@ -236,14 +221,13 @@ def test_an_unparseable_rail_center_url_keeps_its_credential_out_of_the_error(
     with it. That message is what a failed start writes to stderr, and stderr
     is what the container's log collector and every CI job running the image
     keep — so the control plane's password cannot be in it."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv(
         "RAIL_CENTER_URL",
         f"{prefix}svcuser:s3cret-rc-password@rail\u2100center.test/",
     )
 
     with pytest.raises(RuntimeError) as raised:
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
     message = str(raised.value)
     assert "RAIL_CENTER_URL is not a URL that can be parsed" in message
@@ -259,14 +243,13 @@ def test_a_query_or_fragment_does_not_let_the_credential_through(monkeypatch, ta
     credential, finds no such text in the message, and hands the password back
     whole. Asserted on the outcome and not on the scan: what must hold is that
     nothing quotable reaches stderr, whichever way the authority is found."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv(
         "RAIL_CENTER_URL",
         f"http://svcuser:s3cret-rc-password@rail\u2100center.test{tail}",
     )
 
     with pytest.raises(RuntimeError) as raised:
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
     message = str(raised.value)
     assert "RAIL_CENTER_URL is not a URL that can be parsed" in message
@@ -274,27 +257,27 @@ def test_a_query_or_fragment_does_not_let_the_credential_through(monkeypatch, ta
     assert "svcuser" not in message
 
 
-def test_the_upstream_is_checked_before_the_control_plane(monkeypatch):
-    """An operator who has set neither should be told about the one they would
-    fix first, not handed whichever check happens to run first."""
-    monkeypatch.delenv("RAIL_GATEWAY_UPSTREAM_URL", raising=False)
+def test_the_routes_file_is_read_before_the_control_plane(monkeypatch, tmp_path):
+    """An operator who has configured neither should be told about the one they
+    would fix first. A gateway with no upstreams forwards nothing whatever its
+    control plane says, so that is the first refusal."""
+    monkeypatch.setenv("RAIL_GATEWAY_ROUTES_FILE", str(tmp_path / "absent.yaml"))
     monkeypatch.delenv("RAIL_CENTER_URL", raising=False)
 
-    with pytest.raises(RuntimeError, match="RAIL_GATEWAY_UPSTREAM_URL is required"):
-        build_gateway()
+    with pytest.raises(RoutesError, match="cannot read"):
+        build_app()
 
 
 def test_a_credential_that_cannot_be_sent_is_refused_at_startup(monkeypatch):
     """Resolved while `build_gateway` runs, not at the first fetch. Deferred, a
     mistyped secret would surface as a bundle that never arrives, long after
     the deploy that caused it and with nothing naming the cause."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://rail-center.invalid")
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     monkeypatch.setenv("RAIL_AUTH_TOKEN", "line-one\nline-two")
 
     with pytest.raises(AuthConfigurationError, match="RAIL_AUTH_TOKEN holds U\\+000A"):
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
 def test_an_unreadable_refresh_interval_is_refused_at_startup(monkeypatch):
@@ -307,14 +290,13 @@ def test_an_unreadable_refresh_interval_is_refused_at_startup(monkeypatch):
     correct code with a message about a credential. `.env.example` documents
     both, so a contributor's shell is exactly where they turn up.
     """
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://rail-center.invalid")
     monkeypatch.delenv("RAIL_AUTH_MODE", raising=False)
     monkeypatch.delenv("RAIL_AUTH_TOKEN", raising=False)
     monkeypatch.setenv("RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS", "often")
 
     with pytest.raises(RuntimeError, match="must be an integer"):
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
 @pytest.mark.asyncio
@@ -353,13 +335,12 @@ def test_two_rail_center_credentials_are_refused_at_startup(monkeypatch):
     has one of them silently discarded — and which one is httpx's choice rather
     than theirs. The same rule `auth.py` states for a credential that cannot be
     produced: stop, rather than call with something else."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://user:s3cret@rail-center.invalid")
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     monkeypatch.setenv("RAIL_AUTH_TOKEN", "configured-token")
 
     with pytest.raises(RuntimeError, match="only one of them can be sent"):
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
 # --- RAIL_PLUGIN_ENABLED: is RailXia installed here ------------------------
@@ -568,7 +549,6 @@ def test_an_enabled_plugin_beside_rail_center_configuration_is_the_normal_case(
 
 def _unenrolled(monkeypatch):
     """An environment describing a gateway nobody gave RailXia."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     for name in (
         "RAIL_PLUGIN_ENABLED",
         "RAIL_TICKET_MODE",
@@ -588,7 +568,7 @@ def test_build_gateway_takes_the_flag_from_the_environment(monkeypatch, caplog):
     _unenrolled(monkeypatch)
 
     with caplog.at_level(logging.INFO, logger="gateway"):
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
     assert "RAIL_PLUGIN_ENABLED=false" in "\n".join(
         record.getMessage() for record in caplog.records
@@ -607,7 +587,7 @@ def test_build_gateway_refuses_a_leftover_ticket_mode_from_the_environment(
     monkeypatch.setenv("RAIL_TICKET_MODE", "enforce")
 
     with pytest.raises(PluginConfigError, match="RAIL_TICKET_MODE is no longer read"):
-        build_gateway()
+        build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
 def test_build_app_takes_the_flag_from_the_environment(monkeypatch):
@@ -618,7 +598,7 @@ def test_build_app_takes_the_flag_from_the_environment(monkeypatch):
     """
     _unenrolled(monkeypatch)
 
-    app = build_app()
+    app = build_app([Route(name="delivery", url=UPSTREAM, prefix="/")])
 
     assert not isinstance(app, _Enforcement)
 

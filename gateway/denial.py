@@ -170,7 +170,6 @@ def _reads_as_number(value: Any) -> bool:
 def build_report(
     *,
     policy_id: str,
-    datasource_slug: str,
     endpoint_key: str | None,
     endpoint_status: str,
     ticket_state: str,
@@ -211,12 +210,11 @@ def build_report(
 
     report: dict[str, Any] = {
         "policy_id": policy_id,
-        # The slug rather than the row id: this gateway already holds the slug —
-        # it is the segment it qualifies every endpoint key with — where an id
-        # is a second value it would have to be told and could hold a stale copy
-        # of. Exactly one of the two is required, and this is the one that costs
-        # nothing.
-        "datasource_slug": datasource_slug,
+        # **No `datasource_slug`.** This gateway holds none: it fronts several
+        # data sources and composes a key with no slug in it, so naming one here
+        # would mean asserting a value it does not have. The schema requires
+        # neither identifier, and Rail Center resolves the data source from the
+        # reporting gateway and the key it carries.
         "endpoint_key": endpoint_key,
         "denied_at": _utc_now(),
         "metadata": metadata,

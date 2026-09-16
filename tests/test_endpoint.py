@@ -22,11 +22,15 @@ from gateway.endpoint import (
     MAX_BODY_NESTING_DEPTH,
     resolve_endpoint_key,
     resolve_from_body,
+    strip_slug,
 )
 from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH
 from gateway.ticket import MAX_NESTING_DEPTH as TICKET_NESTING_DEPTH
 
-SLUG = "delivery"
+#: The path the upstream serves, as the gateway sees it once the route prefix
+#: is removed. It is what the first segment of a composed key is, and it is not
+#: a data source slug — this gateway composes none.
+MOUNT = "/mcp"
 
 
 def nested_call(depth: int) -> bytes:
@@ -47,24 +51,30 @@ def nested_call(depth: int) -> bytes:
 
 def resolve(method: object = "tools/call", tool_name: object = "track_package"):
     """The resolution as a pair, so a case reads as key-and-status."""
-    resolution = resolve_endpoint_key(method, tool_name, SLUG)
+    resolution = resolve_endpoint_key(method, tool_name, MOUNT)
     return resolution.key, resolution.status
 
 
 # --- a call that names a usable tool --------------------------------------
 
 
-def test_the_key_is_the_slug_and_the_tool_name_verbatim():
-    """Both halves unnormalised. Bindings are indexed on the raw key and the
+def test_every_part_of_the_key_is_used_verbatim():
+    """Unnormalised throughout. Bindings are indexed on the raw key and the
     contract refuses case folding and Unicode normalisation, so a key matches
     what the operator registered character for character or not at all."""
-    assert resolve(tool_name="Track_Package") == ("delivery.Track_Package", "resolved")
+    assert resolve(tool_name="Track_Package") == (
+        f"{MOUNT}#tools/call#Track_Package",
+        "resolved",
+    )
 
 
 def test_dots_inside_a_tool_name_stay_ordinary_characters():
     """An endpoint key is an opaque string to the control plane. Inventing
     structure the other side does not parse would be a private dialect."""
-    assert resolve(tool_name="orders.v2") == ("delivery.orders.v2", "resolved")
+    assert resolve(tool_name="orders.v2") == (
+        f"{MOUNT}#tools/call#orders.v2",
+        "resolved",
+    )
 
 
 # --- a message that names no tool by design -------------------------------
@@ -152,9 +162,11 @@ def test_a_key_past_the_control_plane_cap_is_unrecognised():
     unbounded tool name would otherwise ride into every line the decision
     writes. Asserted from both sides of the bound, so a guard that is merely
     off by one is not mistaken for one that is there."""
-    fits = "t" * (MAX_ENDPOINT_KEY_LENGTH - len(SLUG) - 1)
-    assert len(f"{SLUG}.{fits}") == MAX_ENDPOINT_KEY_LENGTH
-    assert resolve(tool_name=fits) == (f"{SLUG}.{fits}", "resolved")
+    # The key is three parts and two separators, so what a tool name may hold
+    # is the cap less the path, the method and both separators.
+    fits = "t" * (MAX_ENDPOINT_KEY_LENGTH - len(MOUNT) - len("tools/call") - 2)
+    assert len(f"{MOUNT}#tools/call#{fits}") == MAX_ENDPOINT_KEY_LENGTH
+    assert resolve(tool_name=fits) == (f"{MOUNT}#tools/call#{fits}", "resolved")
 
     assert resolve(tool_name=fits + "t") == (None, "unrecognised")
 
@@ -174,10 +186,10 @@ def test_a_body_at_the_nesting_bound_still_resolves():
     one is not mistaken for one that is there. Past it the body is
     `unrecognised` — never `keyless`, because a body that could not be read is
     drift or garbage and has to face the whole chain."""
-    at = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH), SLUG)
-    assert (at.key, at.status) == ("delivery.track_package", "resolved")
+    at = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH), MOUNT)
+    assert (at.key, at.status) == (f"{MOUNT}#tools/call#track_package", "resolved")
 
-    past = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH + 1), SLUG)
+    past = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH + 1), MOUNT)
     assert (past.key, past.status) == (None, "unrecognised")
 
 
@@ -191,7 +203,7 @@ def test_the_body_bound_is_not_the_ticket_headers():
     assert MAX_BODY_NESTING_DEPTH > TICKET_NESTING_DEPTH
 
     deeper_than_a_ticket = resolve_from_body(
-        nested_call(TICKET_NESTING_DEPTH + 1), SLUG
+        nested_call(TICKET_NESTING_DEPTH + 1), MOUNT
     )
     assert deeper_than_a_ticket.status == "resolved"
 
@@ -207,7 +219,7 @@ def test_a_body_deep_enough_to_exhaust_the_stack_answers_rather_than_raising(dep
     The depths cover both declared interpreters: 1000 raises on 3.10 and 10000
     on 3.12, from a shallow stack, and the 3.10 threshold falls further the
     deeper the caller's own stack — an ASGI handler's is deep."""
-    resolution = resolve_from_body(nested_call(depth), SLUG)
+    resolution = resolve_from_body(nested_call(depth), MOUNT)
     assert (resolution.key, resolution.status) == (None, "unrecognised")
 
 
@@ -220,12 +232,60 @@ def test_brackets_inside_a_string_are_characters_rather_than_nesting():
         '"arguments": {"q": "%s"}}}' % ("[" * (MAX_BODY_NESTING_DEPTH * 20))
     ).encode()
 
-    resolution = resolve_from_body(body, SLUG)
-    assert (resolution.key, resolution.status) == ("delivery.track_package", "resolved")
+    resolution = resolve_from_body(body, MOUNT)
+    assert (resolution.key, resolution.status) == (
+        f"{MOUNT}#tools/call#track_package",
+        "resolved",
+    )
 
 
 def test_a_body_that_is_not_json_at_all_still_answers():
     """The bound is a new way in to a function whose whole contract is that it
     answers, so the paths that were already there are held alongside it."""
     for body in (b"", b"\xff\xfe{", b"not json", b"[]", b"null"):
-        assert resolve_from_body(body, SLUG).status == "unrecognised", body
+        assert resolve_from_body(body, MOUNT).status == "unrecognised", body
+
+
+# --- the two strips, and that they are the same one ------------------------
+#
+# A binding's key and a ticket's skill are both minted by Rail Center as
+# `<slug>#<path>#<method>#<call>`, and this gateway composes neither slug. Both
+# are therefore reduced the same way before they are compared, and the tests
+# below are what stop one of the two being changed on its own.
+
+
+def test_a_full_key_reduces_to_what_this_gateway_composes():
+    """The whole point of the strip, from both ends at once."""
+    composed = resolve_endpoint_key("tools/call", "track_package", MOUNT)
+
+    assert strip_slug(f"delivery#{composed.key}") == composed.key
+    assert strip_slug(f"finretail#{composed.key}") == composed.key
+
+
+def test_the_slug_is_taken_off_once_and_from_the_left():
+    """A tool name may carry the separator; a slug may not.
+
+    Rail Center's slug pattern excludes it, which is what makes the first one
+    the boundary — and a tool name is close to free text, which is why nothing
+    splits further. `rpartition`, or a split with no bound, mangles exactly the
+    keys whose tool names carry one.
+    """
+    assert strip_slug("delivery#/mcp#tools/call#a#b") == "/mcp#tools/call#a#b"
+
+
+def test_a_key_carrying_no_slug_is_reduced_anyway_and_matches_nothing():
+    """The shape this reduction cannot tell apart, recorded rather than guarded.
+
+    A producer sending an already-comparable key has its first segment taken for
+    a slug, and what is left matches no endpoint. That is a producer this
+    gateway cannot read keys from, and a binding matching nothing is the safer
+    reading of it than a binding matching everything — but the reduction is not
+    clever about it, and a reader should not expect it to be.
+    """
+    assert strip_slug("/mcp#tools/call#track_package") == "tools/call#track_package"
+
+
+def test_a_key_with_no_separator_at_all_survives_whole():
+    """Nothing to split, so nothing is taken: the same reasoning, at the other
+    end of the same rule."""
+    assert strip_slug("delivery.track_package") == "delivery.track_package"

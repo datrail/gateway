@@ -368,7 +368,7 @@ def test_the_denial_schema_describes_what_this_gateway_actually_sends() -> None:
     validator = Draft202012Validator(_schema("denial-event.schema.json"))
     for endpoint_key, status, claims in [
         (
-            "delivery.track_package",
+            "/mcp#tools/call#track_package",
             "resolved",
             {"agent_id": AGENT, "posture_score": 12},
         ),
@@ -378,7 +378,6 @@ def test_the_denial_schema_describes_what_this_gateway_actually_sends() -> None:
         validator.validate(
             build_report(
                 policy_id=POLICY,
-                datasource_slug="delivery",
                 endpoint_key=endpoint_key,
                 endpoint_status=status,
                 ticket_state="valid",
@@ -397,8 +396,7 @@ def test_the_denial_schema_refuses_a_report_naming_no_policy() -> None:
     validator = Draft202012Validator(_schema("denial-event.schema.json"))
     body = build_report(
         policy_id=POLICY,
-        datasource_slug="delivery",
-        endpoint_key="delivery.track_package",
+        endpoint_key="/mcp#tools/call#track_package",
         endpoint_status="resolved",
         ticket_state="valid",
     )
@@ -416,8 +414,7 @@ def test_the_denial_schema_refuses_a_status_this_gateway_cannot_report() -> None
     validator = Draft202012Validator(_schema("denial-event.schema.json"))
     body = build_report(
         policy_id=POLICY,
-        datasource_slug="delivery",
-        endpoint_key="delivery.track_package",
+        endpoint_key="/mcp#tools/call#track_package",
         endpoint_status="resolved",
         ticket_state="valid",
     )
@@ -430,15 +427,14 @@ def _denial(**claims: Any) -> dict[str, Any]:
     """One report this gateway would actually send, to mutate field by field."""
     return build_report(
         policy_id=POLICY,
-        datasource_slug="delivery",
-        endpoint_key="delivery.track_package",
+        endpoint_key="/mcp#tools/call#track_package",
         endpoint_status="resolved",
         ticket_state="valid",
         **claims,
     )
 
 
-def test_the_denial_schema_requires_exactly_one_data_source() -> None:
+def test_the_denial_schema_refuses_two_data_sources_and_admits_none() -> None:
     """Naming neither data source, or both, is refused.
 
     This is the rule the comparison against the receiver existed to find, and
@@ -448,13 +444,20 @@ def test_the_denial_schema_requires_exactly_one_data_source() -> None:
     422s — and on this route a 422 is a denial not recorded at all.
     """
     validator = Draft202012Validator(_schema("denial-event.schema.json"))
-    by_slug = _denial()
+    neither = _denial()
+    # **What this gateway sends.** It fronts several data sources and composes a
+    # key with no slug in it, so naming one would assert a value it does not
+    # hold; the receiver resolves the data source from the reporting gateway and
+    # the key. A schema refusing this publishes a body the route 422s, and on
+    # this route a 422 is a denial not recorded at all.
+    assert validator.is_valid(neither)
+    # Either identifier alone stays conformant — other reporters have one.
+    by_slug = {**neither, "datasource_slug": "delivery"}
     assert validator.is_valid(by_slug)
-    assert not validator.is_valid({**by_slug, "datasource_id": DATASOURCE})
-    neither = {k: v for k, v in by_slug.items() if k != "datasource_slug"}
-    assert not validator.is_valid(neither)
-    # The other half of "exactly one": by row id alone is a conformant report.
     assert validator.is_valid({**neither, "datasource_id": DATASOURCE})
+    # Both is still refused: two names for one thing, and nothing says which
+    # wins when they disagree.
+    assert not validator.is_valid({**by_slug, "datasource_id": DATASOURCE})
 
 
 def test_the_denial_schema_refuses_a_uuid_spelling_the_receiver_refuses() -> None:

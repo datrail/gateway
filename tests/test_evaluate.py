@@ -29,9 +29,9 @@ from fastmcp.client.transports import StreamableHttpTransport
 from gateway.server import build_app
 from tests.conftest import (
     RAIL_CENTER,
-    SLUG,
     _free_port,
     holder_serving,
+    one_route,
     serve,
     unreachable,
 )
@@ -60,7 +60,7 @@ BUNDLE = {
             "condition": {
                 "field": "endpoint_key",
                 "operator": "matches",
-                "value": f"{SLUG}.*",
+                "value": "/mcp#tools/call#*",
             },
             "action": "alert",
             "enabled": True,
@@ -110,7 +110,7 @@ def evaluating(upstream):
     async def start(bundle=BUNDLE):
         port = _free_port()
         app = build_app(
-            upstream, serving(bundle), plugin=True, slug=SLUG, rail_center=RAIL_CENTER
+            [one_route(upstream)], serving(bundle), plugin=True, rail_center=RAIL_CENTER
         )
         async with serve(app, port):
             yield f"http://127.0.0.1:{port}"
@@ -162,14 +162,14 @@ async def test_an_alert_is_written_and_denies_nothing(evaluating, caplog):
 
 
 @pytest.mark.asyncio
-async def test_the_endpoint_key_is_the_slug_and_the_tool_name(evaluating, caplog):
-    """`<slug>.<tool_name>`, composed here because nothing else can: MCP puts
+async def test_the_endpoint_key_is_the_path_the_method_and_the_call(evaluating, caplog):
+    """`<path>#<method>#<call>`, composed here because nothing else can: MCP puts
     the call's identity in the message rather than the URL."""
     with caplog.at_level(logging.INFO, logger="gateway"):
         async with evaluating() as url:
             await call(url, {"x-rail": ticket(posture_score=95)})
 
-    assert f"{SLUG}.track_package" in "\n".join(caplog.messages)
+    assert "/mcp#tools/call#track_package" in "\n".join(caplog.messages)
 
 
 # --- the ticket reaches the walk as the contract requires ------------------
@@ -301,7 +301,7 @@ async def test_a_plain_gateway_evaluates_nothing_and_is_ready_without_a_bundle(
         # Built inside the capture: the mode's startup line is written by
         # `build_gateway`, so building it first would emit the one line this
         # case is about before anything was listening.
-        app = build_app(upstream, plugin=False, slug=SLUG, rail_center=RAIL_CENTER)
+        app = build_app([one_route(upstream)], plugin=False, rail_center=RAIL_CENTER)
         async with serve(app, port):
             url = f"http://127.0.0.1:{port}"
             async with httpx.AsyncClient() as client:
@@ -381,7 +381,7 @@ async def test_moving_the_posture_takes_effect_on_the_next_poll(upstream, caplog
         lambda: httpx.Response(200, json=bundle_at(posture["mode"]))
     )
     port = _free_port()
-    app = build_app(upstream, holder, plugin=True, slug=SLUG, rail_center=RAIL_CENTER)
+    app = build_app([one_route(upstream)], holder, plugin=True, rail_center=RAIL_CENTER)
 
     async with serve(app, port):
         url = f"http://127.0.0.1:{port}"
@@ -418,23 +418,21 @@ async def test_the_three_pass_traffic_states_are_not_each_other(upstream):
                 return (await client.get(f"http://127.0.0.1:{port}/ready")).status_code
 
         no_data_path = await readiness(
-            build_app(upstream, plugin=False, slug=SLUG, rail_center=RAIL_CENTER)
+            build_app([one_route(upstream)], plugin=False, rail_center=RAIL_CENTER)
         )
         holding_none = await readiness(
             build_app(
-                upstream,
+                [one_route(upstream)],
                 holder_serving(unreachable),
                 plugin=True,
-                slug=SLUG,
                 rail_center=RAIL_CENTER,
             )
         )
         told_none = await readiness(
             build_app(
-                upstream,
+                [one_route(upstream)],
                 serving(bundle_at("none")),
                 plugin=True,
-                slug=SLUG,
                 rail_center=RAIL_CENTER,
             )
         )
@@ -469,7 +467,7 @@ async def test_a_posture_change_under_an_unchanged_version_never_arrives(
         )
     )
     port = _free_port()
-    app = build_app(upstream, holder, plugin=True, slug=SLUG, rail_center=RAIL_CENTER)
+    app = build_app([one_route(upstream)], holder, plugin=True, rail_center=RAIL_CENTER)
 
     async with serve(app, port):
         url = f"http://127.0.0.1:{port}"

@@ -175,8 +175,8 @@ jobs:
             -e RAIL_PLUGIN_ENABLED=true \
             -e RAIL_CENTER_URL=http://rail-center.invalid \
             -e RAIL_GATEWAY_SLUG=edge \
-            -e RAIL_DATASOURCE_SLUG=delivery \
-            -e RAIL_GATEWAY_UPSTREAM_URL=http://upstream.invalid/mcp gateway:ci
+            -e RAIL_GATEWAY_ROUTES_FILE=/etc/rail/routes.yaml \
+            -v "$PWD/e2e/routes.yaml:/etc/rail/routes.yaml:ro" gateway:ci
 
           # Forty rather than twenty, for a wait that should be under six: the
           # lifespan awaits its first bundle fetch before uvicorn serves

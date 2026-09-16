@@ -30,6 +30,7 @@ from types import MappingProxyType
 from typing import Any, Final, Literal
 
 from gateway.bundle.uuid import canonical_uuid
+from gateway.endpoint import strip_slug
 from gateway.json_wire import MAX_SAFE_INTEGER
 from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_characters
 from gateway.key_safety import safe_for_log as _safe
@@ -307,6 +308,8 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
     presents no ticket — without anyone having written ``open``.
     """
     out: dict[str, Binding] = {}
+    #: The full key each stripped one came from, so a collision can name both.
+    first_seen: dict[str, str] = {}
 
     for entry in bindings:
         if not isinstance(entry, dict):
@@ -319,8 +322,47 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
             raise UnusableBundle(
                 f"a binding whose endpoint_key is not a string ({_q(key)})"
             )
-        if key in out:
-            raise UnusableBundle(f"two bindings for endpoint {_q(key)}")
+        comparable = strip_slug(key)
+        if not comparable:
+            # **Logged and skipped, where a collision refuses the whole bundle**,
+            # and the difference is what each one costs to act on. A key this
+            # gateway cannot reduce to anything narrows one endpoint and says
+            # nothing about the others; refusing the bundle over it would take
+            # every other binding down with it, and the endpoint it names goes
+            # to the whole chain — which is the strict reading, not the lax one.
+            # A collision is not like that: it is two bindings an operator has
+            # to choose between, and serving either would be this gateway
+            # choosing for them.
+            logger.warning(
+                "policy bundle carries a binding this gateway cannot read as a "
+                "key (%s); it narrows nothing and every other binding stands",
+                _safe(key),
+            )
+            continue
+        if comparable in out:
+            # **Both full keys, because neither alone identifies the fault.**
+            # The stripped form is what collided and the slugs are what an
+            # operator has to change, so a message naming only one of the three
+            # sends them to a file that looks correct.
+            #
+            # **This compares bindings against each other, and that is the whole
+            # reach it has.** The cost is written down rather than designed
+            # around, as the widening at `conditions.strip_slug` for a ticket's
+            # skills is: a collision only one side of which is bound is not
+            # visible here, so a binding published for one data source narrows
+            # the identically-named tool on every other upstream behind this
+            # gateway, and an `open` one opens it. Closing that would need a
+            # route-to-data-source relationship the routes file deliberately
+            # does not carry, or a discriminator in the key — which is why the
+            # constraint is stated to the operator in the README rather than
+            # enforced in full here.
+            raise UnusableBundle(
+                f"two bindings reach this gateway as {_q(comparable)} — "
+                f"{_q(first_seen[comparable])} and {_q(key)}. Endpoint keys "
+                f"must be unique within a gateway once the data source slug is "
+                f"stripped, because this gateway composes no slug of its own"
+            )
+        first_seen[comparable] = key
 
         mode = entry.get("mode")
         if mode not in ("gated", "open"):
@@ -361,7 +403,7 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
                 )
             canonical.add(resolved)
 
-        out[key] = Binding(mode=mode, policy_ids=frozenset(canonical))
+        out[comparable] = Binding(mode=mode, policy_ids=frozenset(canonical))
 
     return out
 

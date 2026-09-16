@@ -23,6 +23,7 @@ import uvicorn
 from fastmcp import Context, FastMCP
 
 from gateway.bundle.client import BundleHolder
+from gateway.routes import Route
 from gateway.server import build_app
 
 
@@ -41,10 +42,20 @@ LIFESPAN_TIMEOUT_SEC = 10
 #: report to whatever `RAIL_CENTER_URL` happened to be set to on the machine.
 RAIL_CENTER = ("http://rail-center.test", {})
 
-#: The data source every test gateway fronts. Injected rather than read from the
-#: environment, so a suite run with `RAIL_DATASOURCE_SLUG` set to something else
-#: still composes the keys its bundles are bound on.
+#: The data source every test gateway fronts. The gateway composes no slug — it
+#: is the first segment of a *bundle* key, which `strip_slug` removes — so this
+#: names the one the bundles in this suite are published under, and is what a
+#: fixture builds a full key from before the strip is asserted on.
 SLUG = "delivery"
+
+
+#: Where a test gateway listens for its one upstream. `/` — the single-upstream
+#: deployment — so a path reaches the proxy unchanged and an endpoint key is
+#: composed from `/mcp`, which is what the vectors carry. A test about routing
+#: builds its own routes with prefixes.
+def one_route(upstream: str, *, name: str = SLUG, prefix: str = "/") -> Route:
+    return Route(name=name, url=upstream, prefix=prefix)
+
 
 #: The gateway every test gateway is. Injected for the same reason `SLUG` is,
 #: and a different value from it on purpose: a gateway's own identity and the
@@ -267,6 +278,6 @@ async def gateway_url(upstream):
     """
     port = _free_port()
     holder = holder_serving(unreachable)
-    app = build_app(upstream, holder, plugin=True, slug=SLUG, rail_center=RAIL_CENTER)
+    app = build_app([one_route(upstream)], holder, plugin=True, rail_center=RAIL_CENTER)
     async with serve(app, port):
         yield f"http://127.0.0.1:{port}"
