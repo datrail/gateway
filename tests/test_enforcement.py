@@ -95,11 +95,12 @@ def bundle(
     """
     return validate_bundle(
         {
-            "version": "v-enforce",
+            "schema_version": "1.0",
+            "content_hash": "v-enforce",
             "policies": list(policies),
             "bindings": bindings or [],
-            "rejected": [],
-            "enforcement": {"mode": enforcement, "fallback": fallback},
+            "enforcement": {"mode": enforcement},
+            "binding_fallback": fallback,
         }
     )
 

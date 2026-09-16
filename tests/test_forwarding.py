@@ -184,6 +184,7 @@ async def test_an_upstream_failure_does_not_hand_the_caller_its_credential():
             build_app(
                 secret_url,
                 holder_serving(unreachable),
+                plugin=True,
                 slug="delivery",
                 rail_center=RAIL_CENTER,
             ),
@@ -237,6 +238,7 @@ async def test_the_upstream_credential_still_travels(upstream, seen_headers):
                 # is forwarded unjudged — which is the request this test needs
                 # to arrive at the upstream.
                 holder_serving(unreachable),
+                plugin=True,
                 slug="delivery",
                 rail_center=RAIL_CENTER,
             ),

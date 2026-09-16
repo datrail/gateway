@@ -42,14 +42,14 @@ ONE = "5c8f1e42-0000-4000-8000-0000000000a1"
 TWO = "5c8f1e42-0000-4000-8000-0000000000a2"
 
 
-def bundle(version: str = "v1", *, policies: Any = None, rejected: Any = None) -> dict:
+def bundle(content_hash: str = "v1", *, policies: Any = None) -> dict:
     return {
-        "version": version,
+        "schema_version": "1.0",
+        "content_hash": content_hash,
         "policies": [{"id": ONE, "name": "P", "priority": 1}]
         if policies is None
         else policies,
         "bindings": [],
-        "rejected": [] if rejected is None else rejected,
     }
 
 
@@ -99,9 +99,19 @@ def streamed(
     )
 
 
+#: The gateway these holders are. Every fetch carries it as `?gateway=`, which
+#: is how Rail Center knows whose bundle to build where no gateway-kind
+#: credential names one.
+GATEWAY_SLUG = "edge"
+
+
 def holder(*responses: httpx.Response | Exception, **kwargs: Any) -> BundleHolder:
     return BundleHolder(
-        "http://rail-center.test", {}, transport=responder(*responses), **kwargs
+        "http://rail-center.test",
+        {},
+        GATEWAY_SLUG,
+        transport=responder(*responses),
+        **kwargs,
     )
 
 
@@ -115,7 +125,7 @@ async def test_a_first_fetch_is_held() -> None:
 
     assert outcome.kind == "replaced"
     assert h.current() is not None
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
     assert [p.id for p in h.current().chain] == [ONE]
 
 
@@ -156,7 +166,7 @@ async def test_a_failed_fetch_keeps_the_bundle_already_held(
 
     assert outcome.kind == "unreachable", label
     assert outcome.held == "v1", label
-    assert h.current().version == "v1", label
+    assert h.current().content_hash == "v1", label
 
 
 @pytest.mark.parametrize(
@@ -203,7 +213,7 @@ async def test_a_bundle_that_cannot_be_applied_keeps_the_one_held() -> None:
 
     assert outcome.kind == "unusable"
     assert outcome.held == "v1"
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
     assert "`policies` is not a list" in outcome.reason
 
 
@@ -266,6 +276,39 @@ async def test_a_failed_first_fetch_claims_no_refusal_in_the_log(
 
 
 @pytest.mark.asyncio
+async def test_both_failure_lines_call_the_held_value_the_same_thing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One held value, two lines an operator reads about it, one name for it.
+
+    The two failures differ in where the fault is — a refused bundle means Rail
+    Center and this gateway have drifted, an unreachable one means the network
+    or the credential — and an operator triaging a gateway that has stopped
+    updating reads both. Naming the same held value two different things there
+    reads as two different things being held. `content_hash` is what it is, so
+    neither line may call it a version.
+    """
+    refused = holder(
+        httpx.Response(200, json=bundle("v-held")),
+        httpx.Response(200, json=bundle("v-next", policies="not a list")),
+    )
+    unreachable = holder(
+        httpx.Response(200, json=bundle("v-held")),
+        httpx.Response(503),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+        await refused.refresh()
+        await refused.refresh()
+        await unreachable.refresh()
+        await unreachable.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert said.count("keeping bundle v-held") == 2, said
+    assert "version" not in said, said
+
+
+@pytest.mark.asyncio
 async def test_a_new_version_replaces_what_is_held() -> None:
     h = holder(
         httpx.Response(200, json=bundle("v1")),
@@ -278,7 +321,7 @@ async def test_a_new_version_replaces_what_is_held() -> None:
     outcome = await h.refresh()
 
     assert outcome.kind == "replaced"
-    assert h.current().version == "v2"
+    assert h.current().content_hash == "v2"
     assert [p.id for p in h.current().chain] == [TWO]
 
 
@@ -289,11 +332,11 @@ async def test_a_new_version_replaces_what_is_held() -> None:
 async def test_an_unchanged_version_is_not_reparsed() -> None:
     """Proven by sending a body that validation would refuse.
 
-    `version` is a content hash, so an unchanged one means what is held is
+    The held value is a content hash, so an unchanged one means what is held is
     byte-for-byte what arrived and there is nothing to re-parse. The only way to
     show the short-circuit really happens is to make the un-taken path fail: the
-    second answer carries the held version and a `policies` that is not a list.
-    An implementation that validated first would report `unusable`.
+    second answer carries the held content hash and a `policies` that is not a
+    list. An implementation that validated first would report `unusable`.
     """
     h = holder(
         httpx.Response(200, json=bundle("v1")),
@@ -304,19 +347,18 @@ async def test_an_unchanged_version_is_not_reparsed() -> None:
     outcome = await h.refresh()
 
     assert outcome.kind == "unchanged"
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
 
 
 @pytest.mark.asyncio
 async def test_the_short_circuit_needs_a_bundle_to_be_held() -> None:
-    """A first response is validated however its version reads.
+    """A first response is validated however its content hash reads.
 
-    Comparing against a held version of None would match a bundle whose version
-    key is missing, and a bundle nothing validated must never be held.
+    Comparing against a held hash of None would match a bundle whose
+    `content_hash` key is missing, and a bundle nothing validated must never be
+    held.
     """
-    h = holder(
-        httpx.Response(200, json={"policies": [], "bindings": [], "rejected": []})
-    )
+    h = holder(httpx.Response(200, json={"policies": [], "bindings": []}))
     outcome = await h.refresh()
 
     assert outcome.kind == "unusable"
@@ -338,8 +380,8 @@ async def test_a_body_past_the_bound_is_refused_even_when_it_lies_about_its_leng
     h = holder(
         httpx.Response(
             200,
-            content=b'{"version":"v2","policies":[],"bindings":[],"rejected":[]}'
-            + b" " * 4000,
+            content=b'{"schema_version":"1.0","content_hash":"v2",'
+            b'"policies":[],"bindings":[]}' + b" " * 4000,
             headers={"content-length": "10"},
         ),
         max_bytes=1024,
@@ -369,7 +411,7 @@ async def test_a_4xx_carrying_a_perfectly_good_bundle_is_still_refused() -> None
 
     assert outcome.kind == "unreachable"
     assert "responded 404" in outcome.reason
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
 
 
 @pytest.mark.asyncio
@@ -392,7 +434,7 @@ async def test_a_body_past_the_bound_is_treated_as_unreachable() -> None:
 
     assert outcome.kind == "unreachable"
     assert "past the 1024" in outcome.reason
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
 
 
 @pytest.mark.asyncio
@@ -436,7 +478,7 @@ async def test_a_wire_body_past_the_bound_is_refused_across_chunks() -> None:
 
     assert outcome.kind == "unreachable"
     assert f"is past the {limit}" in outcome.reason
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
 
 
 @pytest.mark.asyncio
@@ -472,7 +514,7 @@ async def test_a_bundle_of_exactly_the_bound_is_read() -> None:
     outcome = await h.refresh()
 
     assert outcome.kind == "replaced"
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
 
 
 @pytest.mark.parametrize("declared", ["gzip", "GZIP", " Gzip", "gzip "])
@@ -497,7 +539,7 @@ async def test_a_compressed_bundle_is_read(declared: str) -> None:
     outcome = await h.refresh()
 
     assert outcome.kind == "replaced"
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
 
 
 @pytest.mark.asyncio
@@ -532,7 +574,7 @@ async def test_a_compressed_body_is_bounded_where_it_decodes() -> None:
 
     assert outcome.kind == "unreachable"
     assert f"decodes past the {limit}" in outcome.reason
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
     assert peak < size // 8
 
 
@@ -615,7 +657,7 @@ async def test_a_body_that_decodes_past_the_bound_across_chunks_is_refused() -> 
 
     assert outcome.kind == "unreachable"
     assert f"decodes past the {limit}" in outcome.reason
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
 
 
 @pytest.mark.asyncio
@@ -636,7 +678,7 @@ async def test_an_encoding_this_gateway_did_not_offer_is_refused() -> None:
 
     assert outcome.kind == "unreachable"
     assert "br-encoded" in outcome.reason
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
 
 
 @pytest.mark.asyncio
@@ -668,7 +710,7 @@ async def test_a_body_that_never_ends_is_bounded_by_the_deadline() -> None:
 
     assert outcome.kind == "unreachable"
     assert "0.2 seconds" in outcome.reason
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
 
 
 @pytest.mark.asyncio
@@ -751,56 +793,28 @@ async def test_a_failure_is_a_warning_while_a_bundle_is_held(
 
 
 @pytest.mark.asyncio
-async def test_a_rejected_policy_is_named_every_time_the_bundle_changes(
+async def test_a_bundle_still_carrying_rejected_is_read_and_not_logged(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """`rejected` is not an error channel to drop.
+    """`rejected` left the root, and a responder still sending one is not wrong.
 
-    It names what Rail Center could not compile, so a gateway that swallows it
-    enforces a chain narrower than the operator wrote with nothing on either
-    side saying so.
+    This reader never narrowed anything with it — it named the policies Rail
+    Center could not compile, for an operator to read — so it is gone rather
+    than carried unused. What must not follow is refusing a bundle for carrying
+    it: an unknown root field is a responder of a different age, not a broken
+    one, and refusing would make every deployment upgrade in lockstep.
     """
-    rejected = [
+    body = bundle("v1")
+    body["rejected"] = [
         {"policy_id": TWO, "policy_name": "P2", "reason": "condition not evaluable"}
     ]
-    h = holder(httpx.Response(200, json=bundle("v1", rejected=rejected)))
+    h = holder(httpx.Response(200, json=body))
     with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
-        await h.refresh()
+        outcome = await h.refresh()
 
-    said = "\n".join(r.getMessage() for r in caplog.records)
-    assert "P2" in said
-    assert TWO in said
-    assert "condition not evaluable" in said
-    assert "not in force" in said
-
-
-@pytest.mark.parametrize("field", ["policy_name", "policy_id", "reason"])
-@pytest.mark.asyncio
-async def test_a_rejected_entry_cannot_forge_a_log_line(
-    caplog: pytest.LogCaptureFixture, field: str
-) -> None:
-    """`rejected` is the one thing in a bundle that validation does not inspect.
-
-    `validate_bundle` checks that it is a list and never looks inside an entry,
-    so all three of these reach `logger.warning` raw off the wire — unlike
-    `version`, which is refused upstream. `safe_for_log` on each is the only
-    guard there is, which makes this the one log-injection defence in the file
-    with nothing behind it.
-    """
-    from gateway.key_safety import has_unsafe_key_characters
-
-    forged = "innocent\n2026-08-29 ERROR nothing was rejected\x1b[31m"
-    entry = {"policy_id": TWO, "policy_name": "P2", "reason": "unevaluable"}
-    entry[field] = forged
-
-    h = holder(httpx.Response(200, json=bundle("v1", rejected=[entry])))
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
-        await h.refresh()
-
-    said = "\n".join(r.getMessage() for r in caplog.records)
-    assert not has_unsafe_key_characters(said)
-    assert "ERROR nothing was rejected" not in said
-    assert "<unprintable>" in said
+    assert outcome.kind == "replaced"
+    assert h.current() is not None
+    assert "P2" not in "\n".join(r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -828,14 +842,40 @@ async def test_a_reason_never_carries_a_character_a_log_line_cannot_hold() -> No
 
 
 @pytest.mark.asyncio
+async def test_the_holding_line_names_the_content_hash_and_the_schema_version(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The one place the schema version this reader accepted is observable.
+
+    Nothing else on this branch consumes it — it is parsed, bounded and carried,
+    and then read by an operator and by no code. Rail Center and this gateway
+    reshape in that order, so this line is how whoever ran the producer's deploy
+    confirms that a new-shape bundle actually landed here; a line that named the
+    document without naming its shape would answer a different question.
+
+    Both values are named, and neither is the other: the hash says *which*
+    bundle, the schema version says *which contract it was read against*.
+    """
+    body = {**bundle("hash-7f3a"), "schema_version": "9.4"}
+    h = holder(httpx.Response(200, json=body))
+
+    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "holding policy bundle hash-7f3a" in said
+    assert "schema 9.4" in said
+
+
+@pytest.mark.asyncio
 async def test_the_posture_is_logged_when_a_poll_moves_it(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Moving a gateway to `enforce` is what RC-312 exists to allow.
 
-    The holding line names a version, and a version is a content hash: nothing
-    in it says the gateway has started refusing calls. Without a line of its
-    own, `enforce` and `observe` are told apart only by inducing a verdict.
+    The holding line names a content hash and a schema version: nothing in it
+    says the gateway has started refusing calls. Without a line of its own,
+    `enforce` and `observe` are told apart only by inducing a verdict.
     """
     h = holder(
         httpx.Response(200, json={**bundle("v-none"), "enforcement": {"mode": "none"}}),
@@ -843,7 +883,8 @@ async def test_the_posture_is_logged_when_a_poll_moves_it(
             200,
             json={
                 **bundle("v-enforce"),
-                "enforcement": {"mode": "enforce", "fallback": "block"},
+                "enforcement": {"mode": "enforce"},
+                "binding_fallback": "block",
             },
         ),
     )
@@ -869,7 +910,7 @@ async def test_an_unchanged_posture_is_not_repeated_on_every_poll(
     A posture line on each would bury the one that moved, which is the only one
     an operator is reading for.
     """
-    body = {"enforcement": {"mode": "enforce", "fallback": "block"}}
+    body = {"enforcement": {"mode": "enforce"}, "binding_fallback": "block"}
     h = holder(
         httpx.Response(200, json={**bundle("v1"), **body}),
         httpx.Response(200, json={**bundle("v2"), **body}),
@@ -880,7 +921,7 @@ async def test_an_unchanged_posture_is_not_repeated_on_every_poll(
 
     said = "\n".join(r.getMessage() for r in caplog.records)
     assert said.count("enforcement=enforce") == 1
-    assert said.count("holding policy bundle version") == 2
+    assert said.count("holding policy bundle") == 2
 
 
 @pytest.mark.asyncio
@@ -897,14 +938,16 @@ async def test_a_fallback_that_moves_under_one_mode_is_logged(
             200,
             json={
                 **bundle("v1"),
-                "enforcement": {"mode": "enforce", "fallback": "block"},
+                "enforcement": {"mode": "enforce"},
+                "binding_fallback": "block",
             },
         ),
         httpx.Response(
             200,
             json={
                 **bundle("v2"),
-                "enforcement": {"mode": "enforce", "fallback": "pass"},
+                "enforcement": {"mode": "enforce"},
+                "binding_fallback": "pass",
             },
         ),
     )
@@ -933,14 +976,16 @@ async def test_a_fallback_that_moves_where_it_decides_nothing_is_not_logged(
             200,
             json={
                 **bundle("v1"),
-                "enforcement": {"mode": "observe", "fallback": "block"},
+                "enforcement": {"mode": "observe"},
+                "binding_fallback": "block",
             },
         ),
         httpx.Response(
             200,
             json={
                 **bundle("v2"),
-                "enforcement": {"mode": "observe", "fallback": "pass"},
+                "enforcement": {"mode": "observe"},
+                "binding_fallback": "pass",
             },
         ),
     )
@@ -950,7 +995,7 @@ async def test_a_fallback_that_moves_where_it_decides_nothing_is_not_logged(
 
     said = "\n".join(r.getMessage() for r in caplog.records)
     assert said.count("enforcement=observe") == 1
-    assert said.count("holding policy bundle version") == 2
+    assert said.count("holding policy bundle") == 2
     # Held, and reported the moment the mode reaches the posture that consults
     # it — the move is deferred rather than dropped.
     assert h.current().fallback == "pass"
@@ -966,14 +1011,16 @@ async def test_a_fallback_held_silently_reports_itself_when_enforce_arrives(
             200,
             json={
                 **bundle("v1"),
-                "enforcement": {"mode": "observe", "fallback": "pass"},
+                "enforcement": {"mode": "observe"},
+                "binding_fallback": "pass",
             },
         ),
         httpx.Response(
             200,
             json={
                 **bundle("v2"),
-                "enforcement": {"mode": "enforce", "fallback": "pass"},
+                "enforcement": {"mode": "enforce"},
+                "binding_fallback": "pass",
             },
         ),
     )
@@ -1048,7 +1095,7 @@ def test_a_header_value_that_cannot_be_sent_is_refused_at_the_constructor() -> N
     secret = "Bearer s3cr3t-b\nearer-abc123XYZ"
 
     with pytest.raises(ValueError) as caught:
-        BundleHolder("http://rc.test", {"Authorization": secret})
+        BundleHolder("http://rc.test", {"Authorization": secret}, GATEWAY_SLUG)
 
     said = str(caught.value)
     assert "Authorization" in said
@@ -1063,7 +1110,7 @@ def test_an_ordinary_credential_still_travels() -> None:
     and illegal inside a credential, so the stricter rule here would refuse
     every request this gateway makes.
     """
-    h = BundleHolder("http://rc.test", {"Authorization": "Bearer t0ken"})
+    h = BundleHolder("http://rc.test", {"Authorization": "Bearer t0ken"}, GATEWAY_SLUG)
 
     assert h._headers["Authorization"] == "Bearer t0ken"
 
@@ -1079,11 +1126,14 @@ async def test_the_credential_and_the_route_travel_with_the_request() -> None:
     h = BundleHolder(
         "http://rail-center.test/",
         {"Authorization": "Bearer t0ken"},
+        GATEWAY_SLUG,
         transport=httpx.MockTransport(handle),
     )
     await h.refresh()
 
-    assert str(seen[0].url) == f"http://rail-center.test{BUNDLE_PATH}"
+    assert str(seen[0].url) == (
+        f"http://rail-center.test{BUNDLE_PATH}?gateway={GATEWAY_SLUG}"
+    )
     assert seen[0].headers["authorization"] == "Bearer t0ken"
     assert seen[0].headers["accept"] == "application/json"
     # What is offered is what this holder can decode under its own bound, so
@@ -1102,9 +1152,11 @@ async def test_a_trailing_slash_does_not_double_the_path(configured: str) -> Non
         seen.append(str(request.url))
         return httpx.Response(200, json=bundle("v1"))
 
-    await BundleHolder(configured, {}, transport=httpx.MockTransport(handle)).refresh()
+    await BundleHolder(
+        configured, {}, GATEWAY_SLUG, transport=httpx.MockTransport(handle)
+    ).refresh()
 
-    assert seen == [f"http://rc.test{BUNDLE_PATH}"]
+    assert seen == [f"http://rc.test{BUNDLE_PATH}?gateway={GATEWAY_SLUG}"]
 
 
 @pytest.mark.asyncio
@@ -1134,7 +1186,7 @@ async def test_a_proxy_in_the_environment_does_not_redirect_the_fetch(
 
     # No injected transport: httpx consults the environment only when it is
     # building its own, which is the shape every deployment runs.
-    h = BundleHolder("http://127.0.0.1:1", {}, timeout_seconds=0.5)
+    h = BundleHolder("http://127.0.0.1:1", {}, GATEWAY_SLUG, timeout_seconds=0.5)
     outcome = await h.refresh()
 
     assert outcome.kind == "unreachable"
@@ -1318,7 +1370,9 @@ async def test_a_stop_during_the_first_fetch_leaves_no_loop_behind() -> None:
         await release.wait()
         return httpx.Response(200, json=bundle("v1"))
 
-    h = BundleHolder("http://rc.test", {}, transport=httpx.MockTransport(handle))
+    h = BundleHolder(
+        "http://rc.test", {}, GATEWAY_SLUG, transport=httpx.MockTransport(handle)
+    )
     starting = asyncio.create_task(h.start())
     await reached.wait()
 
@@ -1329,7 +1383,7 @@ async def test_a_stop_during_the_first_fetch_leaves_no_loop_behind() -> None:
     # The fetch still counted: what it brought back is held, and only the loop
     # was called off.
     assert outcome.kind == "replaced"
-    assert h.current().version == "v1"
+    assert h.current().content_hash == "v1"
     assert h._task is None
 
 
@@ -1356,7 +1410,9 @@ async def test_a_concurrent_start_cannot_erase_a_stop_that_landed() -> None:
         await release[n].wait()
         return httpx.Response(200, json=bundle("v1"))
 
-    h = BundleHolder("http://rc.test", {}, transport=httpx.MockTransport(handle))
+    h = BundleHolder(
+        "http://rc.test", {}, GATEWAY_SLUG, transport=httpx.MockTransport(handle)
+    )
     first = asyncio.create_task(h.start())
     await reached[0].wait()
 
@@ -1401,7 +1457,9 @@ async def test_two_refreshes_never_run_at_once() -> None:
         depth -= 1
         return httpx.Response(200, json=bundle("v1"))
 
-    h = BundleHolder("http://rc.test", {}, transport=httpx.MockTransport(handle))
+    h = BundleHolder(
+        "http://rc.test", {}, GATEWAY_SLUG, transport=httpx.MockTransport(handle)
+    )
     outcomes = await asyncio.gather(h.refresh(), h.refresh())
 
     assert not overlapped

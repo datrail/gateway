@@ -26,7 +26,7 @@ forwards the request, never consults the fallback, and sends nothing — a denia
 table filled from a mode that is explicitly not enforcing leaves an operator
 unable to tell which rows stopped traffic.
 
-**`/ready` reports and does not gate**, and under `RAIL_TICKET_MODE=none` it is
+**`/ready` reports and does not gate**, and with the plugin disabled it is
 unconditionally ready: a pass-through evaluates nothing, needs no bundle to do
 its whole job, and must not be the deployment that turns enforcement off and
 then never serves.
@@ -92,7 +92,7 @@ nothing would report:
     the second eagerly would turn a control-plane blip into a gateway that
     never comes up.
 
-  * **`RAIL_TICKET_MODE=none` builds no holder at all**, rather than building
+  * **`RAIL_PLUGIN_ENABLED=false` builds no holder at all**, rather than building
     one and declining to read it. The mode evaluates nothing, so a holder would
     poll Rail Center for the life of the process for a bundle nothing consults,
     and `RAIL_CENTER_URL` would be configuration a deployment must supply to a
@@ -138,12 +138,10 @@ from gateway.denial import build_report, report
 from gateway.endpoint import resolve_from_body
 from gateway.key_safety import safe_for_log
 from gateway.mode import (
-    Enrolment,
     blocks,
-    describe_enrolment,
-    enrolment,
+    describe_plugin,
     judges,
-    polls,
+    plugin_enabled,
 )
 from gateway.ticket import parse_rail_header
 
@@ -258,16 +256,18 @@ def _holder_from_environment() -> BundleHolder:
     `refresh_seconds` on an interval that is not a number.
     """
     url, headers = rail_center_from_environment()
-    return BundleHolder(url, headers, interval_seconds=refresh_seconds())
+    return BundleHolder(
+        url, headers, gateway_slug(), interval_seconds=refresh_seconds()
+    )
 
 
 def datasource_slug() -> str:
     """`RAIL_DATASOURCE_SLUG` — the first segment of every endpoint key.
 
-    Read only where the gateway evaluates. It plays no part in fetching: the
-    bundle route takes no parameters and is single-tenant per deployment, so
-    this names the data source whose endpoints the bundle's bindings are keyed
-    on, and nothing else. A deployment that got it wrong composes keys matching
+    Read only where the gateway evaluates. It plays no part in fetching — that
+    is `RAIL_GATEWAY_SLUG`'s job, and the two are different values: this names a
+    data source whose endpoints the bundle's bindings are keyed on, that names
+    the gateway whose bundle is being fetched. A deployment that got it wrong composes keys matching
     no binding, and what that costs is the bundle's to say: under a `pass`
     fallback every endpoint faces the whole chain, which denies more than the
     operator wrote rather than less; under `block` every call is refused. Neither
@@ -276,19 +276,34 @@ def datasource_slug() -> str:
     return _required("RAIL_DATASOURCE_SLUG")
 
 
+def gateway_slug() -> str:
+    """`RAIL_GATEWAY_SLUG` — which gateway this is, and whose bundle it fetches.
+
+    **Not the data source's slug**, and the distinction is the whole reason this
+    variable exists. A gateway fronts several data sources and a data source may
+    sit behind several gateways, so no single data source slug can identify the
+    component; the bundle is built for a gateway, carrying that gateway's
+    bindings, posture and fallback (design §4.4, §4.5).
+
+    Required whenever the plugin is enabled, and read nowhere else — a gateway
+    with no control plane fetches nothing and has nothing to name itself to.
+    """
+    return _required("RAIL_GATEWAY_SLUG")
+
+
 def build_gateway(
     upstream_url: str | None = None,
     holder: BundleHolder | None = None,
-    enrolled: Enrolment | None = None,
+    plugin: bool | None = None,
 ) -> FastMCP:
     """The proxy that forwards to the upstream, plus liveness and readiness.
 
-    `holder` and `enrolled` are injected by the suite so its gateways answer to a
+    `holder` and `plugin` are injected by the suite so its gateways answer to a
     control plane the test holds. The endpoint slug is not needed here:
     composing keys is the enforcement layer's, and this builds the MCP server
     that sits under it.
 
-    **Under `RAIL_TICKET_MODE=plugin` a holder is always built, whatever posture
+    **Under `RAIL_PLUGIN_ENABLED=true` a holder is always built, whatever posture
     the bundle turns out to carry** (RC-312). That is the inversion, and it
     reads backwards until you ask what the alternative costs: a component that
     declined to poll while its posture was `none` could never be told the
@@ -296,26 +311,26 @@ def build_gateway(
     incident would need a redeploy to undo it. Polling is what makes the switch
     turn both ways, and the bundle it polls for is cheap.
 
-    **Under `none` no holder is built at all**, whether or not one was passed,
-    and `RAIL_CENTER_URL` is not read. That value now means *there is no control
-    plane here* rather than *do not enforce*, so there is nothing to poll and
+    **With the plugin off no holder is built at all**, whether or not one was
+    passed, and `RAIL_CENTER_URL` is not read. The flag means *RailXia is not
+    installed here* rather than *do not enforce*, so there is nothing to poll and
     requiring the variable would be configuration a deployment must supply to a
     component with nothing to point it at. An injected holder is ignored rather
-    than honoured because enrolment is the stronger statement: a test asking for
-    `none` is asking for a gateway with no control plane.
+    than honoured because the flag is the stronger statement: a test asking for
+    the plugin off is asking for a gateway with no control plane.
     """
-    resolved_enrolment = enrolled if enrolled is not None else enrolment()
+    resolved_plugin = plugin if plugin is not None else plugin_enabled()
     url = _checked_url(
         "RAIL_GATEWAY_UPSTREAM_URL",
         upstream_url or _required("RAIL_GATEWAY_UPSTREAM_URL"),
     )
     # After the upstream, so a gateway pointed nowhere is refused for that
     # rather than for the Rail Center variable it also has not been given.
-    if not polls(resolved_enrolment):
+    if not resolved_plugin:
         bundle_holder = None
     else:
         bundle_holder = holder if holder is not None else _holder_from_environment()
-    log.info("%s", describe_enrolment(resolved_enrolment))
+    log.info("%s", describe_plugin(resolved_plugin))
 
     clean_url, credential_headers = _split_credential(url)
     transport = StreamableHttpTransport(url=clean_url, headers=credential_headers)
@@ -364,7 +379,7 @@ def build_gateway(
         503 rather than a 200 carrying a false flag, because the code is the
         part every orchestrator and load balancer reads without being taught to.
 
-        **Under `RAIL_TICKET_MODE=none` it is unconditionally ready**, and after
+        **With the plugin disabled it is unconditionally ready**, and after
         RC-312 that is a statement about enrolment rather than about posture. A
         component with no control plane has no bundle to wait for and never will
         have, so waiting would leave it permanently unready.
@@ -388,10 +403,10 @@ def build_gateway(
         because that absence now means *not enrolled* rather than *does not
         enforce*. What changed is what the words mean, not what the code asks.
 
-        **What it deliberately does not carry is the version held.** This route
-        is unauthenticated and shares a port with the MCP surface, so a version
-        here is a public feed of when a customer's policy changed, bought for an
-        operator convenience the `holding policy bundle version …` log line
+        **What it deliberately does not carry is the content hash held.** This
+        route is unauthenticated and shares a port with the MCP surface, so a
+        hash here is a public feed of when a customer's policy changed, bought
+        for an operator convenience the `holding policy bundle …` log line
         already covers.
         """
         if bundle_holder is None:
@@ -407,7 +422,7 @@ def build_gateway(
 def _bundle_lifespan(holder: BundleHolder | None):
     """Start the holder with the application and stop it with the application.
 
-    `holder` is None under `RAIL_TICKET_MODE=none`, where there is nothing to
+    `holder` is None where the plugin is disabled, and there is nothing to
     start: the mode evaluates no policy, so a lifespan that fetched one anyway
     would poll Rail Center for the whole life of a process that will never read
     the answer.
@@ -440,7 +455,7 @@ def _bundle_lifespan(holder: BundleHolder | None):
     @asynccontextmanager
     async def lifespan(_server) -> AsyncIterator[None]:
         if holder is None:
-            # `RAIL_TICKET_MODE=none`. Nothing to start, nothing to stop, and
+            # the plugin disabled. Nothing to start, nothing to stop, and
             # the app serves immediately — there is no first fetch to wait on.
             yield
             return
@@ -496,7 +511,7 @@ def _bundle_lifespan(holder: BundleHolder | None):
 def build_app(
     upstream_url: str | None = None,
     holder: BundleHolder | None = None,
-    enrolled: Enrolment | None = None,
+    plugin: bool | None = None,
     slug: str | None = None,
     *,
     rail_center: tuple[str, dict[str, str]] | None = None,
@@ -510,7 +525,7 @@ def build_app(
     reporting denials as another is a state nothing would report.
 
     `_Enforcement` wraps the MCP application rather than sitting inside it, for
-    the reason its own docstring gives. Under `RAIL_TICKET_MODE=none` there is
+    the reason its own docstring gives. With the plugin disabled there is
     nothing to wrap it with — no control plane, no holder, no slug, no walk —
     and the app is served bare.
 
@@ -521,9 +536,9 @@ def build_app(
     would have to be installed or removed while the process runs, which is not a
     thing an ASGI stack can do.
     """
-    resolved_enrolment = enrolled if enrolled is not None else enrolment()
-    if not polls(resolved_enrolment):
-        return build_gateway(upstream_url, None, resolved_enrolment).http_app(
+    resolved_plugin = plugin if plugin is not None else plugin_enabled()
+    if not resolved_plugin:
+        return build_gateway(upstream_url, None, resolved_plugin).http_app(
             transport="streamable-http"
         )
 
@@ -533,7 +548,7 @@ def build_app(
         rail_center if rail_center is not None else rail_center_from_environment()
     )
 
-    gateway = build_gateway(upstream_url, resolved_holder, resolved_enrolment)
+    gateway = build_gateway(upstream_url, resolved_holder, resolved_plugin)
     return _Enforcement(
         gateway.http_app(transport="streamable-http"),
         resolved_holder,

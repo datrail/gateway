@@ -3,26 +3,28 @@
 Two questions. They were one variable until RC-312, and separating them is the
 whole of this module's job.
 
-**`RAIL_TICKET_MODE` answers the first and nothing else.** ``plugin`` means a
-Rail Center exists to poll; ``none`` means one does not. It is deploy-time
-configuration because it describes the estate rather than a policy decision: a
-component with no control plane to reach cannot be told to acquire one.
+**`RAIL_PLUGIN_ENABLED` answers the first and nothing else.** True means RailXia
+is installed on this deployment and a Rail Center exists to poll; false means
+this is a plain gateway that never contacts one. It is deploy-time configuration
+because it describes the estate rather than a policy decision — reaching a
+control plane is a RailXia feature, not a gateway feature, and a component with
+no control plane to reach cannot be told to acquire one.
 
 **The bundle answers the second.** ``enforcement.mode`` — ``none``, ``observe``
 or ``enforce`` — arrives on every poll and may change between two of them, which
 is the point. Posture is an operator's decision and belongs where operators
 work, not in a variable that needs a redeploy to move.
 
-==============  ===================================  ==========================
-State           Reached by                           Traffic
-==============  ===================================  ==========================
-no data path    ``RAIL_TICKET_MODE=none``            forwarded; never polls
-holding none    ``plugin``, nothing fetched yet      forwarded; polling
-no posture      ``plugin`` + bundle says nothing     forwarded; polling
-``none``        ``plugin`` + bundle says ``none``    forwarded; polling
-``observe``     ``plugin`` + bundle says ``observe`` evaluated, logged, allowed
-``enforce``     ``plugin`` + bundle says ``enforce`` evaluated, acted on
-==============  ===================================  ==========================
+==============  =====================================  ==========================
+State           Reached by                             Traffic
+==============  =====================================  ==========================
+no data path    ``RAIL_PLUGIN_ENABLED=false``          forwarded; never polls
+holding none    enabled, nothing fetched yet           forwarded; polling
+no posture      enabled, bundle says nothing           forwarded; polling
+``none``        enabled, bundle says ``none``          forwarded; polling
+``observe``     enabled, bundle says ``observe``       evaluated, logged, allowed
+``enforce``     enabled, bundle says ``enforce``       evaluated, acted on
+==============  =====================================  ==========================
 
 **Four of those six pass every request, and they are not each other.** The
 first was never given a control plane. The second has one and has not heard
@@ -33,22 +35,31 @@ judge nothing. Reporting any of them as another is the misreading design §5.2
 exists to prevent: an operator looking at a gateway that forwards everything
 needs to know which of the four they have, because the remedy differs in each.
 
-**A `plugin` component polls at every enforcement value, including `none`.** That
-is the inversion RC-312 makes, and it is the one rule here worth stating twice.
-A component that stopped polling at ``none`` could never be told it had been
-moved off ``none``, so the kill switch would turn one way only — the operator
-who disabled enforcement during an incident could not re-enable it without a
-redeploy. ``none`` is a posture held by a gateway in touch with its control
-plane, not a gateway that has stopped listening.
+**A plugged-in component polls at every enforcement value, including `none`.**
+That is the inversion RC-312 makes, and it is the one rule here worth stating
+twice. A component that stopped polling at ``none`` could never be told it had
+been moved off ``none``, so the kill switch would turn one way only — the
+operator who disabled enforcement during an incident could not re-enable it
+without a redeploy. ``none`` is a posture held by a gateway in touch with its
+control plane, not a gateway that has stopped listening.
 
 **`enforce` is no longer the default, because there is no longer a default
 posture at all.** A component holding no bundle judges nothing — it has been
 told nothing, and inventing `enforce` there would refuse traffic on a ruleset it
 does not have. What protects a deployment during that window is ``/ready``,
 which reports 503 until a bundle is held; what protects it afterwards is the
-bundle. The default that remains is enrolment's: an unset ``RAIL_TICKET_MODE``
-is ``plugin``, so a deployment that forgets the line still asks Rail Center what
-to do rather than silently opting out of having a control plane.
+bundle.
+
+**Enrolment's default is `false`, and the contradiction check is what makes that
+safe.** The danger in defaulting off is that a dropped line silently unenrols a
+gateway that was enforcing an hour ago; the danger in defaulting on is that a
+plain gateway with no RailXia anywhere near it refuses to start, because
+``RAIL_CENTER_URL`` is required once the plugin is on. Neither default escapes
+both. So the answer is not the default: a deployment carrying Rail Center
+configuration with the flag off is **refused at startup**, naming both. The
+dangerous case is exactly the case that has ``RAIL_CENTER_URL`` set, so it stops
+the component rather than unenrolling it, while the harmless case — nothing to
+point at, nothing configured — boots as the plain gateway it is.
 """
 
 from __future__ import annotations
@@ -56,15 +67,42 @@ from __future__ import annotations
 import os
 from typing import Final, Literal
 
-#: Whether a Rail Center exists for this component to poll. Deploy-time.
-Enrolment = Literal["none", "plugin"]
+#: The variable that says whether RailXia is installed on this deployment.
+PLUGIN_FLAG: Final[str] = "RAIL_PLUGIN_ENABLED"
 
-ENROLMENTS: Final[tuple[Enrolment, ...]] = ("none", "plugin")
+#: The variable this one replaces, named so that an operator still setting it is
+#: told rather than ignored.
+RETIRED_FLAG: Final[str] = "RAIL_TICKET_MODE"
 
-#: What an unset `RAIL_TICKET_MODE` means. `plugin`, so a deployment that
-#: forgets the line asks its control plane what to do rather than deciding for
-#: itself to have none.
-DEFAULT_ENROLMENT: Final[Enrolment] = "plugin"
+#: The two spellings accepted, case folded. Anything else is refused rather
+#: than read as false: a component that read `ture` as off would unenrol on a
+#: typo, which is the direction that loses enforcement silently.
+PLUGIN_VALUES: Final[tuple[str, str]] = ("true", "false")
+
+#: What an unset `RAIL_PLUGIN_ENABLED` means. False, so a gateway nobody has
+#: given RailXia configuration needs no variable at all — and the contradiction
+#: refusal below is what stops that default unenrolling one that has it.
+DEFAULT_PLUGIN_ENABLED: Final[bool] = False
+
+#: Rail Center configuration, whose presence contradicts a plugin that is off.
+#: `RAIL_CENTER_URL` is the decisive one, being what an enabled plugin requires;
+#: the other two are named because setting them to a value that asserts anything
+#: is something only an operator who meant to enrol does. What counts as
+#: asserting is `_asserts_enrolment`'s, not mere presence.
+RAIL_CENTER_VARIABLES: Final[tuple[str, ...]] = (
+    "RAIL_CENTER_URL",
+    "RAIL_AUTH_MODE",
+    "RAIL_AUTH_TOKEN",
+)
+
+#: The one value among those variables that asserts no enrolment. `none` is
+#: `RAIL_AUTH_MODE`'s own default and names *no credential*, which is exactly
+#: what a gateway with no control plane has — so a platform template that spells
+#: the default out, or a zone that sets one auth mode across every component,
+#: says nothing about whether RailXia is installed here.
+#:
+#: `RAIL_AUTH_TOKEN` has no counterpart: a token is only ever set to be sent.
+UNENROLLING_AUTH_MODE: Final[str] = "none"
 
 #: What the control plane says to do with a call. Read from the bundle, never
 #: from the environment.
@@ -88,50 +126,92 @@ FALLBACKS: Final[tuple[Fallback, ...]] = ("pass", "block")
 DEFAULT_FALLBACK: Final[Fallback] = "block"
 
 
-class TicketModeError(RuntimeError):
-    """`RAIL_TICKET_MODE` cannot be honoured. Fatal at startup, by design."""
+class PluginConfigError(RuntimeError):
+    """`RAIL_PLUGIN_ENABLED` cannot be honoured. Fatal at startup, by design."""
 
 
-def enrolment() -> Enrolment:
-    """`RAIL_TICKET_MODE`, or the default.
+def _asserts_enrolment(name: str) -> bool:
+    """Whether this variable, as it is set, says an operator meant to enrol.
 
-    **The three old values are refused rather than translated**, and that is a
-    deliberate break: a deployment carrying `RAIL_TICKET_MODE=enforce` today
-    stops starting until the line is changed. The alternative — reading
-    `observe` and `enforce` as `plugin` — would let a deployment go on declaring
-    a posture in a variable nothing reads any more, with the bundle quietly
-    overruling it and nobody told. A component that will not boot is the cheaper
-    of the two, because it is the one an operator sees.
+    Blank and unset say nothing, and so does `RAIL_AUTH_MODE=none` — the value
+    means *no credential*, which is the state of every gateway that reaches no
+    control plane at all. Admitting it costs no protection: `RAIL_CENTER_URL` is
+    the decisive variable and every deployment that really polls a Rail Center
+    has it, so the dangerous case — a dropped flag on a gateway that was
+    enforcing an hour ago — is still refused.
 
-    Case is folded for the reason it always was: the proxy in front reads the
-    same variable through `.strip().lower()`, and a gateway matching exactly
-    would refuse to start on the `NONE` its proxy resolved happily.
+    Lower-cased to match `auth_headers`, which reads the same variable through
+    `.lower()`. A gateway that took `NONE` for an enrolment would refuse to
+    start on a value its own auth layer resolves happily.
     """
-    raw = (os.environ.get("RAIL_TICKET_MODE") or "").strip()
+    value = (os.environ.get(name) or "").strip()
+    if not value:
+        return False
+    if name == "RAIL_AUTH_MODE":
+        return value.lower() != UNENROLLING_AUTH_MODE
+    return True
+
+
+def plugin_enabled() -> bool:
+    """Whether RailXia is installed here, from `RAIL_PLUGIN_ENABLED`.
+
+    **It is not a question about posture.** An enabled component polls at every
+    enforcement value, `none` included; this answers only whether there is a
+    control plane to poll at all.
+
+    Two refusals rather than a lenient read, and they cover the two ways an
+    operator's intent and this variable come apart:
+
+    **A leftover `RAIL_TICKET_MODE` stops the component**, naming what replaced
+    it. That variable carried a posture, then carried enrolment, and now carries
+    nothing — so a deployment still setting it believes it is configuring
+    something that is no longer read. Refusing is the cheaper failure because it
+    is the one an operator sees.
+
+    **Rail Center configuration beside a plugin that is off stops it too**,
+    naming both. This is what makes the `false` default safe: the case that
+    would be dangerous — a dropped flag on a gateway that was enforcing an hour
+    ago — is exactly the case with `RAIL_CENTER_URL` set, so it is refused
+    rather than silently unenrolled. A deployment with no Rail Center
+    configuration is a plain gateway and boots without the variable, and
+    `RAIL_AUTH_MODE=none` is none of it: see `_asserts_enrolment`.
+
+    Case is folded for the reason it always was: the proxy in front reads its
+    own flag through `.strip().lower()`, and a gateway matching exactly would
+    refuse to start on the `TRUE` its proxy resolved happily.
+    """
+    if (os.environ.get(RETIRED_FLAG) or "").strip():
+        raise PluginConfigError(
+            f"{RETIRED_FLAG} is no longer read. Whether this gateway has a "
+            f"control plane is {PLUGIN_FLAG}=true|false; what it does with a "
+            f"call arrives in the policy bundle as `enforcement.mode`. Remove "
+            f"{RETIRED_FLAG}."
+        )
+
+    raw = (os.environ.get(PLUGIN_FLAG) or "").strip()
     if not raw:
-        return DEFAULT_ENROLMENT
-    folded = raw.lower()
-    if folded not in ENROLMENTS:
-        retired = (
-            " RC-312 replaced the posture values: it now arrives in the policy bundle."
-            if folded in ENFORCEMENTS
-            else ""
-        )
-        raise TicketModeError(
-            f"RAIL_TICKET_MODE must be one of {', '.join(ENROLMENTS)}, got: {raw}.{retired}"
-        )
-    return folded  # type: ignore[return-value]
+        enabled = DEFAULT_PLUGIN_ENABLED
+    else:
+        folded = raw.lower()
+        if folded not in PLUGIN_VALUES:
+            raise PluginConfigError(
+                f"{PLUGIN_FLAG} must be one of {', '.join(PLUGIN_VALUES)}, got: {raw}"
+            )
+        enabled = folded == "true"
 
-
-def polls(enrolled: Enrolment) -> bool:
-    """Whether this component reaches a control plane at all.
-
-    False only for `none`, and it is the single question the rest of the
-    component asks of enrolment — the holder's lifecycle and readiness both turn
-    on it. **It is not a question about posture**: a `plugin` component polls at
-    every enforcement value, `none` included.
-    """
-    return enrolled != "none"
+    if not enabled:
+        configured = [
+            name for name in RAIL_CENTER_VARIABLES if _asserts_enrolment(name)
+        ]
+        if configured:
+            raise PluginConfigError(
+                f"{PLUGIN_FLAG} is {raw or 'unset, which is false'} and this "
+                f"gateway would reach no control plane, but "
+                f"{', '.join(configured)} "
+                f"{'is' if len(configured) == 1 else 'are'} set. Set "
+                f"{PLUGIN_FLAG}=true to use that configuration, or remove it."
+            )
+    return enabled
 
 
 def judges(enforcement: Enforcement) -> bool:
@@ -149,7 +229,7 @@ def blocks(enforcement: Enforcement) -> bool:
     return enforcement == "enforce"
 
 
-def describe_enrolment(enrolled: Enrolment) -> str:
+def describe_plugin(enabled: bool) -> str:
     """The startup line, naming what this deployment is rather than what it does.
 
     What it *does* is the bundle's to say and is not known at startup, so this
@@ -157,14 +237,14 @@ def describe_enrolment(enrolled: Enrolment) -> str:
     learns whether a control plane is in play, and looks at the gateway's posture
     for the rest.
     """
-    if enrolled == "none":
+    if not enabled:
         return (
-            "RAIL_TICKET_MODE=none — this gateway has no control plane: it "
-            "fetches no policy bundle, evaluates nothing, and forwards every "
-            "request"
+            "RAIL_PLUGIN_ENABLED=false — RailXia is not installed on this "
+            "gateway: it fetches no policy bundle, evaluates nothing, and "
+            "forwards every request"
         )
     return (
-        "RAIL_TICKET_MODE=plugin — this gateway polls Rail Center for its policy "
+        "RAIL_PLUGIN_ENABLED=true — this gateway polls Rail Center for its policy "
         "bundle and takes its enforcement posture from it; until the first "
         "bundle arrives it judges nothing and reports itself unready"
     )
@@ -180,11 +260,13 @@ def describe_enforcement(
     a line mentioning it is a line where it decides something.
 
     **`told` is not a default, and that is the point of it.** A bundle naming no
-    `enforcement` resolves to the same `none`/`block` as one naming them, so the
+    `enforcement` resolves to the same `none` as one naming `none`, so the
     posture alone cannot say whether Rail Center chose to judge nothing or said
     nothing at all — and the line that reports the second as the first credits a
     control plane with a decision it never made. Every caller has the answer to
     hand; requiring it is what stops a fourth state being rendered as a third.
+    The fallback settles none of this, for the reason `UsableBundle.posture_told`
+    gives.
     """
     if not told:
         return (

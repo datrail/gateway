@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -137,12 +138,11 @@ def test_bundle_vector(case: dict[str, Any]) -> None:
         for key, binding in bundle.bindings.items()
     } == case["bindings"]
 
-    assert len(bundle.rejected) == case["rejected_count"]
-
     # Carried exactly. A reader re-fetches on a timer and re-parses only when
-    # this changes, so a version normalised on the way through would either
-    # re-parse forever or never.
-    assert bundle.version == case["bundle"]["version"]
+    # this changes, so a content hash normalised on the way through would
+    # either re-parse forever or never.
+    assert bundle.content_hash == case["bundle"]["content_hash"]
+    assert bundle.schema_version == case["bundle"]["schema_version"]
 
 
 def test_an_unusable_bundle_names_what_was_wrong() -> None:
@@ -197,17 +197,17 @@ def test_a_validated_bundle_cannot_be_edited_in_place() -> None:
     """
     bundle = validate_bundle(
         {
-            "version": "v1",
+            "schema_version": "1.0",
+            "content_hash": "v1",
             "policies": [{"id": "5c8f1e42-0000-4000-8000-0000000000a1", "priority": 1}],
             "bindings": [
                 {"endpoint_key": "e", "mode": "open", "policy_ids": []},
             ],
-            "rejected": [],
         }
     )
 
     for target, field, value in (
-        (bundle, "version", "v2"),
+        (bundle, "content_hash", "v2"),
         (bundle.chain[0], "action", "block"),
         (bundle.chain[0], "priority", 0),
         (bundle.bindings["e"], "mode", "gated"),
@@ -224,7 +224,6 @@ def test_a_validated_bundle_cannot_be_edited_in_place() -> None:
     # is a caller misusing its own held bundle.
     assert isinstance(bundle.chain, tuple)
     assert isinstance(bundle.bindings["e"].policy_ids, frozenset)
-    assert isinstance(bundle.rejected, tuple)
     with pytest.raises(TypeError):
         bundle.bindings["e"] = Binding(mode="gated", policy_ids=frozenset({"x"}))
     with pytest.raises(AttributeError):
@@ -244,10 +243,10 @@ def test_a_refusal_names_the_value_it_refused() -> None:
 
     def body(**over: Any) -> dict[str, Any]:
         return {
-            "version": "v",
+            "schema_version": "1.0",
+            "content_hash": "v",
             "policies": [],
             "bindings": [],
-            "rejected": [],
             **over,
         }
 
@@ -255,10 +254,14 @@ def test_a_refusal_names_the_value_it_refused() -> None:
         return {"endpoint_key": "e", "mode": "gated", "policy_ids": [one], **over}
 
     refusals = [
-        (body(version="a\nb"), "unprintable"),
-        # And a refused version an operator can actually read, so the only
+        (body(content_hash="a\nb"), "unprintable"),
+        # And a refused content hash an operator can actually read, so the only
         # case is not the one that renders as a placeholder.
-        (body(version="v" * 256), "v" * 255),
+        (body(content_hash="v" * 256), "v" * 255),
+        # The same two rules on the schema version, which is held and re-echoed
+        # for exactly as long as the hash beside it is.
+        (body(schema_version="a\nb"), "unprintable"),
+        (body(schema_version="v" * 256), "v" * 255),
         (body(policies=["not a policy"]), "not a policy"),
         # The binding half of the same message, which round 8's docstring
         # described away as naming nothing rather than noticing it was silent.
@@ -289,21 +292,29 @@ def test_a_refusal_names_the_value_it_refused() -> None:
         assert expected in caught.value.reason, (expected, caught.value.reason)
 
 
-def _postured(enforcement: Any = _ABSENT) -> dict[str, Any]:
-    """A minimal usable bundle, carrying the given `enforcement` or none at all.
+def _postured(
+    enforcement: Any = _ABSENT, binding_fallback: Any = _ABSENT
+) -> dict[str, Any]:
+    """A minimal usable bundle, carrying the given posture and fallback or none.
+
+    **They are two root fields and not one object**, which is the shape this
+    helper exists to keep honest: the posture says how much of a verdict is
+    acted on, the fallback says what the verdict is where no binding matched.
 
     `_ABSENT` rather than `None`, because a bundle carrying `"enforcement":
     null` and one carrying no such key are the same claim here and a default
     argument cannot tell them apart.
     """
     body: dict[str, Any] = {
-        "version": "v-posture",
+        "schema_version": "1.0",
+        "content_hash": "v-posture",
         "policies": [],
         "bindings": [],
-        "rejected": [],
     }
     if enforcement is not _ABSENT:
         body["enforcement"] = enforcement
+    if binding_fallback is not _ABSENT:
+        body["binding_fallback"] = binding_fallback
     return body
 
 
@@ -333,6 +344,103 @@ def test_a_bundle_naming_a_mode_and_no_fallback_blocks_the_unbound() -> None:
     assert resolved.fallback == "block"
 
 
+def test_a_fallback_inside_enforcement_is_warned_about_and_decides_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A fallback stated where nothing reads it is reported, not obeyed.
+
+    The direction is what makes silence unacceptable: the responder said `pass`
+    and the reader holds `block`, so at `enforce` every call no binding matches
+    is refused with a 403 while the control plane's own document says it should
+    be forwarded. The warning is the only place those two claims are put beside
+    each other.
+    """
+    body = _postured({"mode": "enforce", "fallback": "pass"})
+
+    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+        resolved = validate_bundle(body)
+
+    assert resolved.fallback == "block"
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "`pass`" in said
+    assert "`block`" in said
+    assert "binding_fallback" in said
+
+
+@pytest.mark.parametrize(
+    "enforcement, binding_fallback",
+    [
+        ({"mode": "enforce"}, "pass"),
+        ({"mode": "enforce"}, _ABSENT),
+        ({"mode": "observe"}, "block"),
+        (_ABSENT, "pass"),
+    ],
+    ids=["enforce-and-pass", "enforce-alone", "observe-and-block", "fallback-alone"],
+)
+def test_a_correctly_shaped_bundle_says_nothing_about_its_fallback(
+    caplog: pytest.LogCaptureFixture, enforcement: Any, binding_fallback: Any
+) -> None:
+    """The report of a misplaced fallback is confined to a misplaced fallback.
+
+    A warning that also fires on every bundle an operator has got right is one
+    they learn to skip, which costs the case it exists to make visible its only
+    audience. Silence on the correct shape is half of what that warning is,
+    rather than an absence of behaviour.
+    """
+    body = _postured(enforcement, binding_fallback)
+
+    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+        validate_bundle(body)
+
+    assert caplog.records == []
+
+
+@pytest.mark.parametrize(
+    "refused, named",
+    [
+        (
+            {"policies": [{"id": "not-a-uuid", "enabled": True, "priority": 1}]},
+            "not-a-uuid",
+        ),
+        (
+            {
+                "bindings": [
+                    {"endpoint_key": "delivery.x", "mode": "gated", "policy_ids": []}
+                ]
+            },
+            "delivery.x",
+        ),
+    ],
+    ids=["a-policy-id-that-cannot-be-compared", "a-gated-binding-naming-no-policy"],
+)
+def test_a_refused_bundle_says_nothing_about_which_fallback_applies(
+    caplog: pytest.LogCaptureFixture, refused: dict[str, Any], named: str
+) -> None:
+    """Nothing in a refused bundle applies, so nothing in it is reported.
+
+    The audience is an operator mid-reshape, whose responder has moved the root
+    and not the fallback. A line naming the fallback that "applies" off a bundle
+    this reader then throws away names neither this bundle's — it applies none —
+    nor the held one still deciding traffic, and it repeats every poll for as
+    long as the drift lasts, since a refused bundle never reaches the
+    content-hash short-circuit that quiets the accepted case after one line.
+
+    Both the chain and the bindings, because either one left below the warning
+    reopens the case for every bundle the other accepts, and the two refusals
+    are reached from different fields of the same body.
+    """
+    body = _postured({"mode": "enforce", "fallback": "pass"}) | refused
+
+    with (
+        caplog.at_level(logging.WARNING, logger="gateway.bundle"),
+        pytest.raises(UnusableBundle) as caught,
+    ):
+        validate_bundle(body)
+
+    assert named in caught.value.reason
+    assert caplog.records == []
+
+
 #: Every `mode` a bundle can carry, paired with how a refusal must name it, or
 #: `None` where the value is in the vocabulary and is accepted. `_ABSENT` is the
 #: object with no `mode` key, which reads as a null one.
@@ -348,7 +456,7 @@ _MODES: list[tuple[Any, str | None]] = [
     ("enforce", None),
     ("halt", "`halt`"),
     ("", "``"),
-    # Not folded. `RAIL_TICKET_MODE` is folded because a proxy reading the same
+    # Not folded. `RAIL_PLUGIN_ENABLED` is folded because a proxy reading the same
     # variable folds it; a bundle is a document from one producer, and a
     # producer shouting the value disagrees about the vocabulary like any other.
     ("NONE", "`NONE`"),
@@ -418,7 +526,7 @@ def test_the_published_posture_enums_are_the_vocabulary_this_reader_holds() -> N
     )
     enforcement = published["properties"]["enforcement"]["properties"]
     assert set(enforcement["mode"]["enum"]) == set(ENFORCEMENTS)
-    assert set(enforcement["fallback"]["enum"]) == set(FALLBACKS)
+    assert set(published["properties"]["binding_fallback"]["enum"]) == set(FALLBACKS)
 
 
 def test_every_enforcement_object_resolves_or_is_refused() -> None:
@@ -452,9 +560,7 @@ def test_every_enforcement_object_resolves_or_is_refused() -> None:
             enforcement: dict[str, Any] = {}
             if mode is not _ABSENT:
                 enforcement["mode"] = mode
-            if fallback is not _ABSENT:
-                enforcement["fallback"] = fallback
-            cell = f"mode={mode!r}, fallback={fallback!r}"
+            cell = f"mode={mode!r}, binding_fallback={fallback!r}"
 
             # The mode is read first, so a bundle wrong in both is refused for
             # the mode. Naming one fault per refusal is the contract's shape.
@@ -468,13 +574,13 @@ def test_every_enforcement_object_resolves_or_is_refused() -> None:
             if expected is not None:
                 prefix, named = expected
                 with pytest.raises(UnusableBundle) as refused:
-                    validate_bundle(_postured(enforcement))
+                    validate_bundle(_postured(enforcement, fallback))
                 reason = refused.value.reason
                 assert reason.startswith(prefix), (cell, reason)
                 assert named in reason, (cell, reason)
                 continue
 
-            resolved = validate_bundle(_postured(enforcement))
+            resolved = validate_bundle(_postured(enforcement, fallback))
             # Literals, not `UNTOLD_ENFORCEMENT`/`DEFAULT_FALLBACK`: expectations
             # read off the constants would move with a mutation of them.
             assert resolved.enforcement == mode, cell
@@ -569,7 +675,8 @@ def _decide_bundle(case: dict[str, Any]) -> dict[str, Any]:
     if "bundle" in case:
         return case["bundle"]
     return {
-        "version": CONDITION_BUNDLE_VERSION,
+        "schema_version": "1.0",
+        "content_hash": CONDITION_BUNDLE_VERSION,
         "policies": [
             {
                 "id": CONDITION_POLICY_ID,
@@ -692,16 +799,17 @@ INERT_CHAIN = [
 def _fallback_bundle(case: dict[str, Any]):
     return validate_bundle(
         {
-            # The version moves with the posture because Rail Center hashes
-            # `enforcement` into it, and a file whose cases shared one version
-            # across four postures would describe a control plane whose kill
-            # switch cannot arrive.
-            "version": f"v-fallback-{case['enforcement']['mode']}"
-            f"-{case['enforcement']['fallback']}",
+            "schema_version": "1.0",
+            # The content hash moves with the posture and the fallback because
+            # Rail Center hashes both into it, and a file whose cases shared one
+            # hash across four postures would describe a control plane whose
+            # kill switch cannot arrive.
+            "content_hash": f"v-fallback-{case['enforcement']['mode']}"
+            f"-{case['binding_fallback']}",
             "policies": case.get("policies", INERT_CHAIN),
             "bindings": case["bindings"],
-            "rejected": [],
             "enforcement": case["enforcement"],
+            "binding_fallback": case["binding_fallback"],
         }
     )
 
@@ -760,7 +868,7 @@ def test_the_fallback_file_is_worth_running() -> None:
     assert sum(1 for case in FALLBACK_CASES if not case["refused"]) >= 6
 
     modes = {case["enforcement"]["mode"] for case in FALLBACK_CASES}
-    fallbacks = {case["enforcement"]["fallback"] for case in FALLBACK_CASES}
+    fallbacks = {case["binding_fallback"] for case in FALLBACK_CASES}
     # Both halves of the composition are exercised over both of their values. A
     # file covering only `enforce` would say nothing about the rule that makes
     # `observe` safe to switch on.
@@ -781,6 +889,5 @@ def test_the_fallback_file_is_worth_running() -> None:
     assert sum(1 for case in walked if case["expect"]["allowed"]) >= 1
     assert sum(1 for case in walked if not case["expect"]["allowed"]) >= 1
     assert all(
-        case["enforcement"]["fallback"] == "pass" and not case["refused"]
-        for case in walked
+        case["binding_fallback"] == "pass" and not case["refused"] for case in walked
     )

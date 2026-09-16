@@ -32,6 +32,7 @@ import zlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 import httpx
 
@@ -63,9 +64,10 @@ BUNDLE_PATH = "/v1/policy-bundle"
 #: How often to ask again, in seconds. **Chosen, not inherited** — neither the
 #: contract nor the specification names an interval.
 #:
-#: Sixty because `version` is a content hash: an unchanged one costs a round trip
-#: and a string comparison, cheap enough to do often, while a rule an operator
-#: changes reaches enforcement within a minute — a number a person can be told.
+#: Sixty because a poll compares a content hash: an unchanged one costs a round
+#: trip and a string comparison, cheap enough to do often, while a rule an
+#: operator changes reaches enforcement within a minute — a number a person can
+#: be told.
 #: Seconds would load the control plane for nothing; minutes would make "no
 #: gateway release" feel untrue.
 DEFAULT_REFRESH_SECONDS = 60
@@ -185,7 +187,8 @@ class RefreshOutcome:
 
     `kind` is the whole verdict; the rest is context.
 
-    * ``unchanged``   the version matched what is held, so nothing was re-parsed
+    * ``unchanged``   the content hash matched what is held, so nothing was
+      re-parsed
     * ``replaced``    a new bundle validated and is now held
     * ``unusable``    a bundle arrived and cannot be applied
     * ``unreachable`` nothing usable arrived at all
@@ -197,7 +200,7 @@ class RefreshOutcome:
     """
 
     kind: Literal["unchanged", "replaced", "unusable", "unreachable"]
-    #: The version now held, or None when nothing is.
+    #: The content hash of the bundle now held, or None when nothing is.
     held: str | None
     #: Why, for the two failing kinds. Already passed through `safe_for_log`.
     reason: str | None = None
@@ -247,6 +250,7 @@ class BundleHolder:
         self,
         rail_center_url: str,
         headers: dict[str, str],
+        gateway_slug: str,
         *,
         interval_seconds: int = DEFAULT_REFRESH_SECONDS,
         timeout_seconds: float = FETCH_TIMEOUT_SECONDS,
@@ -257,7 +261,19 @@ class BundleHolder:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
-        self._url = rail_center_url.rstrip("/") + BUNDLE_PATH
+        # **The slug is sent even though a gateway-kind credential already names
+        # this gateway.** Rail Center resolves the credential first and refuses a
+        # query naming a different gateway, so the two can only agree or the
+        # fetch fails loudly — and where the credential names nothing, which is
+        # every deployment on `RAIL_AUTH_MODE=none`, the query is the only thing
+        # that identifies which bundle to build. Sending it unconditionally is
+        # what makes the two auth modes fetch the same way.
+        self._url = (
+            rail_center_url.rstrip("/")
+            + BUNDLE_PATH
+            + "?"
+            + urlencode({"gateway": gateway_slug})
+        )
         self._headers = _sendable(
             {
                 "Accept": "application/json",
@@ -393,7 +409,7 @@ class BundleHolder:
                 logger.exception("policy bundle refresh raised; the loop continues")
 
     async def _refresh_once(self) -> RefreshOutcome:
-        held = self._held.version if self._held else None
+        held = self._held.content_hash if self._held else None
         previous_line = _posture_line(self._held) if self._held else None
 
         try:
@@ -401,10 +417,15 @@ class BundleHolder:
         except _Unreachable as failure:
             return self._unreachable(failure.reason, held)
 
-        # `version` is a content hash, so an unchanged one means there is
-        # nothing to re-parse — what is held is byte-for-byte what arrived. Read
-        # off the raw body before validation, so the cheap path stays cheap.
-        if isinstance(body, dict) and held is not None and body.get("version") == held:
+        # `content_hash` covers every field that changes behaviour, so an
+        # unchanged one means there is nothing to re-parse — what is held is
+        # byte-for-byte what arrived. Read off the raw body before validation,
+        # so the cheap path stays cheap.
+        if (
+            isinstance(body, dict)
+            and held is not None
+            and body.get("content_hash") == held
+        ):
             return RefreshOutcome("unchanged", held)
 
         try:
@@ -416,35 +437,21 @@ class BundleHolder:
             logger.error(
                 "refusing the fetched policy bundle — %s; %s",
                 refusal.reason,
-                f"keeping version {safe_for_log(held)}" if held else "no bundle held",
+                f"keeping bundle {safe_for_log(held)}" if held else "no bundle held",
             )
             return RefreshOutcome("unusable", held, refusal.reason)
-
-        # `rejected` is not an error channel to drop. It names the policies Rail
-        # Center could not compile, so a gateway that swallows it enforces a
-        # chain narrower than the operator wrote with nothing on either side
-        # saying so. One line per policy, every time the bundle changes — not
-        # once at startup, since the set moves with the bundle.
-        for entry in bundle.rejected:
-            fields = entry if isinstance(entry, dict) else {}
-            logger.warning(
-                'Rail Center did not publish policy "%s" (%s): %s — it is not in force',
-                safe_for_log(fields.get("policy_name")),
-                safe_for_log(fields.get("policy_id")),
-                safe_for_log(fields.get("reason")),
-            )
 
         posture_line = _posture_line(bundle)
         self._held = bundle
         logger.info(
-            "holding policy bundle version %s — %d enabled policies, "
-            "%d bound endpoints, %d rejected",
-            safe_for_log(bundle.version),
+            "holding policy bundle %s (schema %s) — %d enabled policies, "
+            "%d bound endpoints",
+            safe_for_log(bundle.content_hash),
+            safe_for_log(bundle.schema_version),
             len(bundle.chain),
             len(bundle.bindings),
-            len(bundle.rejected),
         )
-        # The line above names a version; it says nothing about what traffic
+        # The line above names a bundle; it says nothing about what traffic
         # will now experience. Posture is the one thing in a bundle an operator
         # moves deliberately, and moving it without a redeploy is what RC-312
         # exists to allow — so the move needs a line of its own, or `enforce`
@@ -466,7 +473,7 @@ class BundleHolder:
         # and where the fallback decides anything.
         if posture_line != previous_line:
             logger.info("%s", posture_line)
-        return RefreshOutcome("replaced", bundle.version)
+        return RefreshOutcome("replaced", bundle.content_hash)
 
     async def _fetch(self) -> Any:
         """The parsed body, or `_Unreachable` for every way of not getting one."""
@@ -624,8 +631,9 @@ class BundleHolder:
             )
 
     def _unreachable(self, reason: str, held: str | None) -> RefreshOutcome:
-        # Both halves are filtered, and both need to be. `held` is a version off
-        # the wire and reaches here on every failure for as long as it is held.
+        # Both halves are filtered, and both need to be. `held` is a content
+        # hash off the wire and reaches here on every failure for as long as it
+        # is held.
         # A reason built from an exception carries whatever the exception
         # carries: h11 quotes the bytes it could not parse — `illegal header
         # line: b'...'` — so a malformed response puts its own content in this
@@ -647,7 +655,7 @@ class BundleHolder:
         safe = safe_for_log(reason)
         if held:
             logger.warning(
-                "policy bundle fetch failed — %s; keeping version %s",
+                "policy bundle fetch failed — %s; keeping bundle %s",
                 safe,
                 safe_for_log(held),
             )

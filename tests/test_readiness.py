@@ -33,6 +33,7 @@ from gateway import server
 from gateway.bundle.client import FETCH_DEADLINE_SECONDS, BundleHolder
 from gateway.server import _bundle_lifespan, build_app
 from tests.conftest import (
+    GATEWAY_SLUG,
     POLICY_BUNDLE,
     RAIL_CENTER,
     holder_serving,
@@ -74,7 +75,11 @@ async def test_a_gateway_holding_no_bundle_is_not_ready():
     honestly be reported as. 503, because the status code is the part every
     orchestrator reads without being taught to."""
     app = build_app(
-        UPSTREAM, holder_serving(unreachable), slug="delivery", rail_center=RAIL_CENTER
+        UPSTREAM,
+        holder_serving(unreachable),
+        plugin=True,
+        slug="delivery",
+        rail_center=RAIL_CENTER,
     )
 
     async with running(app) as client:
@@ -89,6 +94,7 @@ async def test_a_gateway_holding_a_bundle_is_ready():
     app = build_app(
         UPSTREAM,
         holder_serving(serving_a_bundle),
+        plugin=True,
         slug="delivery",
         rail_center=RAIL_CENTER,
     )
@@ -101,13 +107,14 @@ async def test_a_gateway_holding_a_bundle_is_ready():
 
 
 @pytest.mark.asyncio
-async def test_the_report_does_not_carry_the_version_held():
+async def test_the_report_does_not_carry_the_bundle_held():
     """The route is unauthenticated and shares a port with the MCP surface, so
-    a version in the body is a public feed of when a customer's policy changed.
+    naming the bundle in the body is a public feed of when a customer's policy changed.
     The operator use it would serve is already served by the log line."""
     app = build_app(
         UPSTREAM,
         holder_serving(serving_a_bundle),
+        plugin=True,
         slug="delivery",
         rail_center=RAIL_CENTER,
     )
@@ -115,7 +122,7 @@ async def test_the_report_does_not_carry_the_version_held():
     async with running(app) as client:
         body = (await client.get("/ready")).text
 
-    assert POLICY_BUNDLE["version"] not in body
+    assert POLICY_BUNDLE["content_hash"] not in body
 
 
 @pytest.mark.asyncio
@@ -125,7 +132,9 @@ async def test_readiness_is_read_at_the_request_and_not_cached_at_startup():
     tests above and fails this one, which is the whole reason it is here."""
     answer = unreachable
     holder = holder_serving(lambda: answer())
-    app = build_app(UPSTREAM, holder, slug="delivery", rail_center=RAIL_CENTER)
+    app = build_app(
+        UPSTREAM, holder, plugin=True, slug="delivery", rail_center=RAIL_CENTER
+    )
 
     async with running(app) as client:
         assert (await client.get("/ready")).status_code == 503
@@ -144,7 +153,9 @@ async def test_a_failed_refresh_does_not_take_readiness_away():
     everything it needs."""
     answer = serving_a_bundle
     holder = holder_serving(lambda: answer())
-    app = build_app(UPSTREAM, holder, slug="delivery", rail_center=RAIL_CENTER)
+    app = build_app(
+        UPSTREAM, holder, plugin=True, slug="delivery", rail_center=RAIL_CENTER
+    )
 
     async with running(app) as client:
         assert (await client.get("/ready")).status_code == 200
@@ -163,11 +174,12 @@ async def test_a_bundle_that_will_not_validate_leaves_the_gateway_unready():
     which is a different fault from an unreachable one and the same report."""
 
     def missing_its_policies() -> httpx.Response:
-        return httpx.Response(200, json={"version": "v1"})
+        return httpx.Response(200, json={"schema_version": "1.0", "content_hash": "v1"})
 
     app = build_app(
         UPSTREAM,
         holder_serving(missing_its_policies),
+        plugin=True,
         slug="delivery",
         rail_center=RAIL_CENTER,
     )
@@ -187,7 +199,11 @@ async def test_a_bundle_that_will_not_validate_leaves_the_gateway_unready():
 async def test_liveness_is_the_same_answer_either_way(label, answer):
     """The one assertion that stops `/health` from acquiring a second job."""
     app = build_app(
-        UPSTREAM, holder_serving(answer), slug="delivery", rail_center=RAIL_CENTER
+        UPSTREAM,
+        holder_serving(answer),
+        plugin=True,
+        slug="delivery",
+        rail_center=RAIL_CENTER,
     )
 
     async with running(app) as client:
@@ -243,6 +259,7 @@ async def test_the_holder_starts_and_stops_with_the_application():
     app = build_app(
         UPSTREAM,
         holder_serving(answer, sleep=sleep),
+        plugin=True,
         slug="delivery",
         rail_center=RAIL_CENTER,
     )
@@ -266,7 +283,11 @@ async def test_a_control_plane_that_is_down_does_not_stop_the_gateway_starting(
     the difference between starting and stuck, which the one bit on `/ready`
     cannot carry — and keeps trying."""
     app = build_app(
-        UPSTREAM, holder_serving(unreachable), slug="delivery", rail_center=RAIL_CENTER
+        UPSTREAM,
+        holder_serving(unreachable),
+        plugin=True,
+        slug="delivery",
+        rail_center=RAIL_CENTER,
     )
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
@@ -286,7 +307,7 @@ async def test_a_control_plane_that_is_down_does_not_stop_the_gateway_starting(
     # something that happened, and what `enforce` does includes refusing a call
     # it cannot judge.
     about_the_bundle = [
-        m for m in caplog.messages if not m.startswith("RAIL_TICKET_MODE=")
+        m for m in caplog.messages if not m.startswith("RAIL_PLUGIN_ENABLED=")
     ]
     assert "refus" not in "\n".join(about_the_bundle).lower(), about_the_bundle
 
@@ -298,6 +319,7 @@ async def test_a_gateway_that_starts_ready_says_nothing_about_it(caplog):
     app = build_app(
         UPSTREAM,
         holder_serving(serving_a_bundle),
+        plugin=True,
         slug="delivery",
         rail_center=RAIL_CENTER,
     )
@@ -333,13 +355,16 @@ async def test_the_first_fetch_does_not_hold_the_process_off_the_socket(
     holder = BundleHolder(
         "http://rail-center.test",
         {},
+        GATEWAY_SLUG,
         interval_seconds=3600,
         transport=httpx.MockTransport(never_answers),
     )
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
         async with running(
-            build_app(UPSTREAM, holder, slug="delivery", rail_center=RAIL_CENTER)
+            build_app(
+                UPSTREAM, holder, plugin=True, slug="delivery", rail_center=RAIL_CENTER
+            )
         ) as client:
             assert (await client.get("/health")).status_code == 200
             assert (await client.get("/ready")).status_code == 503
@@ -363,12 +388,15 @@ async def test_a_start_that_raises_stops_the_process_coming_up():
     holder = Defective(
         "http://rail-center.test",
         {},
+        GATEWAY_SLUG,
         transport=httpx.MockTransport(lambda _request: unreachable()),
     )
 
     with pytest.raises(RuntimeError, match="refused to start"):
         async with running(
-            build_app(UPSTREAM, holder, slug="delivery", rail_center=RAIL_CENTER)
+            build_app(
+                UPSTREAM, holder, plugin=True, slug="delivery", rail_center=RAIL_CENTER
+            )
         ):
             raise AssertionError("the app was not meant to start")
 
@@ -380,7 +408,11 @@ async def test_the_unready_warning_carries_why_and_not_only_that(caplog):
     line naming only the kind sends an operator to look for a control plane
     that is down when what happened was a control plane that answered."""
     app = build_app(
-        UPSTREAM, holder_serving(unreachable), slug="delivery", rail_center=RAIL_CENTER
+        UPSTREAM,
+        holder_serving(unreachable),
+        plugin=True,
+        slug="delivery",
+        rail_center=RAIL_CENTER,
     )
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
@@ -480,6 +512,7 @@ async def test_a_first_fetch_that_answers_past_the_grace_still_arrives(monkeypat
     holder = BundleHolder(
         "http://rail-center.test",
         {},
+        GATEWAY_SLUG,
         interval_seconds=3600,
         transport=httpx.MockTransport(answers_only_when_released),
         sleep=sleep,
@@ -523,6 +556,7 @@ async def test_a_first_fetch_still_in_flight_is_retired_with_the_app(monkeypatch
     holder = StillFetching(
         "http://rail-center.test",
         {},
+        GATEWAY_SLUG,
         interval_seconds=3600,
         transport=httpx.MockTransport(lambda _request: unreachable()),
     )
@@ -554,6 +588,7 @@ async def test_a_first_fetch_that_raises_past_the_grace_is_still_said_out_loud(
     holder = RaisesLate(
         "http://rail-center.test",
         {},
+        GATEWAY_SLUG,
         interval_seconds=3600,
         transport=httpx.MockTransport(lambda _request: unreachable()),
     )

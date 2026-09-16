@@ -1,12 +1,12 @@
 {
-  "_comment": "Conformance vectors for `enforcement` — the posture a bundle carries, and what it does to a call no binding matches. They come from rail-center's docs/policy-evaluation-contract.md, under `Enforcement` and `How fallback composes with the chain`.\n\nThis is deliberately a file of its own rather than more cases in decide.json, because the rule it states is NOT part of the walk. `fallback` is consulted BEFORE the chain and instead of it: at `enforce`, a `block` fallback refuses an endpoint with no binding entry without the chain being consulted at all, so there is no verdict to assert and no policy to name. decide.json's cases all reach a decision; none of these do. An implementation that answered these by walking the chain and discarding the result would agree with every assertion here and still have the contract wrong — it would report a policy that was never bound to the endpoint it refused.\n\nEach case gives the posture (`mode` and `fallback`), the `bindings` the bundle carries, the `endpoint_key` of the call, and `refused`: whether the call is refused for being unbound. The two fields compose in one direction only — `fallback` is read at `enforce` and at no other mode — so `refused` is false for every `observe` and `none` case however strict the fallback is, and that is the half an implementation gets wrong: a gateway that refuses at `observe` has made the mode an operator uses to be SURE nothing is blocked into one that blocks.\n\n`refused: false` does not mean allowed. It means the call is judged — by the whole chain where nothing narrows, by the binding where something does — and decide.json carries what that judgement is. `pass` therefore stops meaning \"unjudged\" and means \"not refused for being unbound\".\n\n`keyless` says which kind of absent key a case with a null `endpoint_key` is about, and it is the one field here the contract does not state: the contract models `endpoint_key` as always present. `true` is a message that names no tool by design (`resources/read`), which has no endpoint for a fallback about endpoints to refuse. `false` is a `tools/call` that named a tool the reader declined to compose a key for, which named an endpoint no binding can match. This gateway's answer to both is here so a reimplementation can match it; a reader whose key composition never fails has no second case.\n\nA case may carry `policies` — the chain the bundle serves, defaulting to a single inert `alert` rule that exists only so a `gated` binding has something to name. A case that also carries `claims`, `now` and `expect` asserts **what the walk concluded** once the fallback declined to refuse: `expect.allowed` and `expect.denied_by` (a canonical policy id, or null), read exactly as decide.json reads them. Those cases are the ones that stop `pass` being implemented as *unjudged* — a reader that forwarded an unbound endpoint without walking it answers every `refused` in this file correctly and still admits a request the chain denies. `expect` is meaningless where `refused` is true, because no walk happened, and no case carries both.",
+  "_comment": "Conformance vectors for `enforcement` — the posture a bundle carries, and what it does to a call no binding matches. They come from rail-center's docs/policy-evaluation-contract.md, under `Enforcement` and `How fallback composes with the chain`.\n\nThis is deliberately a file of its own rather than more cases in decide.json, because the rule it states is NOT part of the walk. `fallback` is consulted BEFORE the chain and instead of it: at `enforce`, a `block` fallback refuses an endpoint with no binding entry without the chain being consulted at all, so there is no verdict to assert and no policy to name. decide.json's cases all reach a decision; none of these do. An implementation that answered these by walking the chain and discarding the result would agree with every assertion here and still have the contract wrong — it would report a policy that was never bound to the endpoint it refused.\n\nEach case gives the posture (`enforcement.mode`) and the `binding_fallback` beside it — two root fields of the bundle and not one object, because a posture says how much of a verdict is acted on while a fallback says what the verdict is where nothing matched — the `bindings` the bundle carries, the `endpoint_key` of the call, and `refused`: whether the call is refused for being unbound. The two compose in one direction only — `binding_fallback` is acted on at `enforce` and at no other mode — so `refused` is false for every `observe` and `none` case however strict the fallback is, and that is the half an implementation gets wrong: a gateway that refuses at `observe` has made the mode an operator uses to be SURE nothing is blocked into one that blocks.\n\n`refused: false` does not mean allowed. It means the call is judged — by the whole chain where nothing narrows, by the binding where something does — and decide.json carries what that judgement is. `pass` therefore stops meaning \"unjudged\" and means \"not refused for being unbound\".\n\n`keyless` says which kind of absent key a case with a null `endpoint_key` is about, and it is the one field here the contract does not state: the contract models `endpoint_key` as always present. `true` is a message that names no tool by design (`resources/read`), which has no endpoint for a fallback about endpoints to refuse. `false` is a `tools/call` that named a tool the reader declined to compose a key for, which named an endpoint no binding can match. This gateway's answer to both is here so a reimplementation can match it; a reader whose key composition never fails has no second case.\n\nA case may carry `policies` — the chain the bundle serves, defaulting to a single inert `alert` rule that exists only so a `gated` binding has something to name. A case that also carries `claims`, `now` and `expect` asserts **what the walk concluded** once the fallback declined to refuse: `expect.allowed` and `expect.denied_by` (a canonical policy id, or null), read exactly as decide.json reads them. Those cases are the ones that stop `pass` being implemented as *unjudged* — a reader that forwarded an unbound endpoint without walking it answers every `refused` in this file correctly and still admits a request the chain denies. `expect` is meaningless where `refused` is true, because no walk happened, and no case carries both.",
   "cases": [
     {
       "name": "enforce and block refuse an endpoint with no binding entry",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "block"
+        "mode": "enforce"
       },
+      "binding_fallback": "block",
       "bindings": [],
       "endpoint_key": "delivery.track_package",
       "keyless": true,
@@ -16,9 +16,9 @@
     {
       "name": "enforce and block refuse it however many other endpoints are bound",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "block"
+        "mode": "enforce"
       },
+      "binding_fallback": "block",
       "bindings": [
         {
           "endpoint_key": "delivery.refund_order",
@@ -36,9 +36,9 @@
     {
       "name": "enforce and block do not refuse a gated endpoint",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "block"
+        "mode": "enforce"
       },
+      "binding_fallback": "block",
       "bindings": [
         {
           "endpoint_key": "delivery.track_package",
@@ -56,9 +56,9 @@
     {
       "name": "enforce and block do not refuse an open endpoint",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "block"
+        "mode": "enforce"
       },
+      "binding_fallback": "block",
       "bindings": [
         {
           "endpoint_key": "delivery.track_package",
@@ -74,9 +74,9 @@
     {
       "name": "enforce and pass hand an unbound endpoint to the chain",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "pass"
+        "mode": "enforce"
       },
+      "binding_fallback": "pass",
       "bindings": [],
       "endpoint_key": "delivery.track_package",
       "keyless": true,
@@ -86,9 +86,9 @@
     {
       "name": "enforce and pass change nothing for a bound endpoint",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "pass"
+        "mode": "enforce"
       },
+      "binding_fallback": "pass",
       "bindings": [
         {
           "endpoint_key": "delivery.track_package",
@@ -105,9 +105,9 @@
     {
       "name": "observe never consults a block fallback",
       "enforcement": {
-        "mode": "observe",
-        "fallback": "block"
+        "mode": "observe"
       },
+      "binding_fallback": "block",
       "bindings": [],
       "endpoint_key": "delivery.track_package",
       "keyless": true,
@@ -117,9 +117,9 @@
     {
       "name": "observe never consults a pass fallback either",
       "enforcement": {
-        "mode": "observe",
-        "fallback": "pass"
+        "mode": "observe"
       },
+      "binding_fallback": "pass",
       "bindings": [],
       "endpoint_key": "delivery.track_package",
       "keyless": true,
@@ -128,9 +128,9 @@
     {
       "name": "none never consults a block fallback",
       "enforcement": {
-        "mode": "none",
-        "fallback": "block"
+        "mode": "none"
       },
+      "binding_fallback": "block",
       "bindings": [],
       "endpoint_key": "delivery.track_package",
       "keyless": true,
@@ -140,9 +140,9 @@
     {
       "name": "none never consults a pass fallback either",
       "enforcement": {
-        "mode": "none",
-        "fallback": "pass"
+        "mode": "none"
       },
+      "binding_fallback": "pass",
       "bindings": [],
       "endpoint_key": "delivery.track_package",
       "keyless": true,
@@ -151,9 +151,9 @@
     {
       "name": "a message naming no tool by design is not an unbound endpoint",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "block"
+        "mode": "enforce"
       },
+      "binding_fallback": "block",
       "bindings": [],
       "endpoint_key": null,
       "keyless": true,
@@ -163,9 +163,9 @@
     {
       "name": "a call whose tool name resolved to no key is refused under block",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "block"
+        "mode": "enforce"
       },
+      "binding_fallback": "block",
       "bindings": [],
       "endpoint_key": null,
       "keyless": false,
@@ -175,9 +175,9 @@
     {
       "name": "a call whose tool name resolved to no key is judged under pass",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "pass"
+        "mode": "enforce"
       },
+      "binding_fallback": "pass",
       "bindings": [],
       "endpoint_key": null,
       "keyless": false,
@@ -187,9 +187,9 @@
     {
       "name": "a message naming no tool by design is judged under pass too",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "pass"
+        "mode": "enforce"
       },
+      "binding_fallback": "pass",
       "bindings": [],
       "endpoint_key": null,
       "keyless": true,
@@ -198,9 +198,9 @@
     {
       "name": "enforce and pass: an unbound endpoint the chain denies is denied by the chain",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "pass"
+        "mode": "enforce"
       },
+      "binding_fallback": "pass",
       "bindings": [],
       "policies": [
         {
@@ -234,9 +234,9 @@
     {
       "name": "enforce and pass: an unbound endpoint no policy matches is allowed",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "pass"
+        "mode": "enforce"
       },
+      "binding_fallback": "pass",
       "bindings": [],
       "policies": [
         {
@@ -270,9 +270,9 @@
     {
       "name": "enforce and block refuse before a chain that would have allowed",
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "block"
+        "mode": "enforce"
       },
+      "binding_fallback": "block",
       "bindings": [],
       "policies": [
         {

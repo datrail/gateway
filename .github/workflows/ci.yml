@@ -167,11 +167,14 @@ jobs:
           # Every variable `.env.example` says this gateway needs, and the
           # step exists to catch the day that list grows: a required variable
           # added without a line here is a container that cannot start, and
-          # this is the only check that runs one. `RAIL_TICKET_MODE` is left
-          # unset on purpose, so the default path is the one exercised.
+          # this is the only check that runs one. `RAIL_PLUGIN_ENABLED` is set
+          # rather than left to its default, because the enrolled path is the
+          # one with variables to get wrong — a plain gateway needs one line.
           docker run -d --name gw -p 9100:9100 \
             -e RAIL_GATEWAY_PORT=9100 \
+            -e RAIL_PLUGIN_ENABLED=true \
             -e RAIL_CENTER_URL=http://rail-center.invalid \
+            -e RAIL_GATEWAY_SLUG=edge \
             -e RAIL_DATASOURCE_SLUG=delivery \
             -e RAIL_GATEWAY_UPSTREAM_URL=http://upstream.invalid/mcp gateway:ci
 
