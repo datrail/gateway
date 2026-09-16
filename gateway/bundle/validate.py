@@ -23,10 +23,11 @@ happens before interpreting.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from gateway.bundle.uuid import canonical_uuid
 from gateway.json_wire import MAX_SAFE_INTEGER
@@ -40,6 +41,36 @@ from gateway.mode import (
     Enforcement,
     Fallback,
 )
+
+#: The bundle shape this reader understands, as a major version. A bundle
+#: declaring the same major is read; one declaring any other is refused whole.
+#:
+#: **The minor is deliberately not compared.** This reader already treats a root
+#: field it does not recognise as a responder of a different age rather than a
+#: broken one — see `validate_bundle`, where a bundle still carrying `rejected`
+#: is read rather than refused — and a minor bump is exactly that case given a
+#: number. Refusing one would make adding an optional field a breaking change
+#: after all, which would leave that tolerance unreachable and put every
+#: component on a lockstep upgrade with its control plane.
+#:
+#: **The major is compared because a major bump means the opposite**: a field
+#: this reader relies on has moved or changed meaning, so reading the document
+#: at all would be guessing. Refusing it costs an *update* rather than
+#: enforcement — the caller keeps the bundle it already holds — except on a
+#: first fetch, where there is nothing to fall back to and the gateway reports
+#: itself unready.
+SUPPORTED_SCHEMA_MAJOR: Final[int] = 1
+
+#: `MAJOR.MINOR` in ASCII digits, anchored at both ends.
+#:
+#: **Written as a pattern rather than as `str.isdigit()` and `int()`, because
+#: those accept digits this contract does not.** `isdigit` is true of the
+#: Arabic-Indic `١`, the fullwidth `１` and the superscript `¹`, and `int`
+#: parses the first two — so a bundle declaring `١.٠` would be read as major 1
+#: here and refused by a reimplementation in a language whose integer parser is
+#: ASCII-only. The vectors beside this file are answerable to both, so the
+#: grammar has to be the narrow one.
+_SCHEMA_VERSION = re.compile(r"\A[0-9]+\.[0-9]+\Z")
 
 #: The holder's logger, shared so that everything an operator reads about one
 #: bundle — the fetch, the refusal, the posture, and the warnings below —
@@ -391,6 +422,32 @@ def _fallback(value: object) -> Fallback:
     return value  # type: ignore[return-value]
 
 
+def _refuse_an_unsupported_schema(declared: str) -> None:
+    """Refuse a bundle whose shape this reader cannot claim to understand.
+
+    **`MAJOR.MINOR`, and only the major is compared.** A matching major with any
+    minor is read; a different major is refused; anything that is not two
+    non-negative integers separated by a single dot is refused, because a
+    version this reader cannot parse is one it cannot say it supports — and
+    guessing at it is the half-read the field exists to prevent.
+
+    A trailing suffix is not tolerated. `1.0-rc1` and `1.0.0` are refused rather
+    than read as `1.0`: both are a producer saying something this reader has no
+    rule for, and accepting them would mean accepting whatever the next
+    responder invents in that position.
+    """
+    if not _SCHEMA_VERSION.match(declared):
+        raise UnusableBundle(
+            f"a schema_version that is not MAJOR.MINOR ({_q(declared)})"
+        )
+    major = declared.partition(".")[0]
+    if int(major) != SUPPORTED_SCHEMA_MAJOR:
+        raise UnusableBundle(
+            f"schema_version {_q(declared)} is a bundle shape this gateway does "
+            f"not read; it understands {SUPPORTED_SCHEMA_MAJOR}.x"
+        )
+
+
 def validate_bundle(body: object) -> UsableBundle:
     """Validate a fetched bundle and return one that can be walked.
 
@@ -408,11 +465,11 @@ def validate_bundle(body: object) -> UsableBundle:
     if not isinstance(body, dict):
         raise UnusableBundle("the response is not an object")
 
-    # Read first, because it describes the shape of everything read after it —
-    # a reader that parsed the document and then asked what shape it was in has
-    # already made the assumption the field exists to check. **Not acted on
-    # here**: refusing an unsupported version is its own change, and this one
-    # only teaches the component where to find it.
+    # Read first, and acted on before anything else is, because it describes the
+    # shape of everything below it — a reader that parsed the document and then
+    # asked what shape it was in has already made the assumption this field
+    # exists to check. Every refusal after this one is a claim about a `1.x`
+    # document, which is the only kind this reader can make a claim about.
     schema_version = body.get("schema_version")
     if not isinstance(schema_version, str) or schema_version == "":
         raise UnusableBundle("no schema_version to read the bundle against")
@@ -423,6 +480,7 @@ def validate_bundle(body: object) -> UsableBundle:
         raise UnusableBundle(
             f"a schema_version that cannot be recorded ({_q(schema_version)})"
         )
+    _refuse_an_unsupported_schema(schema_version)
 
     content_hash = body.get("content_hash")
     if not isinstance(content_hash, str) or content_hash == "":
