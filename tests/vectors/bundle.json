@@ -3550,6 +3550,162 @@
       },
       "usable": false,
       "note": "Refused eagerly, whatever the walk would have answered: a block at priority 1 would have denied first and the bundle is still unusable."
+    },
+    {
+      "name": "a higher minor of the supported major is read",
+      "bundle": {
+        "schema_version": "1.1",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": true,
+      "chain": [],
+      "chain_priorities": [],
+      "chain_conditions": [],
+      "chain_actions": [],
+      "chain_names": [],
+      "bindings": {},
+      "note": "The whole of why only the major is compared. A minor bump adds a field a reader may not know, and this reader already treats an unrecognised root field as a responder of a different age rather than a broken one — so refusing the number while accepting the field it announces would be two rules for one situation, and would make adding an optional field a breaking change after all."
+    },
+    {
+      "name": "a minor far ahead of this reader is still read",
+      "bundle": {
+        "schema_version": "1.99",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": true,
+      "chain": [],
+      "chain_priorities": [],
+      "chain_conditions": [],
+      "chain_actions": [],
+      "chain_names": [],
+      "bindings": {},
+      "note": "There is no ceiling on the minor. A reader that accepted 1.1 and refused 1.99 would be asserting a limit nobody wrote down, and a producer has no way to discover where it sits."
+    },
+    {
+      "name": "a minor behind this reader is read",
+      "bundle": {
+        "schema_version": "1.0",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": true,
+      "chain": [],
+      "chain_priorities": [],
+      "chain_conditions": [],
+      "chain_actions": [],
+      "chain_names": [],
+      "bindings": {},
+      "note": "The other direction, and it is the ordinary case during a staged rollout: a component upgraded before its control plane meets the shape it was built on. An older minor is a subset this reader already understands."
+    },
+    {
+      "name": "a leading zero in the major is read",
+      "bundle": {
+        "schema_version": "01.0",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": true,
+      "chain": [],
+      "chain_priorities": [],
+      "chain_conditions": [],
+      "chain_actions": [],
+      "chain_names": [],
+      "bindings": {},
+      "note": "`01` is 1 to every integer parser a reimplementation would reach for. Stated as a case so it is a decision rather than an accident of whichever one is used."
+    },
+    {
+      "name": "a different major is refused",
+      "bundle": {
+        "schema_version": "2.0",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": false,
+      "note": "A major bump says a field this reader relies on has moved or changed meaning, so reading the document at all would be guessing. The caller keeps the bundle it already holds; on a first fetch it holds none and reports itself unready."
+    },
+    {
+      "name": "an earlier major is refused",
+      "bundle": {
+        "schema_version": "0.9",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": false,
+      "note": "Refused for the same reason and in the same way as a later one. A reader that accepted anything below its own major would be claiming to understand a shape that predates the contract it implements."
+    },
+    {
+      "name": "a version with no minor is refused",
+      "bundle": {
+        "schema_version": "1",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": false,
+      "note": "`MAJOR.MINOR` is the whole grammar. A bare major is a producer saying something this reader has no rule for, and reading it as `1.0` would be inventing the missing half."
+    },
+    {
+      "name": "a three-part version is refused",
+      "bundle": {
+        "schema_version": "1.0.0",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": false,
+      "note": "Not read as `1.0` with a patch ignored. The contract has two parts, and tolerating a third would mean tolerating whatever the next responder puts in that position."
+    },
+    {
+      "name": "a pre-release suffix is refused",
+      "bundle": {
+        "schema_version": "1.0-rc1",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": false,
+      "note": "Same rule as the three-part case. A suffix is a claim about the document that this reader has no way to act on."
+    },
+    {
+      "name": "non-ASCII digits are refused",
+      "bundle": {
+        "schema_version": "١.٠",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": false,
+      "note": "Arabic-Indic `١٠`. The grammar is ASCII digits, and this case exists because the obvious implementation does not enforce that: Python's `str.isdigit` is true here and `int` parses it, so a reader written that way accepts a version a Go or TypeScript reimplementation refuses. The two must agree."
+    },
+    {
+      "name": "fullwidth digits are refused",
+      "bundle": {
+        "schema_version": "１.０",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": false,
+      "note": "The same hazard in a different block. `１` is also `isdigit`, and `int` parses it too."
+    },
+    {
+      "name": "a version whose parts are not digits is refused",
+      "bundle": {
+        "schema_version": "x.y",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": []
+      },
+      "usable": false,
+      "note": "The grammar is the whole of what leaves a run of digits for the reader to convert, so a part made of something else is refused by the grammar rather than by the conversion."
     }
   ]
 }

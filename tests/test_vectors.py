@@ -16,6 +16,7 @@ import base64
 import dataclasses
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,13 @@ import pytest
 
 from gateway.bundle.conditions import ConditionInput, UninterpretableCondition
 from gateway.bundle.decide import decide, refuses_unbound
-from gateway.bundle.validate import Binding, UnusableBundle, validate_bundle
+from gateway.bundle.validate import (
+    _SCHEMA_VERSION,
+    SUPPORTED_SCHEMA_MAJOR,
+    Binding,
+    UnusableBundle,
+    validate_bundle,
+)
 from gateway.key_safety import has_unsafe_key_characters
 from gateway.mode import ENFORCEMENTS, FALLBACKS, blocks
 from gateway.ticket import parse_rail_header
@@ -262,6 +269,16 @@ def test_a_refusal_names_the_value_it_refused() -> None:
         # for exactly as long as the hash beside it is.
         (body(schema_version="a\nb"), "unprintable"),
         (body(schema_version="v" * 256), "v" * 255),
+        # And the two refusals the version check itself raises. For the first,
+        # the message is all an operator has to tell a third part from a suffix
+        # from a pair of digits that are digits everywhere but in ASCII, since
+        # all three arrive as one refusal.
+        (body(schema_version="1.0.0"), "1.0.0"),
+        (body(schema_version="1.0-rc1"), "1.0-rc1"),
+        (body(schema_version="\u0661.\u0660"), "\u0661.\u0660"),
+        # The second raise, where the version parses and the major is one this
+        # reader has no rules for.
+        (body(schema_version="2.0"), "2.0"),
         (body(policies=["not a policy"]), "not a policy"),
         # The binding half of the same message, which round 8's docstring
         # described away as naming nothing rather than noticing it was silent.
@@ -290,6 +307,71 @@ def test_a_refusal_names_the_value_it_refused() -> None:
         with pytest.raises(UnusableBundle) as caught:
             validate_bundle(payload)
         assert expected in caught.value.reason, (expected, caught.value.reason)
+
+
+def test_an_unreadable_shape_is_refused_before_anything_beneath_it() -> None:
+    """Which of two refusals an operator is sent to act on.
+
+    `schema_version` is read and acted on before anything else because it
+    describes the shape of everything under it, so every refusal after it is a
+    claim about a `1.x` document — the only kind this reader can make a claim
+    about. A bundle declaring a major it does not know *and* carrying a second
+    fault is therefore refused for its shape: naming the field below would send
+    an operator to fix a document whose shape is the actual fault, against a
+    rule this reader has just said it cannot apply.
+
+    The vectors cannot hold this. An unusable case asserts the refusal and not
+    its reason, the message being an operator's text rather than a contract, so
+    all three bodies below are unusable there whichever refusal answers. What is
+    pinned here is the narrowest thing that tells the two apart — the supported
+    major the message offers — and not its wording.
+    """
+    for beneath in ({"policies": "nope"}, {"bindings": "nope"}, {"content_hash": ""}):
+        body = {
+            "schema_version": "2.0",
+            "content_hash": "h",
+            "policies": [],
+            "bindings": [],
+            **beneath,
+        }
+        with pytest.raises(UnusableBundle) as caught:
+            validate_bundle(body)
+        assert f"{SUPPORTED_SCHEMA_MAJOR}.x" in caught.value.reason, (
+            beneath,
+            caught.value.reason,
+        )
+
+
+def test_a_version_too_long_to_convert_is_refused_rather_than_converted() -> None:
+    """The order of the two guards `schema_version` passes through.
+
+    The major is compared as an integer, and CPython refuses `int()` on a
+    decimal string past 4,300 digits. What keeps that unreachable is the
+    recordability guard above the grammar: `schema_version` is bounded at
+    `MAX_ENDPOINT_KEY_LENGTH` before either the grammar or the conversion sees
+    it, so the conversion only ever runs on a string far shorter than the limit.
+    The two guards sit a few lines apart in one function and neither names the
+    other, which is what this case is here to say instead.
+
+    The refusal path is what the order protects. `_refresh_once` catches
+    `UnusableBundle`, keeps the bundle already held and logs a line naming the
+    fault; a `ValueError` out of `validate_bundle` is caught by neither, so it
+    reaches `_loop` as a traceback and anything awaiting `refresh()` as itself
+    — telling an operator that a control plane it disagrees with is a gateway
+    that crashed.
+
+    Only the exception is pinned. Which of the two refusals answers is the
+    guards' own business, and both name a `schema_version` an operator can go
+    and look at.
+    """
+    body = {
+        "schema_version": "9" * 5000 + ".0",
+        "content_hash": "a3f1c09e7b2d4485",
+        "policies": [],
+        "bindings": [],
+    }
+    with pytest.raises(UnusableBundle):
+        validate_bundle(body)
 
 
 def _postured(
@@ -527,6 +609,88 @@ def test_the_published_posture_enums_are_the_vocabulary_this_reader_holds() -> N
     enforcement = published["properties"]["enforcement"]["properties"]
     assert set(enforcement["mode"]["enum"]) == set(ENFORCEMENTS)
     assert set(published["properties"]["binding_fallback"]["enum"]) == set(FALLBACKS)
+
+
+def test_the_published_version_grammar_is_the_language_this_reader_parses() -> None:
+    """`schemas/policy-bundle.schema.json`'s `pattern`, against `_SCHEMA_VERSION`.
+
+    The version grammar is written twice — as the pattern a reimplementation
+    builds against and as the regex this reader matches with — and neither copy
+    is generated from the other. What holds them to one language is that every
+    candidate below is driven through *both* and the two verdicts compared,
+    rather than each being checked against a list of expected answers. A list
+    beside each copy is a third copy of the rule: it agrees with both on the day
+    it is written and says nothing on the day one of them moves.
+
+    **Well-formed is a different claim from read**, and the vectors own the
+    second: `2.0` and `0.9` are well-formed and refused. A published pattern
+    that hard-coded the supported major would be a wire contract that expired
+    the first time a reader moved on, so nothing here asserts one.
+
+    The candidates are the versions the vectors already carry, so a case added
+    there is asserted here too, plus the shapes no vector carries.
+
+    **What they are compared over is every candidate that reaches the grammar.**
+    A `schema_version` carrying a character no log line can hold is refused
+    before it, and that class is one the published schema states in prose
+    because `pattern` cannot express it. `1.0\\n` is where the two look like they
+    differ and do not: `jsonschema` compiles patterns with `re`, where `$` also
+    matches before a trailing newline, so the published grammar admits a string
+    this reader refuses a step earlier. Spelling that anchor past `re` is what
+    costs more than it closes — `\\Z`, `\\z` and a `(?![\\s\\S])` lookahead are
+    each unavailable to one of `re`, ECMA-262 and RE2, and RE2 is the engine a
+    Go reimplementation validates with, where an unsupported lookahead fails
+    the whole document rather than one field.
+    """
+    published = json.loads(
+        (SCHEMAS / "policy-bundle.schema.json").read_text(encoding="utf-8")
+    )
+    grammar = re.compile(published["properties"]["schema_version"]["pattern"])
+
+    candidates = {
+        case["bundle"]["schema_version"]
+        for case in BUNDLE_CASES
+        if isinstance(case["bundle"], dict)
+        and isinstance(case["bundle"].get("schema_version"), str)
+    } | {
+        # Shapes no vector carries, each standing for a way one copy of the
+        # grammar can narrow or widen without the other: a major longer than
+        # any vector's, a minor likewise, four ways a run of digits can be
+        # bounded by something other than the end of the string, and either
+        # part alone made of something that is not a digit. The two runs carry
+        # a character class each, so one widens without the other; the case
+        # where both do is `x.y`, which the vectors carry because the reader
+        # refusing it is what leaves `int` only digits to convert.
+        "0001.0",
+        "123456789.0",
+        "1.000000000",
+        "x.0",
+        "1.y",
+        "1.0\n",
+        "\n1.0",
+        "1.0 ",
+        " 1.0",
+        "1.0\n2.0",
+        "",
+    }
+
+    compared = [c for c in sorted(candidates) if not has_unsafe_key_characters(c)]
+    for candidate in compared:
+        # `search`, not `match`: a JSON Schema `pattern` is unanchored and
+        # `jsonschema` applies it as a search, so where the published grammar
+        # ends is the pattern's own business and not this test's.
+        published_reads = bool(grammar.search(candidate))
+        assert published_reads == bool(_SCHEMA_VERSION.match(candidate)), candidate
+
+    # The excluded case, asserted rather than described: `1.0\n` is refused for
+    # the character it carries and never reaches either grammar.
+    assert has_unsafe_key_characters("1.0\n")
+
+    # Agreement over a corpus that had stopped exercising both answers would be
+    # agreement about nothing, which is the same hazard the case-count floors
+    # above exist for.
+    assert any(grammar.search(candidate) for candidate in compared)
+    assert any(not grammar.search(candidate) for candidate in compared)
 
 
 def test_every_enforcement_object_resolves_or_is_refused() -> None:
