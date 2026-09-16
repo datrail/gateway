@@ -42,9 +42,10 @@ LIFESPAN_TIMEOUT_SEC = 10
 #: report to whatever `RAIL_CENTER_URL` happened to be set to on the machine.
 RAIL_CENTER = ("http://rail-center.test", {})
 
-#: The data source every test gateway fronts. Injected rather than read from the
-#: environment, so a suite run with `RAIL_DATASOURCE_SLUG` set to something else
-#: still composes the keys its bundles are bound on.
+#: The data source every test gateway fronts. The gateway composes no slug — it
+#: is the first segment of a *bundle* key, which `strip_slug` removes — so this
+#: names the one the bundles in this suite are published under, and is what a
+#: fixture builds a full key from before the strip is asserted on.
 SLUG = "delivery"
 
 

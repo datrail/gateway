@@ -859,7 +859,7 @@
       "claims": {
         "agent_id": "agent-1",
         "exp": 4102444800,
-        "skills": "delivery.track_package"
+        "skills": "delivery#/mcp#tools/call#track_package"
       },
       "holds": true,
       "note": "It declares no skill at all — the same reading `contains` takes."
@@ -876,7 +876,7 @@
         "agent_id": "agent-1",
         "exp": 4102444800,
         "skills": {
-          "delivery.track_package": true
+          "delivery#/mcp#tools/call#track_package": true
         }
       },
       "holds": true,
@@ -910,7 +910,7 @@
         "exp": 4102444800,
         "skills": [
           [
-            "delivery.track_package"
+            "delivery#/mcp#tools/call#track_package"
           ]
         ]
       },
@@ -1980,7 +1980,7 @@
         "agent_id": "agent-1",
         "exp": 4102444800,
         "skills": {
-          "delivery.track_package": true
+          "delivery#/mcp#tools/call#track_package": true
         }
       },
       "holds": false

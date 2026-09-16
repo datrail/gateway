@@ -1,8 +1,7 @@
 """Which upstreams this gateway fronts, and where each one listens.
 
-One gateway fronts several data sources. `RAIL_GATEWAY_UPSTREAM_URL` could name
-only one, so it is replaced by a file — the same file the proxy reads, with one
-field added.
+One gateway fronts several data sources, and this file is where they are named:
+the same file the proxy reads, with one field added.
 
 **The file carries no slugs, and that is the design rather than an omission.**
 An entry's `name` is a label: it appears in logs and in nothing else. Rail

@@ -18,11 +18,13 @@ from gateway.mode import (
 )
 from gateway.routes import Route, RoutesError
 from gateway.server import (
+    DEFAULT_PORT,
     _Enforcement,
     _holder_from_environment,
     build_app,
     build_gateway,
     gateway_slug,
+    port,
 )
 
 
@@ -43,6 +45,44 @@ def enrolled(monkeypatch):
 
 #: A well-formed upstream, for the tests whose subject is some other variable.
 UPSTREAM = "http://upstream.invalid/mcp"
+
+
+def test_port_defaults(monkeypatch):
+    """8080, with the literal asserted beside the constant.
+
+    `EXPOSE 8080` in the Dockerfile, `-p 8080:8080` in the README and the e2e
+    health checks all name it, so the default is a contract with the image
+    rather than an internal choice. `port() == DEFAULT_PORT` alone moves with the
+    constant and pins nothing: it holds just as well at 9091, with every one of
+    those four out of step.
+    """
+    monkeypatch.delenv("RAIL_GATEWAY_PORT", raising=False)
+    assert port() == DEFAULT_PORT == 8080
+
+
+@pytest.mark.parametrize("raw", ["nope", "8080.5"])
+def test_a_non_integer_port_is_refused(monkeypatch, raw):
+    monkeypatch.setenv("RAIL_GATEWAY_PORT", raw)
+    with pytest.raises(RuntimeError, match="must be an integer"):
+        port()
+
+
+@pytest.mark.parametrize("raw", ["", "   "])
+def test_an_empty_or_blank_port_means_the_default(monkeypatch, raw):
+    """Read the same way `_required` reads a blank: as unset, not as a value.
+
+    Without stripping first, whitespace reaches `int()` and the error names an
+    empty string back at the operator who set spaces.
+    """
+    monkeypatch.setenv("RAIL_GATEWAY_PORT", raw)
+    assert port() == DEFAULT_PORT
+
+
+@pytest.mark.parametrize("raw", ["0", "65536", "-1"])
+def test_a_port_outside_the_range_is_refused(monkeypatch, raw):
+    monkeypatch.setenv("RAIL_GATEWAY_PORT", raw)
+    with pytest.raises(RuntimeError, match="between 1 and 65535"):
+        port()
 
 
 @pytest.mark.parametrize("url", ["http://", "http://user:pw@", "https://"])
@@ -66,7 +106,6 @@ def test_a_missing_rail_center_url_refuses_to_start(monkeypatch):
     """The same rule as the upstream, and the failure it prevents is worse: a
     gateway that cannot resolve where its control plane is fetches no bundle
     ever, and reports that in the log as a control plane which is down."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.delenv("RAIL_CENTER_URL", raising=False)
 
     with pytest.raises(RuntimeError, match="RAIL_CENTER_URL is required"):
@@ -84,7 +123,6 @@ def test_a_missing_gateway_slug_refuses_to_start(monkeypatch, raw):
     fallback against its own traffic. Whitespace counts as missing for the reason
     every other required variable does: it is an operator who meant to set it.
     """
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://rail-center.test")
     if raw is None:
         monkeypatch.delenv("RAIL_GATEWAY_SLUG", raising=False)
@@ -99,7 +137,6 @@ def test_a_missing_gateway_slug_refuses_to_start(monkeypatch, raw):
 
 @pytest.mark.parametrize("url", ["http://", "http://user:pw@", "https://"])
 def test_a_rail_center_url_with_no_host_refuses_to_start(monkeypatch, url):
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", url)
 
     with pytest.raises(RuntimeError, match="RAIL_CENTER_URL names no host"):
@@ -114,7 +151,6 @@ def test_a_rail_center_url_with_no_scheme_keeps_its_credential_out_of_the_error(
     with the rest as path, so there is no host and no netloc either — and a
     redaction that rebuilds from the netloc has nothing to strip and hands back
     the password whole, into the stderr of a failed start."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv(
         "RAIL_CENTER_URL", "svcuser:s3cret-rc-password@rail-center.test/"
     )
@@ -143,7 +179,6 @@ def test_an_unparseable_upstream_url_names_the_upstream():
 def test_an_unparseable_rail_center_url_names_the_control_plane(monkeypatch):
     """The other half of the same helper. Named separately because a message
     hardcoded to either variable passes the case for that one."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://[::1")
 
     with pytest.raises(
@@ -157,7 +192,6 @@ def test_an_unparseable_url_carrying_no_credential_keeps_its_diagnostic(monkeypa
     no userinfo to remove, `str.replace("", "***")` would put the marker between
     every character of the message — `***I***n***v***a***l***i***d***…` — and
     the operator loses the half of it that says what they mistyped."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://[::1")
 
     with pytest.raises(RuntimeError) as raised:
@@ -187,7 +221,6 @@ def test_an_unparseable_rail_center_url_keeps_its_credential_out_of_the_error(
     with it. That message is what a failed start writes to stderr, and stderr
     is what the container's log collector and every CI job running the image
     keep — so the control plane's password cannot be in it."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv(
         "RAIL_CENTER_URL",
         f"{prefix}svcuser:s3cret-rc-password@rail\u2100center.test/",
@@ -210,7 +243,6 @@ def test_a_query_or_fragment_does_not_let_the_credential_through(monkeypatch, ta
     credential, finds no such text in the message, and hands the password back
     whole. Asserted on the outcome and not on the scan: what must hold is that
     nothing quotable reaches stderr, whichever way the authority is found."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv(
         "RAIL_CENTER_URL",
         f"http://svcuser:s3cret-rc-password@rail\u2100center.test{tail}",
@@ -240,7 +272,6 @@ def test_a_credential_that_cannot_be_sent_is_refused_at_startup(monkeypatch):
     """Resolved while `build_gateway` runs, not at the first fetch. Deferred, a
     mistyped secret would surface as a bundle that never arrives, long after
     the deploy that caused it and with nothing naming the cause."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://rail-center.invalid")
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     monkeypatch.setenv("RAIL_AUTH_TOKEN", "line-one\nline-two")
@@ -259,7 +290,6 @@ def test_an_unreadable_refresh_interval_is_refused_at_startup(monkeypatch):
     correct code with a message about a credential. `.env.example` documents
     both, so a contributor's shell is exactly where they turn up.
     """
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://rail-center.invalid")
     monkeypatch.delenv("RAIL_AUTH_MODE", raising=False)
     monkeypatch.delenv("RAIL_AUTH_TOKEN", raising=False)
@@ -305,7 +335,6 @@ def test_two_rail_center_credentials_are_refused_at_startup(monkeypatch):
     has one of them silently discarded — and which one is httpx's choice rather
     than theirs. The same rule `auth.py` states for a credential that cannot be
     produced: stop, rather than call with something else."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://user:s3cret@rail-center.invalid")
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     monkeypatch.setenv("RAIL_AUTH_TOKEN", "configured-token")
@@ -520,7 +549,6 @@ def test_an_enabled_plugin_beside_rail_center_configuration_is_the_normal_case(
 
 def _unenrolled(monkeypatch):
     """An environment describing a gateway nobody gave RailXia."""
-    monkeypatch.setenv("RAIL_GATEWAY_UPSTREAM_URL", "http://upstream.invalid/mcp")
     for name in (
         "RAIL_PLUGIN_ENABLED",
         "RAIL_TICKET_MODE",

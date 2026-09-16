@@ -42,10 +42,16 @@ mcp:
   servers:
     - name: delivery
       url: http://delivery-mcp:9000/mcp
+      prefix: /delivery
     - name: finretail
       url: http://finretail-mcp:9001/mcp
-      prefix: /finretail        # defaults to /
+      prefix: /finretail
 ```
+
+`prefix` defaults to `/`, the single-upstream deployment, where the gateway
+listens at its root and strips nothing. Every entry in a file naming more than
+one upstream carries a prefix of its own: `/` overlaps every other prefix, and
+the pair is refused at startup.
 
 `prefix` is where this gateway listens for that upstream, and it is the only
 thing that decides routing — an MCP `tools/call` names a tool and nothing else,

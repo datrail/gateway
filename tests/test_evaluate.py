@@ -162,8 +162,8 @@ async def test_an_alert_is_written_and_denies_nothing(evaluating, caplog):
 
 
 @pytest.mark.asyncio
-async def test_the_endpoint_key_is_the_slug_and_the_tool_name(evaluating, caplog):
-    """`<slug>.<tool_name>`, composed here because nothing else can: MCP puts
+async def test_the_endpoint_key_is_the_path_the_method_and_the_call(evaluating, caplog):
+    """`<path>#<method>#<call>`, composed here because nothing else can: MCP puts
     the call's identity in the message rather than the URL."""
     with caplog.at_level(logging.INFO, logger="gateway"):
         async with evaluating() as url:

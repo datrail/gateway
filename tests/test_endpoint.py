@@ -58,8 +58,8 @@ def resolve(method: object = "tools/call", tool_name: object = "track_package"):
 # --- a call that names a usable tool --------------------------------------
 
 
-def test_the_key_is_the_slug_and_the_tool_name_verbatim():
-    """Both halves unnormalised. Bindings are indexed on the raw key and the
+def test_every_part_of_the_key_is_used_verbatim():
+    """Unnormalised throughout. Bindings are indexed on the raw key and the
     contract refuses case folding and Unicode normalisation, so a key matches
     what the operator registered character for character or not at all."""
     assert resolve(tool_name="Track_Package") == (

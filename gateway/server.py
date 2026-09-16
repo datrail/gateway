@@ -51,13 +51,15 @@ nothing would report:
     explicitly — `ProxyClient` installs a default only for a key absent from
     its kwargs.
 
-  * **The proxy is served directly, never mounted.** `FastMCP.mount` re-exposes
-    an upstream's tools under a namespace when it is given one, and an
-    endpoint key is `<datasource_slug>.<tool_name>`: a renamed tool matches no
-    endpoint the control plane registered, while the agents were prompted with
-    the real name. Serving directly is the shape that cannot acquire a prefix
-    by someone later passing a namespace, rather than one that merely has none
-    today.
+  * **Each proxy is served directly, never mounted.** `FastMCP.mount` re-exposes
+    an upstream's tools under a namespace when it is given one, and an endpoint
+    key is `<path>#<method>#<call>`: a renamed tool matches no endpoint the
+    control plane registered, while the agents were prompted with the real name.
+    Several upstreams are told apart by the prefix they arrive under — see
+    `_Routed` — which leaves the message itself untouched, where a namespace
+    would rewrite the one field the key is composed from. Serving directly is
+    the shape that cannot acquire a namespace by someone later passing one,
+    rather than one that merely has none today.
 
   * **Incoming headers are not forwarded, and that line comes last.** Both
     `create_proxy` and `ProxyClient.__init__` set the flag True themselves, so
@@ -115,10 +117,10 @@ import base64
 import json
 import logging
 import os
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Sequence
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, Final
-from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
 from fastmcp import FastMCP
@@ -127,6 +129,7 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server import create_proxy
 from fastmcp.server.middleware import Middleware
 from fastmcp.server.providers.proxy import ProxyClient
+from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
@@ -281,6 +284,8 @@ def build_gateway(
     route: Route,
     holder: BundleHolder | None = None,
     plugin: bool | None = None,
+    *,
+    polls: bool = True,
 ) -> FastMCP:
     """The proxy that forwards to the upstream, plus liveness and readiness.
 
@@ -304,12 +309,20 @@ def build_gateway(
     component with nothing to point it at. An injected holder is ignored rather
     than honoured because the flag is the stronger statement: a test asking for
     the plugin off is asking for a gateway with no control plane.
+
+    **`polls=False` builds no holder either, and is not the same as passing
+    `None`.** `None` means *nobody handed one down, so resolve one from the
+    environment*; `polls=False` means *this proxy is not the one that holds the
+    bundle*. A gateway fronting several upstreams builds one proxy that polls
+    and the rest without, so there is one poll loop against a control plane with
+    one bundle to give — and the rest must not fall back to the environment,
+    which would be a second holder nothing ever starts.
     """
     resolved_plugin = plugin if plugin is not None else plugin_enabled()
     url = _checked_url(f"the url for upstream '{route.name}'", route.url)
     # After the upstream, so a gateway pointed nowhere is refused for that
     # rather than for the Rail Center variable it also has not been given.
-    if not resolved_plugin:
+    if not resolved_plugin or not polls:
         bundle_holder = None
     else:
         bundle_holder = holder if holder is not None else _holder_from_environment()
@@ -522,7 +535,7 @@ def build_app(
     resolved_routes = routes if routes is not None else load_routes()
 
     if not resolved_plugin:
-        mounted = [
+        bare = [
             (
                 route,
                 build_gateway(route, None, resolved_plugin).http_app(
@@ -531,7 +544,7 @@ def build_app(
             )
             for route in resolved_routes
         ]
-        return _Routed(mounted, mounted[0][1])
+        return _Routed(bare, bare[0][1], [app for _, app in bare[1:]])
 
     resolved_holder = holder if holder is not None else _holder_from_environment()
     url, auth = (
@@ -545,22 +558,32 @@ def build_app(
     # `/ready` at the root, which is why `_Routed` keeps a reference to it.
     mounted: list[tuple[Route, ASGIApp]] = []
     primary: ASGIApp | None = None
+    secondaries: list[Starlette] = []
     for route in resolved_routes:
+        polls = primary is None
         gateway = build_gateway(
-            route, resolved_holder if primary is None else None, resolved_plugin
+            route,
+            resolved_holder if polls else None,
+            resolved_plugin,
+            polls=polls,
         )
+        served = gateway.http_app(transport="streamable-http")
         app = _Enforcement(
-            gateway.http_app(transport="streamable-http"),
+            served,
             resolved_holder,
             rail_center_url=url,
             auth=auth,
             transport=report_transport,
         )
-        if primary is None:
+        if polls:
             primary = app
+        else:
+            # Enforcement still reads the gateway's one holder; what this route
+            # does without is the poll loop that fills it.
+            secondaries.append(served)
         mounted.append((route, app))
     assert primary is not None  # `load_routes` refuses a file naming none
-    return _Routed(mounted, primary)
+    return _Routed(mounted, primary, secondaries)
 
 
 class _Routed:
@@ -579,15 +602,28 @@ class _Routed:
     rather than one invented here, for an upstream that needs to build absolute
     URLs.
 
-    `/health` and `/ready` are the gateway's rather than any route's, so they are
-    answered off the primary sub-app — the one holding the bundle — at the root
-    and are not reachable beneath a prefix.
+    **The gateway's own `/health` and `/ready` are the ones at the root**, and
+    they are answered off the primary sub-app — the one holding the bundle.
+    Beneath a prefix the same two paths reach that route's own proxy and
+    describe that proxy, which is the sub-app's answer to give rather than this
+    layer's to intercept.
+
+    **Every sub-app is started, not only the one that serves the lifespan
+    scope.** Each carries its own `StreamableHTTPSessionManager`, and one whose
+    task group was never entered answers 500 to every request that reaches it —
+    so an upstream that is mounted but unstarted is a route the gateway cannot
+    serve at all.
     """
 
     #: Answered at the root, by the gateway rather than by a route.
     META_PATHS: Final[frozenset[str]] = frozenset({"/health", "/ready"})
 
-    def __init__(self, mounted: list[tuple[Route, ASGIApp]], primary: ASGIApp) -> None:
+    def __init__(
+        self,
+        mounted: list[tuple[Route, ASGIApp]],
+        primary: ASGIApp,
+        secondaries: Sequence[Starlette] = (),
+    ) -> None:
         # Longest first, so the match is deterministic whatever order the file
         # listed them in. Overlaps are already refused, so this orders rather
         # than resolves — but a reader should not have to know that to see that
@@ -596,10 +632,23 @@ class _Routed:
             mounted, key=lambda pair: len(pair[0].strips), reverse=True
         )
         self._primary = primary
+        #: The sub-apps `primary` does not start: every mounted app but its own.
+        #: Held as the Starlette instances rather than as what `_mounted` serves,
+        #: because the lifespan is the router's and an enforcement wrapper has
+        #: none of its own.
+        self._secondaries = list(secondaries)
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] == "lifespan":
-            await self._primary(scope, receive, send)
+            # The scope is served by `primary`, which runs the startup and
+            # shutdown messaging the server is waiting on. The others are
+            # entered around it — a lifespan scope forwarded to more than one
+            # app would have each of them answer `lifespan.startup.complete` on
+            # the one channel — and unwound when it returns.
+            async with AsyncExitStack() as stack:
+                for app in self._secondaries:
+                    await stack.enter_async_context(app.router.lifespan_context(app))
+                await self._primary(scope, receive, send)
             return
         path = scope.get("path") or ""
         if path in self.META_PATHS:
@@ -633,10 +682,17 @@ def _beneath(path: str, prefix: str) -> str | None:
 def _under_prefix(scope, route: Route, rest: str):
     """`scope`, rewritten as the sub-app and the upstream should see it.
 
-    `raw_path` is rewritten beside `path` because Starlette prefers it where it
-    is present, so a stale one would route the sub-app by the string this layer
-    just removed. `root_path` carries the prefix in the ASGI form, which is what
-    a framework beneath uses to build its own URLs.
+    `raw_path` is rewritten beside `path` because the two describe one request,
+    and a stale one hands the sub-app the string this layer just removed.
+
+    **`path` carries the strip and `root_path` is left as it was found.** Only
+    one of them may: Starlette routes on `get_route_path`, which removes
+    `root_path` from `path` itself, so a prefix in both is removed twice. With
+    the prefix in `root_path` as well, an upstream mounted at `prefix: /mcp`
+    would be routed the empty path and serve nothing, and `/a/a/mcp` would be
+    served as `/a/mcp` under a key naming an endpoint nobody serves. The prefix
+    reaches a framework beneath as `X-Forwarded-Prefix`, which is what it is
+    for.
     """
     headers = [
         (name, value)
@@ -644,14 +700,44 @@ def _under_prefix(scope, route: Route, rest: str):
         if name != b"x-forwarded-prefix"
     ]
     if route.strips:
-        headers.append((b"x-forwarded-prefix", route.strips.encode("latin-1")))
+        # Percent-encoded, because a header value is bytes and a prefix is a
+        # path: `/路径` has no latin-1 spelling to send, and an ASCII prefix —
+        # every one in practice — is unchanged by this.
+        headers.append((b"x-forwarded-prefix", quote(route.strips).encode("ascii")))
     rewritten = dict(scope)
     rewritten["path"] = rest
-    rewritten["root_path"] = scope.get("root_path", "") + route.strips
     rewritten["headers"] = headers
-    if scope.get("raw_path") is not None:
-        rewritten["raw_path"] = rest.encode("latin-1")
+    raw_path = scope.get("raw_path")
+    if raw_path is not None:
+        rewritten["raw_path"] = _raw_beneath(raw_path, route.strips)
     return rewritten
+
+
+def _raw_beneath(raw: bytes, prefix: str) -> bytes:
+    """`raw` with the bytes spelling `prefix` removed, its encoding untouched.
+
+    Sliced rather than re-encoded from the decoded path, which cannot be done
+    at all and would be wrong if it could: uvicorn decodes `path` from these
+    bytes, so `/%E8%B7%AF%E5%BE%84` arrives as `/路径` with no latin-1 form to
+    encode back, and re-encoding `/delivery/a%2Fb` would hand the upstream
+    `/a/b` — a separator it never received.
+
+    The scan steps over whole escapes, because one decoded character can span
+    three of them, and stops once it has decoded past the prefix: the work is
+    bounded by the prefix in the routes file rather than by the caller's path.
+    """
+    text = raw.decode("latin-1")
+    cut = 0
+    while cut <= len(text):
+        decoded = unquote(text[:cut])
+        if decoded == prefix:
+            # `_beneath` reads a path equal to its prefix as `/`; the bytes say
+            # the same thing, so an empty tail is that same root.
+            return text[cut:].encode("latin-1") or b"/"
+        if len(decoded) > len(prefix):
+            break
+        cut += 3 if text[cut : cut + 1] == "%" else 1
+    return raw
 
 
 def _split_credential(url: str) -> tuple[str, dict[str, str]]:
@@ -1117,9 +1203,10 @@ def _credential_free(text: str, url: str) -> str:
 def _safe_to_log(url: str) -> str:
     """Where the gateway points, with every part that can carry a secret gone.
 
-    `RAIL_GATEWAY_UPSTREAM_URL` can legitimately carry `user:password@`, and a
-    hosted MCP endpoint commonly carries `?api_key=`. The line naming it is
-    written on every start, so both would reach stdout and whatever collects it.
+    An upstream's `url` in the routes file can legitimately carry
+    `user:password@`, and a hosted MCP endpoint commonly carries `?api_key=`.
+    The line naming it is written on every start, once per upstream, so both
+    would reach stdout and whatever collects it.
 
     Rebuilt rather than selectively rewritten. Clearing the authority alone left
     the query untouched; reassembling from `hostname` and `port` dropped the

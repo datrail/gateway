@@ -982,13 +982,14 @@ NOTES_ANY_TICKET = policy(
     SKILL_ID, {"field": "agent_id", "operator": "present"}, action="alert"
 )
 
-#: `delivery.track_package`, gated to the one policy above. A binding *entry* is
-#: what the fallback looks for; which policies it names is the chain's business.
-#: A binding as the bundle carries it — the **full** key, with the data source
-#: slug Rail Center composed it from. The gateway strips that first segment and
-#: matches the rest against what it composed from the request, so a fixture
-#: carrying the comparable form would pass while testing nothing about the strip.
-FULL_KEY = f"{SLUG}#{KEY.lstrip('#')}" if KEY.startswith("#") else f"{SLUG}#{KEY}"
+#: `delivery#/mcp#tools/call#track_package`, gated to the one policy above. A
+#: binding *entry* is what the fallback looks for; which policies it names is the
+#: chain's business. A binding as the bundle carries it — the **full** key, with
+#: the data source slug Rail Center composed it from. The gateway strips that
+#: first segment and matches the rest against what it composed from the request,
+#: so a fixture carrying the comparable form would pass while testing nothing
+#: about the strip.
+FULL_KEY = f"{SLUG}#{KEY}"
 BOUND = {"endpoint_key": FULL_KEY, "mode": "gated", "policy_ids": [SKILL_ID]}
 
 
@@ -1291,7 +1292,7 @@ async def test_a_disconnect_is_not_the_end_of_a_body():
 # F-027 — a body that never finished arriving is not a call
 # --------------------------------------------------------------------------
 
-#: `delivery.track_package` exempt from every rule in the chain — mode `open`
+#: `/mcp#tools/call#track_package` exempt from every rule in the chain — `open`
 #: narrows to nothing. It is what makes the two halves below differ: the same
 #: agent, the same bytes, and a verdict that turns on whether the body finished.
 EXEMPT = [{"endpoint_key": FULL_KEY, "mode": "open", "policy_ids": []}]

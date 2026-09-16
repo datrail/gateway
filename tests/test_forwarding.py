@@ -23,14 +23,16 @@ async def test_a_call_reaches_the_upstream_and_its_answer_comes_back(gateway_url
 
 @pytest.mark.asyncio
 async def test_tool_names_are_not_rewritten(gateway_url):
-    """An endpoint key is `<datasource_slug>.<tool_name>`, and the agents were
-    prompted with the upstream's names.
+    """An endpoint key ends in the tool's own name, and the agents were prompted
+    with the upstream's names.
 
     `FastMCP.mount` prefixes an upstream's tools when it is given a namespace,
-    which is right for a proxy fronting several servers and wrong here. Serving
-    the proxy directly is the shape that cannot acquire a prefix later; a
-    renamed tool matches no endpoint the control plane registered, and shows up
-    as a policy that silently never applies rather than as an error.
+    which rewrites the one field the key is composed from. Several upstreams are
+    told apart by the prefix a request arrived under instead, which leaves the
+    message untouched; serving each proxy directly is the shape that cannot
+    acquire a namespace later. A renamed tool matches no endpoint the control
+    plane registered, and shows up as a policy that silently never applies
+    rather than as an error.
     """
     async with Client(StreamableHttpTransport(url=f"{gateway_url}/mcp")) as client:
         names = sorted(tool.name for tool in await client.list_tools())
