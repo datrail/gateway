@@ -112,8 +112,10 @@ services:
 
   # Enforcing, with the other fallback: an endpoint carrying no binding entry is
   # refused without the chain being consulted. Its bundle binds
-  # `delivery.track_package` and nothing else, so one call through this gateway
-  # is judged and every other is refused for never having been reviewed.
+  # `delivery#/mcp#tools/call#track_package` — the slug-qualified key Rail Center
+  # publishes, which a gateway compares against with the slug stripped off — and
+  # nothing else, so one call through this gateway is judged and every other is
+  # refused for never having been reviewed.
   gateway-fallback:
     <<: *gateway
     environment:

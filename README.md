@@ -59,7 +59,9 @@ so two upstreams reachable at one address are indistinguishable in the message.
 **Overlapping prefixes are refused at startup**: a request matching two routes
 has no answer this gateway could give, and resolving it by longest-match is a
 rule an operator did not write and cannot see. The prefix is removed before the
-request is forwarded and travels on as `X-Forwarded-Prefix`.
+request is forwarded, and travels on as `X-Forwarded-Prefix` to what the gateway
+serves beneath it rather than to the upstream, which is sent none of the
+incoming headers.
 
 `name` is a label. It appears in logs and nowhere else, and it is **not** a Rail
 Center data source slug.

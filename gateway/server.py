@@ -310,20 +310,29 @@ def build_gateway(
     than honoured because the flag is the stronger statement: a test asking for
     the plugin off is asking for a gateway with no control plane.
 
-    **`polls=False` builds no holder either, and is not the same as passing
-    `None`.** `None` means *nobody handed one down, so resolve one from the
-    environment*; `polls=False` means *this proxy is not the one that holds the
-    bundle*. A gateway fronting several upstreams builds one proxy that polls
-    and the rest without, so there is one poll loop against a control plane with
-    one bundle to give — and the rest must not fall back to the environment,
-    which would be a second holder nothing ever starts.
+    **`polls=False` starts no poll loop. It does not decide which holder is
+    read.** A gateway fronting several upstreams polls on one proxy and hands
+    the same holder to the rest, so there is one poll loop against a control
+    plane with one bundle to give and every route's `/ready` answers off that
+    one bundle. Readiness is the gateway's state rather than a route's: the
+    enforcement layer on every route reads this same holder, so a route
+    answering ready off a holder of its own would tell a probe that a route
+    forwarding every call unjudged is ready to serve.
+
+    **A non-polling proxy handed no holder resolves none from the environment**,
+    which is what keeps `polls=False` from meaning `None`. `None` on its own is
+    *nobody handed one down, so resolve one*; resolving one here would be a
+    holder nothing ever starts, and a holder nothing starts holds nothing for
+    the life of the process.
     """
     resolved_plugin = plugin if plugin is not None else plugin_enabled()
     url = _checked_url(f"the url for upstream '{route.name}'", route.url)
     # After the upstream, so a gateway pointed nowhere is refused for that
     # rather than for the Rail Center variable it also has not been given.
-    if not resolved_plugin or not polls:
+    if not resolved_plugin:
         bundle_holder = None
+    elif not polls:
+        bundle_holder = holder
     else:
         bundle_holder = holder if holder is not None else _holder_from_environment()
     log.info("%s", describe_plugin(resolved_plugin))
@@ -341,7 +350,9 @@ def build_gateway(
     gateway = create_proxy(
         backend,
         name="datrail-gateway",
-        lifespan=_bundle_lifespan(bundle_holder),
+        # Read by `/ready` whether or not this proxy polls; started only where
+        # it does, since the loop is what `polls` decides.
+        lifespan=_bundle_lifespan(bundle_holder if polls else None),
     )
     gateway.add_middleware(_UpstreamErrorBoundary())
 
@@ -418,10 +429,12 @@ def build_gateway(
 def _bundle_lifespan(holder: BundleHolder | None):
     """Start the holder with the application and stop it with the application.
 
-    `holder` is None where the plugin is disabled, and there is nothing to
-    start: the mode evaluates no policy, so a lifespan that fetched one anyway
-    would poll Rail Center for the whole life of a process that will never read
-    the answer.
+    `holder` is None where the plugin is disabled and where this proxy is not
+    the one that polls, and neither has anything to start. A disabled plugin
+    evaluates no policy, so a lifespan that fetched one anyway would poll Rail
+    Center for the whole life of a process that will never read the answer; a
+    non-polling proxy reads a holder another proxy in the same process fills,
+    and starting it again would be a second loop for one bundle.
 
     **Nothing here catches.** `start()` turns every expected failure — an
     unreachable control plane, a refused credential, a bundle that will not
@@ -451,8 +464,9 @@ def _bundle_lifespan(holder: BundleHolder | None):
     @asynccontextmanager
     async def lifespan(_server) -> AsyncIterator[None]:
         if holder is None:
-            # the plugin disabled. Nothing to start, nothing to stop, and
-            # the app serves immediately — there is no first fetch to wait on.
+            # the plugin disabled, or a proxy that does not poll. Nothing to
+            # start, nothing to stop, and the app serves immediately — there is
+            # no first fetch to wait on.
             yield
             return
         # `asyncio.wait` rather than `wait_for`: a timeout there cancels what it
@@ -551,11 +565,14 @@ def build_app(
         rail_center if rail_center is not None else rail_center_from_environment()
     )
 
-    # **The holder is the gateway's, not a route's**, so exactly one proxy is
-    # built with it: its lifespan is what starts the poll, and a holder handed
-    # to each of them would run one poll loop per upstream against a control
-    # plane that has one bundle to give. That same proxy answers `/health` and
-    # `/ready` at the root, which is why `_Routed` keeps a reference to it.
+    # **The holder is the gateway's, not a route's**: every proxy is built with
+    # it and exactly one polls it. The poll is started by a lifespan, so polling
+    # on each of them would run one loop per upstream against a control plane
+    # that has one bundle to give — while a route built without the holder would
+    # answer `/ready` off nothing and report itself ready while every call
+    # through it went unjudged. The polling proxy is also the one answering
+    # `/health` and `/ready` at the root, which is why `_Routed` keeps a
+    # reference to it.
     mounted: list[tuple[Route, ASGIApp]] = []
     primary: ASGIApp | None = None
     secondaries: list[Starlette] = []
@@ -563,7 +580,7 @@ def build_app(
         polls = primary is None
         gateway = build_gateway(
             route,
-            resolved_holder if polls else None,
+            resolved_holder,
             resolved_plugin,
             polls=polls,
         )
@@ -598,9 +615,11 @@ class _Routed:
 
     **The prefix is removed before the sub-app sees the request**, so the path it
     receives — and the path an endpoint key is composed from — is the one the
-    upstream serves. It travels on as `X-Forwarded-Prefix`, Traefik's convention
-    rather than one invented here, for an upstream that needs to build absolute
-    URLs.
+    upstream serves. It travels on to that sub-app as `X-Forwarded-Prefix`,
+    Traefik's convention rather than one invented here, for a framework beneath
+    this layer that builds absolute URLs. It travels no further: the proxy
+    reaches the upstream as an MCP client over a transport that forwards none of
+    the incoming headers, so the header is the gateway's own to read.
 
     **The gateway's own `/health` and `/ready` are the ones at the root**, and
     they are answered off the primary sub-app — the one holding the bundle.
@@ -691,8 +710,9 @@ def _under_prefix(scope, route: Route, rest: str):
     the prefix in `root_path` as well, an upstream mounted at `prefix: /mcp`
     would be routed the empty path and serve nothing, and `/a/a/mcp` would be
     served as `/a/mcp` under a key naming an endpoint nobody serves. The prefix
-    reaches a framework beneath as `X-Forwarded-Prefix`, which is what it is
-    for.
+    reaches the sub-app as `X-Forwarded-Prefix`, for a framework beneath this
+    layer that builds absolute URLs, and reaches nothing past it: the proxy
+    forwards none of its incoming headers to the upstream.
     """
     headers = [
         (name, value)

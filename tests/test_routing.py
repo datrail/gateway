@@ -23,11 +23,13 @@ from fastmcp.client.transports import StreamableHttpTransport
 
 from gateway.routes import Route
 from gateway.server import _raw_beneath, _under_prefix, build_app
+from gateway.server import unquote as server_unquote
 from tests.conftest import (
     RAIL_CENTER,
     _free_port,
     holder_serving,
     serve,
+    serving_a_bundle,
     unreachable,
 )
 
@@ -75,17 +77,36 @@ async def upstream_named(label: str, seen: Seen):
 
 
 @asynccontextmanager
-async def gateway_for(routes: list[Route]):
-    """A gateway fronting `routes`, holding no bundle.
+async def gateway_for(routes: list[Route], *, answer=unreachable):
+    """A gateway fronting `routes`, holding whatever `answer` serves.
 
     The holder is injected and `rail_center` is passed, so nothing here reads the
     environment — which is also what makes this a standing check that a second
     route does not go looking for `RAIL_CENTER_URL` on its own behalf.
+
+    `answer` defaults to a control plane that is down, the state the rest of this
+    file runs in: routing does not consult a bundle, so the holder is furniture
+    everywhere except the tests about `/ready`.
     """
     port = _free_port()
     app = build_app(
-        routes, holder_serving(unreachable), plugin=True, rail_center=RAIL_CENTER
+        routes, holder_serving(answer), plugin=True, rail_center=RAIL_CENTER
     )
+    async with serve(app, port):
+        yield f"http://127.0.0.1:{port}"
+
+
+@asynccontextmanager
+async def passthrough_gateway_for(routes: list[Route]):
+    """A gateway fronting `routes` with the plugin off — RailXia not installed.
+
+    A different arm of `build_app` from `gateway_for`'s: no holder is built, no
+    control plane is read and no enforcement layer wraps a route, so the sub-apps
+    are handed to `_Routed` bare and everything the dispatch layer does to them
+    is wired by its own line.
+    """
+    port = _free_port()
+    app = build_app(routes, plugin=False)
     async with serve(app, port):
         yield f"http://127.0.0.1:{port}"
 
@@ -138,6 +159,25 @@ async def test_every_upstream_answers_not_only_the_first(two_upstreams):
         Route("finretail", finretail_url, "/finretail"),
     ]
     async with gateway_for(routes) as base:
+        assert await call_whoami(base, "/delivery") == "delivery"
+        assert await call_whoami(base, "/finretail") == "finretail"
+
+
+@pytest.mark.asyncio
+async def test_every_upstream_answers_with_the_plugin_off_too(two_upstreams):
+    """The same assertion on the arm `build_app` takes when RailXia is absent.
+
+    A separate line starts the sub-apps there, because that arm serves them bare
+    rather than wrapped, so the one above pins nothing about it — and this is the
+    shape `e2e/compose.yml` deploys as `gateway-passthrough`, where every route
+    after the first answering 500 is the whole gateway for anyone running it.
+    """
+    (delivery_url, _), (finretail_url, _) = two_upstreams
+    routes = [
+        Route("delivery", delivery_url, "/delivery"),
+        Route("finretail", finretail_url, "/finretail"),
+    ]
+    async with passthrough_gateway_for(routes) as base:
         assert await call_whoami(base, "/delivery") == "delivery"
         assert await call_whoami(base, "/finretail") == "finretail"
 
@@ -311,11 +351,40 @@ async def test_health_and_ready_are_the_gateways_own_at_the_root(two_upstreams):
 
 @pytest.mark.asyncio
 async def test_a_second_route_polls_no_control_plane_of_its_own(two_upstreams):
-    """One holder for the gateway, so one poll loop against one bundle.
+    """One holder for the gateway, so one fetch however many routes it fronts.
 
-    A route after the first that resolved its own holder would answer `/ready`
-    off an object nothing ever starts — permanently 503 — while the gateway's
-    own readiness came from somewhere else entirely.
+    A route after the first that resolved its own holder would poll a second
+    time for a bundle the gateway already has, and a route that started the
+    gateway's holder again would fetch through it twice. The count is the
+    assertion: the loop is the gateway's, and a route reads what it holds.
+    """
+    (delivery_url, _), (finretail_url, _) = two_upstreams
+    routes = [
+        Route("delivery", delivery_url, "/delivery"),
+        Route("finretail", finretail_url, "/finretail"),
+    ]
+    fetches = 0
+
+    def counted() -> httpx.Response:
+        nonlocal fetches
+        fetches += 1
+        return unreachable()
+
+    async with gateway_for(routes, answer=counted) as base, httpx.AsyncClient() as c:
+        await c.get(f"{base}/ready")
+
+    assert fetches == 1
+
+
+@pytest.mark.asyncio
+async def test_a_second_routes_ready_is_the_gateways_own(two_upstreams):
+    """Beneath a prefix, `/ready` answers off the bundle the gateway holds.
+
+    Readiness is what keeps traffic off a gateway holding nothing — `_judge`
+    says so — and the enforcement layer on every route reads that one holder. A
+    route answering ready while the gateway holds nothing therefore tells a
+    probe that a route forwarding every call unjudged is ready to serve, which
+    is the one direction this must not fail in.
     """
     (delivery_url, _), (finretail_url, _) = two_upstreams
     routes = [
@@ -323,9 +392,37 @@ async def test_a_second_route_polls_no_control_plane_of_its_own(two_upstreams):
         Route("finretail", finretail_url, "/finretail"),
     ]
     async with gateway_for(routes) as base, httpx.AsyncClient() as client:
-        response = await client.get(f"{base}/finretail/ready")
+        held_nothing = [
+            (await client.get(f"{base}{path}")).status_code
+            for path in ("/ready", "/delivery/ready", "/finretail/ready")
+        ]
 
-    assert response.status_code == 200
+    assert held_nothing == [503, 503, 503]
+
+
+@pytest.mark.asyncio
+async def test_a_second_routes_ready_follows_the_held_bundle(two_upstreams):
+    """The same paths answer 200 once a bundle is held, off that same holder.
+
+    The other half of the assertion above: a secondary reporting 503 whatever
+    the gateway holds would be as wrong as one reporting 200, and only a gateway
+    that is actually holding a bundle can tell the two apart.
+    """
+    (delivery_url, _), (finretail_url, _) = two_upstreams
+    routes = [
+        Route("delivery", delivery_url, "/delivery"),
+        Route("finretail", finretail_url, "/finretail"),
+    ]
+    async with (
+        gateway_for(routes, answer=serving_a_bundle) as base,
+        httpx.AsyncClient() as client,
+    ):
+        held_one = [
+            (await client.get(f"{base}{path}")).status_code
+            for path in ("/ready", "/delivery/ready", "/finretail/ready")
+        ]
+
+    assert held_one == [200, 200, 200]
 
 
 @pytest.mark.asyncio
@@ -390,6 +487,48 @@ def test_the_raw_path_keeps_the_encoding_it_arrived_with():
     assert _raw_beneath(b"/delivery", "/delivery") == b"/"
     # The root prefix strips nothing, including from a path with no latin-1 form.
     assert _raw_beneath(b"/%E8%B7%AF%E5%BE%84", "") == b"/%E8%B7%AF%E5%BE%84"
+
+
+def test_the_sub_app_is_handed_the_stripped_raw_path():
+    """The rewrite is wired to `raw_path`, not only available to be called.
+
+    `path` and `raw_path` describe one request, and a `raw_path` left as it
+    arrived hands the sub-app the string this layer just removed — while `path`,
+    which everything else here asserts on, looks right. The escaped separator is
+    what makes the two visibly different: `/a%2Fb` is one segment containing a
+    slash, and the decoded `path` cannot say so.
+    """
+    scope = _scope("/delivery/a/b")
+    scope["raw_path"] = b"/delivery/a%2Fb"
+    rewritten = _under_prefix(scope, Route("delivery", "http://u", "/delivery"), "/a/b")
+
+    assert rewritten["raw_path"] == b"/a%2Fb"
+    assert rewritten["path"] == "/a/b"
+
+
+def test_the_prefix_scan_is_bounded_by_the_prefix_and_not_by_the_path(monkeypatch):
+    """How much the scan decodes is the routes file's to decide, not a caller's.
+
+    The scan walks a growing head of the raw bytes and stops once it has decoded
+    past the prefix. Without that stop it decodes the whole path, once per route
+    the file names, on every request that is not beneath the prefix being tried
+    — work an unauthenticated caller sets the size of by sending a long path.
+    """
+    decoded = 0
+    real = server_unquote
+
+    def counting(text, *args, **kwargs):
+        nonlocal decoded
+        decoded += 1
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr("gateway.server.unquote", counting)
+    prefix = "/delivery"
+    long_path = b"/" + b"x" * 4000
+    assert _raw_beneath(long_path, prefix) == long_path
+
+    # One decode per step to the end of the prefix, and one that oversteps it.
+    assert decoded <= len(prefix) + 2, f"{decoded} decodes for {len(long_path)} bytes"
 
 
 def test_the_prefix_is_carried_by_the_path_and_not_by_root_path():

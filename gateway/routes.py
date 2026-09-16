@@ -19,8 +19,10 @@ refused at startup for that reason — a request matching two routes has no answ
 this gateway could give.
 
 The prefix is **removed** before the request is forwarded and before a key is
-composed, and travels on as `X-Forwarded-Prefix` for an upstream that needs to
-build absolute URLs. It must not enter the endpoint key: Rail Center stores one
+composed, and travels on as `X-Forwarded-Prefix` to what the gateway serves
+beneath it, for a framework that builds absolute URLs. The upstream never reads
+it: the proxy forwards none of its incoming headers on. It must not enter the
+endpoint key: Rail Center stores one
 row per endpoint, and the same MCP server behind two gateways mounted at
 different prefixes would otherwise produce two keys for one row.
 """

@@ -35,7 +35,7 @@
         "string",
         "null"
       ],
-      "description": "The **resolved** endpoint key the walk was given — `<datasource_slug>.<tool_name>` — matched after any ingress rewrite and never the raw path. Null where the call named no endpoint: a message that names no tool by design, or one whose name could not be composed into a key. Those two are distinguishable in `metadata.endpoint_resolution` and deliberately not by an absent key, since drift must never masquerade as an endpoint with no rule."
+      "description": "The **resolved** endpoint key the walk was given — `<path>#<method>#<call>`, as in `/mcp#tools/call#track_package` — matched after any ingress rewrite and never the raw path. Null where the call named no endpoint: a message that names no tool by design, or one whose name could not be composed into a key. Those two are distinguishable in `metadata.endpoint_resolution` and deliberately not by an absent key, since drift must never masquerade as an endpoint with no rule."
     },
     "agent_id": {
       "anyOf": [
@@ -111,7 +111,7 @@
     {
       "policy_id": "11111111-0000-4000-8000-000000000001",
       "datasource_slug": "delivery",
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "denied_at": "2026-07-28T20:41:07.512247+00:00",
       "agent_id": "550e8400-e29b-41d4-a716-446655440000",
       "posture_score": 12,
