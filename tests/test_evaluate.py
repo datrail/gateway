@@ -145,7 +145,10 @@ async def test_an_allowed_call_says_so(evaluating, caplog):
     assert answer == "delivered:77123"
     written = "\n".join(caplog.messages)
     assert "allow" in written
-    assert "would deny" not in written
+    # The fallback is evaluated at this posture and acted on at no posture, so a
+    # would-be refusal on an unbound endpoint is logged beside the allow rather
+    # than instead of it. What must not appear is a refusal that was *acted* on.
+    assert "denied " not in written
 
 
 @pytest.mark.asyncio

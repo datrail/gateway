@@ -1076,21 +1076,25 @@ async def test_the_caller_cannot_tell_a_fallback_refusal_from_a_policy_denial():
 
 
 @pytest.mark.asyncio
-async def test_a_fallback_refusal_reports_nothing_because_no_policy_decided():
-    """The other side of the trade the case above makes.
+async def test_a_fallback_refusal_is_reported_as_a_denial_carrying_no_policy() -> None:
+    """The one verdict this gateway reaches without a rule, and it is still a
+    denial.
 
-    A report names the policy that matched and Rail Center records that
-    attribution without re-deriving it, so a refusal no policy reached has
-    nothing it could honestly name — and `policy_id` has no absent form. The
-    refusal is therefore in the gateway's log and nowhere else, which is a gap
-    on Rail Center's side of the wire rather than a decision taken here.
+    `block` refuses a call no binding matched without the chain being consulted
+    at all, so there is no policy to name — and the report omits `policy_id`
+    rather than inventing one or sending null. Leaving it unreported would make
+    the endpoints nobody bound the only ones whose refusals never reach an
+    operator, which is the opposite of what an unbound endpoint deserves.
     """
     enforcement, _, reports = layer(bundle(fallback="block"))
 
     assert (await drive(enforcement, call())).status == 403
-    await settled(reports, expecting=0)
+    await settled(reports, expecting=1)
 
-    assert reports.bodies == []
+    (body,) = reports.bodies
+    assert "policy_id" not in body
+    assert body["endpoint_key"] == KEY
+    assert body["metadata"]["endpoint_resolution"] == "resolved"
 
 
 @pytest.mark.asyncio
@@ -1108,7 +1112,9 @@ async def test_the_fallback_refusal_says_in_the_log_what_the_caller_is_not_told(
     written = "\n".join(caplog.messages)
     assert KEY in written
     assert "fallback=block" in written
-    assert "nothing was reported" in written
+    # The refusal *is* reported — what the caller is not told is which
+    # endpoint has no binding, and the log is where that lives.
+    assert "no policy judged it" in written
 
 
 @pytest.mark.asyncio
@@ -1451,3 +1457,82 @@ async def test_a_body_too_deep_to_read_is_still_forwarded_under_observe(depth):
     assert answer.status == 200
     assert downstream.calls == 1
     assert downstream.body == body
+
+
+# --- what a denial names, and at which posture the fallback is asked ---------
+#
+# Two rules that only show up in a report, and one that only shows up in a log.
+# Both were settled in RC-312's plan and neither is visible from the caller's
+# side, which is what makes them worth pinning here rather than inferring from
+# a 403.
+
+
+@pytest.mark.asyncio
+async def test_a_denial_on_a_matched_binding_names_the_key_rail_center_published() -> (
+    None
+):
+    """The full key, taken off the binding rather than recomposed.
+
+    This gateway composes `<path>#<method>#<call>` and holds no slug, so the key
+    it built is not the key Rail Center stores. Where a binding matched, the
+    whole key is in hand — it arrived in the bundle — and reporting that one
+    lets the receiver resolve the data source without re-deriving it from the
+    gateway's routing. Reporting the composed form instead would throw away the
+    only part the gateway could not have known.
+    """
+    bound_to_the_denying_rule = {
+        "endpoint_key": FULL_KEY,
+        "mode": "gated",
+        "policy_ids": [DENY_ID],
+    }
+    enforcement, _, reports = layer(
+        bundle(DENIES_EVERYTHING, bindings=[bound_to_the_denying_rule], fallback="pass")
+    )
+
+    assert (await drive(enforcement, call())).status == 403
+    await settled(reports, expecting=1)
+
+    (body,) = reports.bodies
+    assert body["endpoint_key"] == FULL_KEY
+    assert body["endpoint_key"] != KEY
+
+
+@pytest.mark.asyncio
+async def test_a_denial_on_no_binding_names_the_only_key_there_is() -> None:
+    """The other half, and the reason the first is not simply "always the full
+    key": where nothing matched there is no published key to name, so the
+    composed form is all this gateway holds."""
+    enforcement, _, reports = layer(bundle(DENIES_EVERYTHING, fallback="pass"))
+
+    assert (await drive(enforcement, call())).status == 403
+    await settled(reports, expecting=1)
+
+    (body,) = reports.bodies
+    assert body["endpoint_key"] == KEY
+
+
+@pytest.mark.asyncio
+async def test_observe_says_what_block_would_refuse_and_still_walks(caplog) -> None:
+    """The rung that previews enforcement must preview the fallback too.
+
+    An operator has to see what `block` would refuse *before* it refuses
+    anything, which is the whole of what `observe` is for — and the design's
+    case for making `observe` unskippable rests on it. But saying it is the
+    whole of what this posture does: acting on it here would mean refusing
+    without the chain being consulted, which is `enforce`'s behaviour, so the
+    walk still runs and the verdict is still logged beside the warning.
+    """
+    enforcement, _, reports = layer(
+        bundle(DENIES_EVERYTHING, fallback="block"), blocking=False
+    )
+
+    with caplog.at_level(logging.INFO, logger="gateway"):
+        answer = await drive(enforcement, call())
+
+    assert answer.status == 200, "observe acts on nothing, the fallback included"
+    written = "\n".join(caplog.messages)
+    assert "would deny" in written and "fallback=block" in written
+    assert "would deny" in written and DENY_ID in written, (
+        "the chain was walked as well, so its verdict is in the log too"
+    )
+    await settled(reports, expecting=0)

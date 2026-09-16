@@ -932,11 +932,14 @@ class _Enforcement:
             return None
         blocking = blocks(bundle.enforcement)
 
-        # **Asked instead of the walk, not before it as a filter.** `fallback`
-        # is consulted only at `enforce`, which is what `blocking` already
-        # means, and a `block` fallback refuses the call without the chain
-        # being consulted at all — so there is no verdict here, and nothing to
-        # report to Rail Center.
+        # **Asked instead of the walk, wherever the chain would be walked.**
+        # `block` refuses a call no binding matched without the chain being
+        # consulted at all — but the *asking* happens at `observe` too, and only
+        # the acting is held back to `enforce`. An operator has to be able to
+        # see what `block` would refuse before it refuses anything, which is the
+        # whole of what `observe` is for; a fallback silent until the day it
+        # blocks makes the rung that exists to preview enforcement the one rung
+        # that previews none of it.
         # **One reading, asked twice.** `resolution.key` is None for both keyless
         # outcomes and only one of them earns the narrowing: a message that
         # names no tool by design has no subject for an endpoint-derived rule,
@@ -946,13 +949,34 @@ class _Enforcement:
         # two spellings of it that can drift apart.
         keyless = resolution.status == "keyless"
 
-        if blocking and refuses_unbound(bundle, resolution.key, keyless=keyless):
-            log.warning(
-                "denied %s (no binding entry, fallback=block; ticket %s); "
-                "no policy judged it, so nothing was reported",
+        unbound = refuses_unbound(bundle, resolution.key, keyless=keyless)
+        if unbound and not blocking:
+            # **Said, and then not acted on — which is the whole distinction.**
+            # Returning here would *act* on the fallback: at `enforce` a `block`
+            # refuses without the chain being consulted, so short-circuiting
+            # would make this mode enforce the one verdict it is supposed only
+            # to preview. The walk below still runs, so an operator sees both
+            # what the fallback would do and what the chain says about the same
+            # call.
+            log.info(
+                "would deny %s (no binding entry, fallback=block; ticket %s) — "
+                "this mode enforces nothing, so it was forwarded",
                 named,
                 ticket.state,
             )
+        if unbound and blocking:
+            log.warning(
+                "denied %s (no binding entry, fallback=block; ticket %s); "
+                "no policy judged it",
+                named,
+                ticket.state,
+            )
+            # **Reported as an ordinary denial carrying no policy.** A refusal
+            # nobody hears about is a refusal an operator debugs from the
+            # caller's side: the fallback is the one verdict reached without a
+            # rule, and leaving it unreported would make the endpoints nobody
+            # bound the only ones whose refusals never appear.
+            self._send_report(scope, resolution, ticket, policy=None, bundle=bundle)
             # **The caller is told what any denied caller is told.** A distinct
             # status or reason here would let anyone holding a tool name probe
             # which endpoints this gateway has bindings for, one call at a
@@ -1015,7 +1039,7 @@ class _Enforcement:
             safe_for_log(policy.id),
             ticket.state,
         )
-        self._send_report(scope, resolution, ticket, policy)
+        self._send_report(scope, resolution, ticket, policy, bundle=bundle)
         # **The policy id does not go back to the caller.** The `x-rail` ticket
         # is unsigned and this gateway is the only thing in front of the
         # upstream, so a caller that reads which id stopped each attempt can
@@ -1025,17 +1049,28 @@ class _Enforcement:
         # Center — both on the trusted side of the boundary.
         return 403, "denied by policy"
 
-    def _send_report(self, scope, resolution, ticket, policy) -> None:
+    def _send_report(self, scope, resolution, ticket, policy, bundle=None) -> None:
         """Report the denial without the caller waiting for it.
 
         Fire-and-forget: the caller has already been refused, so awaiting this
         would put Rail Center's availability into how long a denied request
         takes, and a failed report would look like a failed refusal.
+
+        `policy` is None for a fallback refusal — the one verdict reached
+        without a rule — and the report carries no `policy_id` rather than
+        inventing one.
+
+        **The key reported is the fullest one this gateway holds.** Where a
+        binding matched, that is the key Rail Center published, slug and all,
+        taken off the binding rather than recomposed; where none did, it is the
+        slug-less form this gateway composed, which is all there is. The
+        receiver resolves the data source from the reporting gateway and
+        whichever it gets.
         """
         claims = ticket.token or {}
         body = build_report(
-            policy_id=policy.id,
-            endpoint_key=resolution.key,
+            policy_id=policy.id if policy is not None else None,
+            endpoint_key=_reportable_key(bundle, resolution.key),
             endpoint_status=resolution.status,
             ticket_state=ticket.state,
             agent_id=claims.get("agent_id"),
@@ -1047,6 +1082,14 @@ class _Enforcement:
         )
         self._reports.add(task)
         task.add_done_callback(self._reports.discard)
+
+
+def _reportable_key(bundle, composed: str | None) -> str | None:
+    """The full key where a binding matched, the composed one where none did."""
+    if bundle is None or composed is None:
+        return composed
+    binding = bundle.bindings.get(composed)
+    return binding.full_key if binding is not None else composed
 
 
 async def _drained(receive):

@@ -169,7 +169,7 @@ def _reads_as_number(value: Any) -> bool:
 
 def build_report(
     *,
-    policy_id: str,
+    policy_id: str | None,
     endpoint_key: str | None,
     endpoint_status: str,
     ticket_state: str,
@@ -209,7 +209,11 @@ def build_report(
         metadata[CLAIMED_STATUS_KEY] = claimed_status
 
     report: dict[str, Any] = {
-        "policy_id": policy_id,
+        # **Absent rather than null for a fallback refusal.** The one verdict
+        # this gateway reaches without a rule is the `block` fallback, and there
+        # is no policy to name; omitting the key says that, where a null would
+        # be a reporter that had a policy and lost it.
+        **({"policy_id": policy_id} if policy_id is not None else {}),
         # **No `datasource_slug`.** This gateway holds none: it fronts several
         # data sources and composes a key with no slug in it, so naming one here
         # would mean asserting a value it does not have. The schema requires
