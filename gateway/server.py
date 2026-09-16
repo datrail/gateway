@@ -117,7 +117,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Final
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
@@ -143,6 +143,7 @@ from gateway.mode import (
     judges,
     plugin_enabled,
 )
+from gateway.routes import Route, load_routes
 from gateway.ticket import parse_rail_header
 
 log = logging.getLogger("gateway")
@@ -261,21 +262,6 @@ def _holder_from_environment() -> BundleHolder:
     )
 
 
-def datasource_slug() -> str:
-    """`RAIL_DATASOURCE_SLUG` — the first segment of every endpoint key.
-
-    Read only where the gateway evaluates. It plays no part in fetching — that
-    is `RAIL_GATEWAY_SLUG`'s job, and the two are different values: this names a
-    data source whose endpoints the bundle's bindings are keyed on, that names
-    the gateway whose bundle is being fetched. A deployment that got it wrong composes keys matching
-    no binding, and what that costs is the bundle's to say: under a `pass`
-    fallback every endpoint faces the whole chain, which denies more than the
-    operator wrote rather than less; under `block` every call is refused. Neither
-    is what they wrote.
-    """
-    return _required("RAIL_DATASOURCE_SLUG")
-
-
 def gateway_slug() -> str:
     """`RAIL_GATEWAY_SLUG` — which gateway this is, and whose bundle it fetches.
 
@@ -292,7 +278,7 @@ def gateway_slug() -> str:
 
 
 def build_gateway(
-    upstream_url: str | None = None,
+    route: Route,
     holder: BundleHolder | None = None,
     plugin: bool | None = None,
 ) -> FastMCP:
@@ -320,10 +306,7 @@ def build_gateway(
     the plugin off is asking for a gateway with no control plane.
     """
     resolved_plugin = plugin if plugin is not None else plugin_enabled()
-    url = _checked_url(
-        "RAIL_GATEWAY_UPSTREAM_URL",
-        upstream_url or _required("RAIL_GATEWAY_UPSTREAM_URL"),
-    )
+    url = _checked_url(f"the url for upstream '{route.name}'", route.url)
     # After the upstream, so a gateway pointed nowhere is refused for that
     # rather than for the Rail Center variable it also has not been given.
     if not resolved_plugin:
@@ -509,10 +492,9 @@ def _bundle_lifespan(holder: BundleHolder | None):
 
 
 def build_app(
-    upstream_url: str | None = None,
+    routes: list[Route] | None = None,
     holder: BundleHolder | None = None,
     plugin: bool | None = None,
-    slug: str | None = None,
     *,
     rail_center: tuple[str, dict[str, str]] | None = None,
     report_transport: httpx.AsyncBaseTransport | None = None,
@@ -537,26 +519,139 @@ def build_app(
     thing an ASGI stack can do.
     """
     resolved_plugin = plugin if plugin is not None else plugin_enabled()
+    resolved_routes = routes if routes is not None else load_routes()
+
     if not resolved_plugin:
-        return build_gateway(upstream_url, None, resolved_plugin).http_app(
-            transport="streamable-http"
-        )
+        mounted = [
+            (
+                route,
+                build_gateway(route, None, resolved_plugin).http_app(
+                    transport="streamable-http"
+                ),
+            )
+            for route in resolved_routes
+        ]
+        return _Routed(mounted, mounted[0][1])
 
     resolved_holder = holder if holder is not None else _holder_from_environment()
-    resolved_slug = slug if slug is not None else datasource_slug()
     url, auth = (
         rail_center if rail_center is not None else rail_center_from_environment()
     )
 
-    gateway = build_gateway(upstream_url, resolved_holder, resolved_plugin)
-    return _Enforcement(
-        gateway.http_app(transport="streamable-http"),
-        resolved_holder,
-        resolved_slug,
-        rail_center_url=url,
-        auth=auth,
-        transport=report_transport,
-    )
+    # **The holder is the gateway's, not a route's**, so exactly one proxy is
+    # built with it: its lifespan is what starts the poll, and a holder handed
+    # to each of them would run one poll loop per upstream against a control
+    # plane that has one bundle to give. That same proxy answers `/health` and
+    # `/ready` at the root, which is why `_Routed` keeps a reference to it.
+    mounted: list[tuple[Route, ASGIApp]] = []
+    primary: ASGIApp | None = None
+    for route in resolved_routes:
+        gateway = build_gateway(
+            route, resolved_holder if primary is None else None, resolved_plugin
+        )
+        app = _Enforcement(
+            gateway.http_app(transport="streamable-http"),
+            resolved_holder,
+            rail_center_url=url,
+            auth=auth,
+            transport=report_transport,
+        )
+        if primary is None:
+            primary = app
+        mounted.append((route, app))
+    assert primary is not None  # `load_routes` refuses a file naming none
+    return _Routed(mounted, primary)
+
+
+class _Routed:
+    """Dispatch a request to the upstream whose prefix it arrived under.
+
+    **The prefix is the only thing that decides routing.** An MCP `tools/call`
+    names a tool and nothing else, so two upstreams reachable at one address are
+    indistinguishable in the message — which is why the agent-facing URL becomes
+    per-upstream and why `gateway.routes` refuses overlapping prefixes at
+    startup. A request matching two routes has no answer this gateway could
+    give, and one matching none is a 404 rather than a guess.
+
+    **The prefix is removed before the sub-app sees the request**, so the path it
+    receives — and the path an endpoint key is composed from — is the one the
+    upstream serves. It travels on as `X-Forwarded-Prefix`, Traefik's convention
+    rather than one invented here, for an upstream that needs to build absolute
+    URLs.
+
+    `/health` and `/ready` are the gateway's rather than any route's, so they are
+    answered off the primary sub-app — the one holding the bundle — at the root
+    and are not reachable beneath a prefix.
+    """
+
+    #: Answered at the root, by the gateway rather than by a route.
+    META_PATHS: Final[frozenset[str]] = frozenset({"/health", "/ready"})
+
+    def __init__(self, mounted: list[tuple[Route, ASGIApp]], primary: ASGIApp) -> None:
+        # Longest first, so the match is deterministic whatever order the file
+        # listed them in. Overlaps are already refused, so this orders rather
+        # than resolves — but a reader should not have to know that to see that
+        # two prefixes cannot both match.
+        self._mounted = sorted(
+            mounted, key=lambda pair: len(pair[0].strips), reverse=True
+        )
+        self._primary = primary
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "lifespan":
+            await self._primary(scope, receive, send)
+            return
+        path = scope.get("path") or ""
+        if path in self.META_PATHS:
+            await self._primary(scope, receive, send)
+            return
+        for route, app in self._mounted:
+            rest = _beneath(path, route.strips)
+            if rest is None:
+                continue
+            await app(_under_prefix(scope, route, rest), receive, send)
+            return
+        await _refuse(send, 404, f"no upstream is mounted at {safe_for_log(path)}")
+
+
+def _beneath(path: str, prefix: str) -> str | None:
+    """`path` with `prefix` removed, or None where it is not beneath it.
+
+    The root prefix strips nothing and matches everything, which is the
+    single-upstream deployment. Otherwise the match is on a path boundary: `/d`
+    claims `/d` and `/d/mcp`, and never `/d-eu/mcp`.
+    """
+    if not prefix:
+        return path
+    if path == prefix:
+        return "/"
+    if path.startswith(prefix + "/"):
+        return path[len(prefix) :]
+    return None
+
+
+def _under_prefix(scope, route: Route, rest: str):
+    """`scope`, rewritten as the sub-app and the upstream should see it.
+
+    `raw_path` is rewritten beside `path` because Starlette prefers it where it
+    is present, so a stale one would route the sub-app by the string this layer
+    just removed. `root_path` carries the prefix in the ASGI form, which is what
+    a framework beneath uses to build its own URLs.
+    """
+    headers = [
+        (name, value)
+        for name, value in scope.get("headers", [])
+        if name != b"x-forwarded-prefix"
+    ]
+    if route.strips:
+        headers.append((b"x-forwarded-prefix", route.strips.encode("latin-1")))
+    rewritten = dict(scope)
+    rewritten["path"] = rest
+    rewritten["root_path"] = scope.get("root_path", "") + route.strips
+    rewritten["headers"] = headers
+    if scope.get("raw_path") is not None:
+        rewritten["raw_path"] = rest.encode("latin-1")
+    return rewritten
 
 
 def _split_credential(url: str) -> tuple[str, dict[str, str]]:
@@ -633,7 +728,6 @@ class _Enforcement:
         self,
         app: ASGIApp,
         holder: BundleHolder,
-        slug: str,
         *,
         rail_center_url: str,
         auth: dict[str, str],
@@ -641,7 +735,6 @@ class _Enforcement:
     ) -> None:
         self._app = app
         self._holder = holder
-        self._slug = slug
         self._rail_center_url = rail_center_url
         self._auth = auth
         self._transport = transport
@@ -693,7 +786,7 @@ class _Enforcement:
         proceeds, which is the same trade `_UpstreamErrorBoundary` makes — a
         gateway that forwards nothing is worse than one that enforces nothing.
         """
-        resolution = resolve_from_body(body, self._slug)
+        resolution = resolve_from_body(body, scope.get("path") or "/")
         named = safe_for_log(resolution.key or resolution.status)
         if resolution.status == "discovery":
             # Not a call: it opens the session or lists what the session
@@ -836,7 +929,6 @@ class _Enforcement:
         claims = ticket.token or {}
         body = build_report(
             policy_id=policy.id,
-            datasource_slug=self._slug,
             endpoint_key=resolution.key,
             endpoint_status=resolution.status,
             ticket_state=ticket.state,

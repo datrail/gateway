@@ -26,7 +26,10 @@ from gateway.endpoint import (
 from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH
 from gateway.ticket import MAX_NESTING_DEPTH as TICKET_NESTING_DEPTH
 
-SLUG = "delivery"
+#: The path the upstream serves, as the gateway sees it once the route prefix
+#: is removed. It is what the first segment of a composed key is, and it is not
+#: a data source slug — this gateway composes none.
+MOUNT = "/mcp"
 
 
 def nested_call(depth: int) -> bytes:
@@ -47,7 +50,7 @@ def nested_call(depth: int) -> bytes:
 
 def resolve(method: object = "tools/call", tool_name: object = "track_package"):
     """The resolution as a pair, so a case reads as key-and-status."""
-    resolution = resolve_endpoint_key(method, tool_name, SLUG)
+    resolution = resolve_endpoint_key(method, tool_name, MOUNT)
     return resolution.key, resolution.status
 
 
@@ -58,13 +61,19 @@ def test_the_key_is_the_slug_and_the_tool_name_verbatim():
     """Both halves unnormalised. Bindings are indexed on the raw key and the
     contract refuses case folding and Unicode normalisation, so a key matches
     what the operator registered character for character or not at all."""
-    assert resolve(tool_name="Track_Package") == ("delivery.Track_Package", "resolved")
+    assert resolve(tool_name="Track_Package") == (
+        f"{MOUNT}#tools/call#Track_Package",
+        "resolved",
+    )
 
 
 def test_dots_inside_a_tool_name_stay_ordinary_characters():
     """An endpoint key is an opaque string to the control plane. Inventing
     structure the other side does not parse would be a private dialect."""
-    assert resolve(tool_name="orders.v2") == ("delivery.orders.v2", "resolved")
+    assert resolve(tool_name="orders.v2") == (
+        f"{MOUNT}#tools/call#orders.v2",
+        "resolved",
+    )
 
 
 # --- a message that names no tool by design -------------------------------
@@ -152,9 +161,11 @@ def test_a_key_past_the_control_plane_cap_is_unrecognised():
     unbounded tool name would otherwise ride into every line the decision
     writes. Asserted from both sides of the bound, so a guard that is merely
     off by one is not mistaken for one that is there."""
-    fits = "t" * (MAX_ENDPOINT_KEY_LENGTH - len(SLUG) - 1)
-    assert len(f"{SLUG}.{fits}") == MAX_ENDPOINT_KEY_LENGTH
-    assert resolve(tool_name=fits) == (f"{SLUG}.{fits}", "resolved")
+    # The key is three parts and two separators, so what a tool name may hold
+    # is the cap less the path, the method and both separators.
+    fits = "t" * (MAX_ENDPOINT_KEY_LENGTH - len(MOUNT) - len("tools/call") - 2)
+    assert len(f"{MOUNT}#tools/call#{fits}") == MAX_ENDPOINT_KEY_LENGTH
+    assert resolve(tool_name=fits) == (f"{MOUNT}#tools/call#{fits}", "resolved")
 
     assert resolve(tool_name=fits + "t") == (None, "unrecognised")
 
@@ -174,10 +185,10 @@ def test_a_body_at_the_nesting_bound_still_resolves():
     one is not mistaken for one that is there. Past it the body is
     `unrecognised` — never `keyless`, because a body that could not be read is
     drift or garbage and has to face the whole chain."""
-    at = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH), SLUG)
-    assert (at.key, at.status) == ("delivery.track_package", "resolved")
+    at = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH), MOUNT)
+    assert (at.key, at.status) == (f"{MOUNT}#tools/call#track_package", "resolved")
 
-    past = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH + 1), SLUG)
+    past = resolve_from_body(nested_call(MAX_BODY_NESTING_DEPTH + 1), MOUNT)
     assert (past.key, past.status) == (None, "unrecognised")
 
 
@@ -191,7 +202,7 @@ def test_the_body_bound_is_not_the_ticket_headers():
     assert MAX_BODY_NESTING_DEPTH > TICKET_NESTING_DEPTH
 
     deeper_than_a_ticket = resolve_from_body(
-        nested_call(TICKET_NESTING_DEPTH + 1), SLUG
+        nested_call(TICKET_NESTING_DEPTH + 1), MOUNT
     )
     assert deeper_than_a_ticket.status == "resolved"
 
@@ -207,7 +218,7 @@ def test_a_body_deep_enough_to_exhaust_the_stack_answers_rather_than_raising(dep
     The depths cover both declared interpreters: 1000 raises on 3.10 and 10000
     on 3.12, from a shallow stack, and the 3.10 threshold falls further the
     deeper the caller's own stack — an ASGI handler's is deep."""
-    resolution = resolve_from_body(nested_call(depth), SLUG)
+    resolution = resolve_from_body(nested_call(depth), MOUNT)
     assert (resolution.key, resolution.status) == (None, "unrecognised")
 
 
@@ -220,12 +231,15 @@ def test_brackets_inside_a_string_are_characters_rather_than_nesting():
         '"arguments": {"q": "%s"}}}' % ("[" * (MAX_BODY_NESTING_DEPTH * 20))
     ).encode()
 
-    resolution = resolve_from_body(body, SLUG)
-    assert (resolution.key, resolution.status) == ("delivery.track_package", "resolved")
+    resolution = resolve_from_body(body, MOUNT)
+    assert (resolution.key, resolution.status) == (
+        f"{MOUNT}#tools/call#track_package",
+        "resolved",
+    )
 
 
 def test_a_body_that_is_not_json_at_all_still_answers():
     """The bound is a new way in to a function whose whole contract is that it
     answers, so the paths that were already there are held alongside it."""
     for body in (b"", b"\xff\xfe{", b"not json", b"[]", b"null"):
-        assert resolve_from_body(body, SLUG).status == "unrecognised", body
+        assert resolve_from_body(body, MOUNT).status == "unrecognised", body

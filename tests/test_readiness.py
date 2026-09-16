@@ -37,6 +37,7 @@ from tests.conftest import (
     POLICY_BUNDLE,
     RAIL_CENTER,
     holder_serving,
+    one_route,
     running,
     serving_a_bundle,
     unreachable,
@@ -75,10 +76,9 @@ async def test_a_gateway_holding_no_bundle_is_not_ready():
     honestly be reported as. 503, because the status code is the part every
     orchestrator reads without being taught to."""
     app = build_app(
-        UPSTREAM,
+        [one_route(UPSTREAM)],
         holder_serving(unreachable),
         plugin=True,
-        slug="delivery",
         rail_center=RAIL_CENTER,
     )
 
@@ -92,10 +92,9 @@ async def test_a_gateway_holding_no_bundle_is_not_ready():
 @pytest.mark.asyncio
 async def test_a_gateway_holding_a_bundle_is_ready():
     app = build_app(
-        UPSTREAM,
+        [one_route(UPSTREAM)],
         holder_serving(serving_a_bundle),
         plugin=True,
-        slug="delivery",
         rail_center=RAIL_CENTER,
     )
 
@@ -112,10 +111,9 @@ async def test_the_report_does_not_carry_the_bundle_held():
     naming the bundle in the body is a public feed of when a customer's policy changed.
     The operator use it would serve is already served by the log line."""
     app = build_app(
-        UPSTREAM,
+        [one_route(UPSTREAM)],
         holder_serving(serving_a_bundle),
         plugin=True,
-        slug="delivery",
         rail_center=RAIL_CENTER,
     )
 
@@ -132,9 +130,7 @@ async def test_readiness_is_read_at_the_request_and_not_cached_at_startup():
     tests above and fails this one, which is the whole reason it is here."""
     answer = unreachable
     holder = holder_serving(lambda: answer())
-    app = build_app(
-        UPSTREAM, holder, plugin=True, slug="delivery", rail_center=RAIL_CENTER
-    )
+    app = build_app([one_route(UPSTREAM)], holder, plugin=True, rail_center=RAIL_CENTER)
 
     async with running(app) as client:
         assert (await client.get("/ready")).status_code == 503
@@ -153,9 +149,7 @@ async def test_a_failed_refresh_does_not_take_readiness_away():
     everything it needs."""
     answer = serving_a_bundle
     holder = holder_serving(lambda: answer())
-    app = build_app(
-        UPSTREAM, holder, plugin=True, slug="delivery", rail_center=RAIL_CENTER
-    )
+    app = build_app([one_route(UPSTREAM)], holder, plugin=True, rail_center=RAIL_CENTER)
 
     async with running(app) as client:
         assert (await client.get("/ready")).status_code == 200
@@ -177,10 +171,9 @@ async def test_a_bundle_that_will_not_validate_leaves_the_gateway_unready():
         return httpx.Response(200, json={"schema_version": "1.0", "content_hash": "v1"})
 
     app = build_app(
-        UPSTREAM,
+        [one_route(UPSTREAM)],
         holder_serving(missing_its_policies),
         plugin=True,
-        slug="delivery",
         rail_center=RAIL_CENTER,
     )
 
@@ -199,10 +192,9 @@ async def test_a_bundle_that_will_not_validate_leaves_the_gateway_unready():
 async def test_liveness_is_the_same_answer_either_way(label, answer):
     """The one assertion that stops `/health` from acquiring a second job."""
     app = build_app(
-        UPSTREAM,
+        [one_route(UPSTREAM)],
         holder_serving(answer),
         plugin=True,
-        slug="delivery",
         rail_center=RAIL_CENTER,
     )
 
@@ -257,10 +249,9 @@ async def test_the_holder_starts_and_stops_with_the_application():
         resume.clear()
 
     app = build_app(
-        UPSTREAM,
+        [one_route(UPSTREAM)],
         holder_serving(answer, sleep=sleep),
         plugin=True,
-        slug="delivery",
         rail_center=RAIL_CENTER,
     )
 
@@ -283,10 +274,9 @@ async def test_a_control_plane_that_is_down_does_not_stop_the_gateway_starting(
     the difference between starting and stuck, which the one bit on `/ready`
     cannot carry — and keeps trying."""
     app = build_app(
-        UPSTREAM,
+        [one_route(UPSTREAM)],
         holder_serving(unreachable),
         plugin=True,
-        slug="delivery",
         rail_center=RAIL_CENTER,
     )
 
@@ -317,10 +307,9 @@ async def test_a_gateway_that_starts_ready_says_nothing_about_it(caplog):
     """The warning above is the abnormal case and has to stay that way, or an
     operator filtering for it finds it on every healthy start too."""
     app = build_app(
-        UPSTREAM,
+        [one_route(UPSTREAM)],
         holder_serving(serving_a_bundle),
         plugin=True,
-        slug="delivery",
         rail_center=RAIL_CENTER,
     )
 
@@ -363,7 +352,7 @@ async def test_the_first_fetch_does_not_hold_the_process_off_the_socket(
     with caplog.at_level(logging.WARNING, logger="gateway"):
         async with running(
             build_app(
-                UPSTREAM, holder, plugin=True, slug="delivery", rail_center=RAIL_CENTER
+                [one_route(UPSTREAM)], holder, plugin=True, rail_center=RAIL_CENTER
             )
         ) as client:
             assert (await client.get("/health")).status_code == 200
@@ -395,7 +384,7 @@ async def test_a_start_that_raises_stops_the_process_coming_up():
     with pytest.raises(RuntimeError, match="refused to start"):
         async with running(
             build_app(
-                UPSTREAM, holder, plugin=True, slug="delivery", rail_center=RAIL_CENTER
+                [one_route(UPSTREAM)], holder, plugin=True, rail_center=RAIL_CENTER
             )
         ):
             raise AssertionError("the app was not meant to start")
@@ -408,10 +397,9 @@ async def test_the_unready_warning_carries_why_and_not_only_that(caplog):
     line naming only the kind sends an operator to look for a control plane
     that is down when what happened was a control plane that answered."""
     app = build_app(
-        UPSTREAM,
+        [one_route(UPSTREAM)],
         holder_serving(unreachable),
         plugin=True,
-        slug="delivery",
         rail_center=RAIL_CENTER,
     )
 
