@@ -22,6 +22,7 @@ from gateway.endpoint import (
     MAX_BODY_NESTING_DEPTH,
     resolve_endpoint_key,
     resolve_from_body,
+    strip_slug,
 )
 from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH
 from gateway.ticket import MAX_NESTING_DEPTH as TICKET_NESTING_DEPTH
@@ -243,3 +244,48 @@ def test_a_body_that_is_not_json_at_all_still_answers():
     answers, so the paths that were already there are held alongside it."""
     for body in (b"", b"\xff\xfe{", b"not json", b"[]", b"null"):
         assert resolve_from_body(body, MOUNT).status == "unrecognised", body
+
+
+# --- the two strips, and that they are the same one ------------------------
+#
+# A binding's key and a ticket's skill are both minted by Rail Center as
+# `<slug>#<path>#<method>#<call>`, and this gateway composes neither slug. Both
+# are therefore reduced the same way before they are compared, and the tests
+# below are what stop one of the two being changed on its own.
+
+
+def test_a_full_key_reduces_to_what_this_gateway_composes():
+    """The whole point of the strip, from both ends at once."""
+    composed = resolve_endpoint_key("tools/call", "track_package", MOUNT)
+
+    assert strip_slug(f"delivery#{composed.key}") == composed.key
+    assert strip_slug(f"finretail#{composed.key}") == composed.key
+
+
+def test_the_slug_is_taken_off_once_and_from_the_left():
+    """A tool name may carry the separator; a slug may not.
+
+    Rail Center's slug pattern excludes it, which is what makes the first one
+    the boundary — and a tool name is close to free text, which is why nothing
+    splits further. `rpartition`, or a split with no bound, mangles exactly the
+    keys whose tool names carry one.
+    """
+    assert strip_slug("delivery#/mcp#tools/call#a#b") == "/mcp#tools/call#a#b"
+
+
+def test_a_key_carrying_no_slug_is_reduced_anyway_and_matches_nothing():
+    """The shape this reduction cannot tell apart, recorded rather than guarded.
+
+    A producer sending an already-comparable key has its first segment taken for
+    a slug, and what is left matches no endpoint. That is a producer this
+    gateway cannot read keys from, and a binding matching nothing is the safer
+    reading of it than a binding matching everything — but the reduction is not
+    clever about it, and a reader should not expect it to be.
+    """
+    assert strip_slug("/mcp#tools/call#track_package") == "tools/call#track_package"
+
+
+def test_a_key_with_no_separator_at_all_survives_whole():
+    """Nothing to split, so nothing is taken: the same reasoning, at the other
+    end of the same rule."""
+    assert strip_slug("delivery.track_package") == "delivery.track_package"

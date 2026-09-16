@@ -18,6 +18,8 @@ x-gateway: &gateway
   build:
     context: ..
     dockerfile: Dockerfile
+  volumes:
+    - ./routes.yaml:/etc/rail/routes.yaml:ro
   healthcheck:
     # Liveness, not readiness — and the distinction is why this is `/health`.
     # `/ready` answers 503 until a bundle is held, except where
@@ -77,9 +79,8 @@ services:
   gateway-enforce:
     <<: *gateway
     environment:
-      RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
+      RAIL_GATEWAY_ROUTES_FILE: /etc/rail/routes.yaml
       RAIL_CENTER_URL: http://rail-center:8080
-      RAIL_DATASOURCE_SLUG: delivery
       RAIL_GATEWAY_SLUG: edge
       RAIL_PLUGIN_ENABLED: "true"
       RAIL_AUTH_MODE: bearer
@@ -98,9 +99,8 @@ services:
   gateway-observe:
     <<: *gateway
     environment:
-      RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
+      RAIL_GATEWAY_ROUTES_FILE: /etc/rail/routes.yaml
       RAIL_CENTER_URL: http://rail-center:8080
-      RAIL_DATASOURCE_SLUG: delivery
       RAIL_GATEWAY_SLUG: edge
       RAIL_PLUGIN_ENABLED: "true"
       RAIL_AUTH_MODE: bearer
@@ -117,9 +117,8 @@ services:
   gateway-fallback:
     <<: *gateway
     environment:
-      RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
+      RAIL_GATEWAY_ROUTES_FILE: /etc/rail/routes.yaml
       RAIL_CENTER_URL: http://rail-center:8080
-      RAIL_DATASOURCE_SLUG: delivery
       RAIL_GATEWAY_SLUG: edge
       RAIL_PLUGIN_ENABLED: "true"
       RAIL_AUTH_MODE: bearer
@@ -130,8 +129,7 @@ services:
       upstream: {condition: service_healthy}
 
   # A pass-through, and the one gateway here whose posture is *not* the bundle's
-  # to say. No `RAIL_CENTER_URL`, no `RAIL_GATEWAY_SLUG` and no
-  # `RAIL_DATASOURCE_SLUG` are set, and that is the assertion rather than an
+  # to say. No `RAIL_CENTER_URL` and no `RAIL_GATEWAY_SLUG` are set, and that is the assertion rather than an
   # omission: with RailXia not installed there is no control plane at all, so it
   # builds no holder and needs none of that configuration — setting any of it
   # here would be refused at startup. It is not the same state as a gateway
@@ -140,7 +138,7 @@ services:
   gateway-passthrough:
     <<: *gateway
     environment:
-      RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
+      RAIL_GATEWAY_ROUTES_FILE: /etc/rail/routes.yaml
       RAIL_PLUGIN_ENABLED: "false"
     depends_on:
       upstream: {condition: service_healthy}

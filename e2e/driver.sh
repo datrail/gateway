@@ -214,8 +214,8 @@ printf '\n== enforce: an endpoint rule denies the call and not the handshake ==\
 # so a chain that kept P3 would refuse `initialize` for an agent whose declared
 # skills are exactly right. With the key present P3 is reached only for a key
 # the ticket declares no skill for: the good ticket declares
-# `delivery.track_package`, so `skill_match` resolves present and P3 does not
-# hold, and `delivery.forbidden_tool` is refused by P2 first, on priority. The
+# `/mcp#tools/call#track_package`, so `skill_match` resolves present and P3 does not
+# hold, and `/mcp#tools/call#forbidden_tool` is refused by P2 first, on priority. The
 # block below is where P3 answers for a key that is present.
 reset_journals
 sid=$(open_session gateway-enforce -H "x-rail: $GOOD_TICKET") || sid=none
@@ -225,7 +225,7 @@ expect "the forbidden call is refused 403" 403 \
 expect "it named P2, the endpoint rule" 1 \
   "$(await_denial 1 11111111-0000-4000-8000-000000000002)"
 # The two assertions below are what stop the argument above resting on P3's
-# identity. A P3 retargeted to `endpoint_key eq delivery.undeclared_tool` keeps
+# identity. A P3 retargeted to `endpoint_key eq /mcp#tools/call#undeclared_tool` keeps
 # its id, its priority and its action, still refuses the call the next block
 # makes — and, being endpoint-derived, is dropped from the handshake's chain
 # exactly as P2 is, so "the handshake still succeeds" goes back to being unable
@@ -276,7 +276,7 @@ expect "no denial was reported" 0 "$(denials)"
 printf '\n== enforce with fallback block: an endpoint nobody bound is refused ==\n'
 # The other half of `enforcement`, and the only place a caller's answer turns on
 # something other than a policy. This gateway's bundle binds
-# `delivery.track_package` and nothing else.
+# `/mcp#tools/call#track_package` and nothing else.
 #
 # Both calls carry the good ticket, and the two status codes below are not what
 # separates the fallback from the chain. `gateway-enforce` — `fallback: pass`,

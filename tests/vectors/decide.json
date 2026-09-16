@@ -1,5 +1,5 @@
 {
-  "_comment": "Conformance vectors for the policy decision — the condition grammar and the walk — written as data so a reimplementation in another language is answerable to the same cases. They come from rail-center's docs/policy-evaluation-contract.md, under `Conditions` and `The decision`. This repository is where they live; rail-center's api/tests/vectors/policy_evaluation.json covers the same contract from the publishing side.\n\nWhat is NOT here. Whether a bundle can be READ at all: that refusal is eager, taken before the walk, and tests/vectors/bundle.json carries it. How an MCP message resolves to an endpoint key: that is this gateway's own composition, it appears nowhere in the contract, and tests/test_endpoint.py covers it. What a decision means for a call naming NO endpoint: the contract models endpoint_key as an argument that is always present, so it takes no position on one, and every case here carries a key. tests/test_decide.py carries this gateway's own answer. How the `x-rail` header decodes: tests/vectors/ticket.json.\n\nEvery case carries `endpoint_key` — the RESOLVED key, never a raw ingress path — and `now`, a fixed instant, because a decision is a pure function of its inputs and a pure function is the only thing two implementations can be compared on. The ticket comes as either `claims`, which the runner base64url-encodes, or `header`, a literal the runner passes through unchanged. `agent_id` and `exp` are spelled out on every payload rather than filled in by a runner, so a case can be read literally.\n\nCases come in two shapes.\n\nA CONDITION case carries `condition` and `holds`. The runner puts the condition behind a single enabled `block` policy at priority 1, walks it, and reads `holds` off the decision: a condition that holds denies, and one that does not allows. Going through the decision rather than calling a predicate directly is what makes these vectors rather than unit tests of a private function.\n\nA BUNDLE case carries a whole `bundle` and an `expect` of `allowed`, `denied_by` (a canonical policy id, or null) and `alerts` (canonical policy ids, IN EVALUATION ORDER — priority ascending, ties by canonical id — not in the order the bundle listed them).\n\nA case of either shape may carry `refusal` instead, naming the kind of refusal required: `uninterpretable_condition`. Read it and assert on it. A runner that asks only 'did it throw?' scores a crash as conformant, and a crash is the one outcome the contract rules out everywhere — an exception where a decision belongs is neither an allow nor a deny.\n\n`ticket_state`, where a case carries it, is what the header must classify as; its absence means the case does not assert one. `note` says why a case exists where its name does not.",
+  "_comment": "Conformance vectors for the policy decision — the condition grammar and the walk — written as data so a reimplementation in another language is answerable to the same cases. They come from rail-center's docs/policy-evaluation-contract.md, under `Conditions` and `The decision`. This repository is where they live; rail-center's api/tests/vectors/policy_evaluation.json covers the same contract from the publishing side.\n\nWhat is NOT here. Whether a bundle can be READ at all: that refusal is eager, taken before the walk, and tests/vectors/bundle.json carries it. How an MCP message resolves to an endpoint key: that is this gateway's own composition, it appears nowhere in the contract, and tests/test_endpoint.py covers it. What a decision means for a call naming NO endpoint: the contract models endpoint_key as an argument that is always present, so it takes no position on one, and every case here carries a key. tests/test_decide.py carries this gateway's own answer. How the `x-rail` header decodes: tests/vectors/ticket.json.\n\nEvery case carries `endpoint_key` — the RESOLVED key, never a raw ingress path — and `now`, a fixed instant, because a decision is a pure function of its inputs and a pure function is the only thing two implementations can be compared on. The ticket comes as either `claims`, which the runner base64url-encodes, or `header`, a literal the runner passes through unchanged. `agent_id` and `exp` are spelled out on every payload rather than filled in by a runner, so a case can be read literally.\n\nCases come in two shapes.\n\nA CONDITION case carries `condition` and `holds`. The runner puts the condition behind a single enabled `block` policy at priority 1, walks it, and reads `holds` off the decision: a condition that holds denies, and one that does not allows. Going through the decision rather than calling a predicate directly is what makes these vectors rather than unit tests of a private function.\n\nA BUNDLE case carries a whole `bundle` and an `expect` of `allowed`, `denied_by` (a canonical policy id, or null) and `alerts` (canonical policy ids, IN EVALUATION ORDER — priority ascending, ties by canonical id — not in the order the bundle listed them).\n\nA case of either shape may carry `refusal` instead, naming the kind of refusal required: `uninterpretable_condition`. Read it and assert on it. A runner that asks only 'did it throw?' scores a crash as conformant, and a crash is the one outcome the contract rules out everywhere — an exception where a decision belongs is neither an allow nor a deny.\n\n`ticket_state`, where a case carries it, is what the header must classify as; its absence means the case does not assert one. `note` says why a case exists where its name does not.\n\nEndpoint keys are the form a gateway composes — `<path>#<method>#<call>`, with no data source slug, because the slug is Rail Center's and is stripped off each binding before it is compared. A binding inside a case's own bundle therefore carries the full `<slug>#<path>#<method>#<call>`, and the case's `endpoint_key` carries what it reduces to. Several cases under `matches` use short abstract keys — `ab`, `aXbcYbc` — that are not endpoint keys at all: their subject is the glob operator, and giving them realistic shapes would make them harder to read without asking anything more of an implementation.",
   "cases": [
     {
       "name": "uninterpretable — a field outside the table",
@@ -8,7 +8,7 @@
         "operator": "eq",
         "value": "x"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -16,7 +16,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition",
@@ -29,7 +29,7 @@
         "operator": "regex",
         "value": "x"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -37,7 +37,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -49,7 +49,7 @@
         "operator": "eq",
         "value": "x"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -57,7 +57,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -68,7 +68,7 @@
         "field": "endpoint_key",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -76,7 +76,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition",
@@ -88,7 +88,7 @@
         "field": "endpoint_key",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -96,7 +96,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition",
@@ -109,7 +109,7 @@
         "operator": "eq",
         "value": "x"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -117,7 +117,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -131,7 +131,7 @@
           "x"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -139,7 +139,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -151,7 +151,7 @@
         "operator": "matches",
         "value": "gold*"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -159,7 +159,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition",
@@ -172,7 +172,7 @@
         "operator": "contains",
         "value": "x"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -180,7 +180,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -192,7 +192,7 @@
         "operator": "matches",
         "value": "4*"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -200,7 +200,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -212,7 +212,7 @@
         "operator": "lt",
         "value": "40"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -220,7 +220,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition",
@@ -235,7 +235,7 @@
           40
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -243,7 +243,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -255,7 +255,7 @@
         "operator": "gt",
         "value": true
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -263,7 +263,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition",
@@ -276,7 +276,7 @@
         "operator": "lte",
         "value": null
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -284,7 +284,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -298,7 +298,7 @@
           "gold"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -306,7 +306,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -318,7 +318,7 @@
         "operator": "ne",
         "value": true
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -326,7 +326,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -338,7 +338,7 @@
         "operator": "eq",
         "value": null
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -346,7 +346,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -358,7 +358,7 @@
         "operator": "in",
         "value": "gold"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -366,7 +366,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -380,7 +380,7 @@
           "x"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -388,7 +388,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -400,7 +400,7 @@
         "operator": "matches",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -408,7 +408,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition",
@@ -417,7 +417,7 @@
     {
       "name": "uninterpretable — a condition that is not an object",
       "condition": "not an object",
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -425,7 +425,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -437,7 +437,7 @@
           "field": "tier"
         }
       ],
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -445,7 +445,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -456,7 +456,7 @@
         "field": 17,
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -464,7 +464,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -475,7 +475,7 @@
         "field": "tier",
         "operator": null
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -483,7 +483,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -494,7 +494,7 @@
         "operator": "present",
         "value": 1
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -502,7 +502,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -513,7 +513,7 @@
         "field": "tier",
         "value": 1
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -521,7 +521,7 @@
         "tier": "gold",
         "posture_score": 95,
         "skills": [
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "refusal": "uninterpretable_condition"
@@ -533,7 +533,7 @@
         "operator": "eq",
         "value": "x"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "header": null,
       "refusal": "uninterpretable_condition",
@@ -546,7 +546,7 @@
         "field": "x_rail_header",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "header": null,
       "holds": true,
@@ -559,7 +559,7 @@
         "field": "x_rail_header",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "header": "!!!not base64!!!",
       "holds": true,
@@ -572,7 +572,7 @@
         "field": "x_rail_header",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -587,7 +587,7 @@
         "field": "x_rail_header",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "exp": 4102444800
@@ -602,7 +602,7 @@
         "field": "x_rail_header",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -617,7 +617,7 @@
         "field": "x_rail_header",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -633,7 +633,7 @@
         "operator": "gt",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -650,7 +650,7 @@
         "field": "posture_score",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -666,7 +666,7 @@
         "field": "posture_score",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -681,7 +681,7 @@
         "field": "posture_score",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -697,7 +697,7 @@
         "field": "posture_score",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -712,7 +712,7 @@
         "field": "posture_score",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -728,7 +728,7 @@
         "field": "posture_score",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -743,7 +743,7 @@
         "field": "tier",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -759,7 +759,7 @@
         "field": "tier",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -774,7 +774,7 @@
         "field": "skills",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -790,7 +790,7 @@
         "field": "skills",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -805,14 +805,14 @@
         "field": "skill_match",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
         "exp": 4102444800,
         "skills": [
-          "delivery.other",
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#other",
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "holds": true
@@ -823,13 +823,13 @@
         "field": "skill_match",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
         "exp": 4102444800,
         "skills": [
-          "delivery.other"
+          "delivery#/mcp#tools/call#other"
         ]
       },
       "holds": true
@@ -840,7 +840,7 @@
         "field": "skill_match",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -854,7 +854,7 @@
         "field": "skill_match",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -870,7 +870,7 @@
         "field": "skill_match",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -888,7 +888,7 @@
         "field": "skill_match",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -903,7 +903,7 @@
         "field": "skill_match",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -923,7 +923,7 @@
         "field": "skill_match",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "header": null,
       "holds": true,
@@ -934,9 +934,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "eq",
-        "value": "delivery.track_package"
+        "value": "/mcp#tools/call#track_package"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -950,7 +950,7 @@
         "field": "agent_id",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -965,7 +965,7 @@
         "field": "agent_id",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "header": null,
       "holds": true,
@@ -979,7 +979,7 @@
         "operator": "eq",
         "value": "agent-1"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -994,7 +994,7 @@
         "operator": "ne",
         "value": "agent-2"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1012,7 +1012,7 @@
           "agent-1"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1026,7 +1026,7 @@
         "field": "sandbox_id",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1041,7 +1041,7 @@
         "field": "sandbox_id",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1058,7 +1058,7 @@
         "operator": "eq",
         "value": "9f2c4b7e1a8d3056"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1074,7 +1074,7 @@
         "operator": "ne",
         "value": "0000000000000000"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1093,7 +1093,7 @@
           "9f2c4b7e1a8d3056"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1108,7 +1108,7 @@
         "field": "sandbox_type",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1123,7 +1123,7 @@
         "field": "sandbox_type",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1139,7 +1139,7 @@
         "operator": "eq",
         "value": "nemo_claw"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1155,7 +1155,7 @@
         "operator": "ne",
         "value": "kubernetes"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1174,7 +1174,7 @@
           "nemo_claw"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1189,7 +1189,7 @@
         "field": "environment_fingerprint",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1204,7 +1204,7 @@
         "field": "environment_fingerprint",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1220,7 +1220,7 @@
         "operator": "eq",
         "value": "c7d1e05a3b924f68"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1236,7 +1236,7 @@
         "operator": "ne",
         "value": "a1b2c3d4e5f60718"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1255,7 +1255,7 @@
           "c7d1e05a3b924f68"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1270,7 +1270,7 @@
         "field": "scored_at",
         "operator": "present"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1285,7 +1285,7 @@
         "field": "scored_at",
         "operator": "missing"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1303,7 +1303,7 @@
         "operator": "eq",
         "value": "2026-07-31T18:04:23.881204+00:00"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1319,7 +1319,7 @@
         "operator": "ne",
         "value": "2026-07-30T00:00:00+00:00"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1338,7 +1338,7 @@
           "2026-07-31T18:04:23.881204+00:00"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1354,7 +1354,7 @@
         "operator": "eq",
         "value": "gold"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1370,7 +1370,7 @@
         "operator": "eq",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1387,7 +1387,7 @@
         "operator": "eq",
         "value": 0
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1403,7 +1403,7 @@
         "operator": "eq",
         "value": 1
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1420,7 +1420,7 @@
         "operator": "eq",
         "value": 0
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1436,7 +1436,7 @@
         "operator": "eq",
         "value": "gold"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1454,7 +1454,7 @@
         "operator": "eq",
         "value": "100"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1471,7 +1471,7 @@
         "operator": "eq",
         "value": "100"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1487,7 +1487,7 @@
         "operator": "ne",
         "value": "gold"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1503,7 +1503,7 @@
         "operator": "ne",
         "value": "gold"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1519,7 +1519,7 @@
         "operator": "ne",
         "value": "gold"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1536,7 +1536,7 @@
         "operator": "ne",
         "value": "gold"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1555,7 +1555,7 @@
         "operator": "ne",
         "value": "gold"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1573,7 +1573,7 @@
         "operator": "lt",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1589,7 +1589,7 @@
         "operator": "lt",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1606,7 +1606,7 @@
         "operator": "lt",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1622,7 +1622,7 @@
         "operator": "lt",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1640,7 +1640,7 @@
         "operator": "lte",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1656,7 +1656,7 @@
         "operator": "lt",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1672,7 +1672,7 @@
         "operator": "gte",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1688,7 +1688,7 @@
         "operator": "gt",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1704,7 +1704,7 @@
         "operator": "lt",
         "value": 40
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1720,7 +1720,7 @@
         "operator": "eq",
         "value": 9007199254740993
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1737,7 +1737,7 @@
         "operator": "lt",
         "value": 9007199254740993
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1754,7 +1754,7 @@
         "operator": "eq",
         "value": 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1771,7 +1771,7 @@
         "operator": "eq",
         "value": -100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1787,7 +1787,7 @@
         "operator": "lt",
         "value": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1806,7 +1806,7 @@
           "silver"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1825,7 +1825,7 @@
           50
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1844,7 +1844,7 @@
           50
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1862,7 +1862,7 @@
           "gold"
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1885,7 +1885,7 @@
           50
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1904,7 +1904,7 @@
           true
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1918,16 +1918,16 @@
       "condition": {
         "field": "skills",
         "operator": "contains",
-        "value": "delivery.track_package"
+        "value": "delivery#/mcp#tools/call#track_package"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
         "exp": 4102444800,
         "skills": [
-          "delivery.other",
-          "delivery.track_package"
+          "delivery#/mcp#tools/call#other",
+          "delivery#/mcp#tools/call#track_package"
         ]
       },
       "holds": true
@@ -1939,7 +1939,7 @@
         "operator": "contains",
         "value": "delivery.admin"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1956,13 +1956,13 @@
         "operator": "contains",
         "value": "delivery.admin"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
         "exp": 4102444800,
         "skills": [
-          "delivery.administrator"
+          "delivery#/mcp#tools/call#administrator"
         ]
       },
       "holds": false
@@ -1972,9 +1972,9 @@
       "condition": {
         "field": "skills",
         "operator": "contains",
-        "value": "delivery.track_package"
+        "value": "delivery#/mcp#tools/call#track_package"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -1992,7 +1992,7 @@
         "operator": "contains",
         "value": 1
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2008,9 +2008,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.*"
+        "value": "/mcp#tools/call#*"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2023,9 +2023,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.*"
+        "value": "/mcp#tools/call#*"
       },
-      "endpoint_key": "delivery.orders.v2",
+      "endpoint_key": "/mcp#tools/call#orders.v2",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2039,9 +2039,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.*"
+        "value": "/mcp#tools/call#*"
       },
-      "endpoint_key": "delivery.",
+      "endpoint_key": "/mcp#tools/call#",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2054,9 +2054,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.*"
+        "value": "tools/call#*"
       },
-      "endpoint_key": "acme.delivery.orders",
+      "endpoint_key": "/mcp#tools/call#delivery.orders",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2070,9 +2070,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "*.orders"
+        "value": "*#delivery.orders"
       },
-      "endpoint_key": "acme.delivery.orders",
+      "endpoint_key": "/mcp#tools/call#delivery.orders",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2085,9 +2085,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "*.orders"
+        "value": "*#delivery.orders"
       },
-      "endpoint_key": "acme.delivery.orders.v2",
+      "endpoint_key": "/mcp#tools/call#delivery.orders.v2",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2102,7 +2102,7 @@
         "operator": "matches",
         "value": "*"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2115,9 +2115,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.orders"
+        "value": "/mcp#tools/call#orders"
       },
-      "endpoint_key": "delivery.orders",
+      "endpoint_key": "/mcp#tools/call#orders",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2131,9 +2131,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.order"
+        "value": "/mcp#tools/call#order"
       },
-      "endpoint_key": "delivery.orders.v2",
+      "endpoint_key": "/mcp#tools/call#orders.v2",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2147,9 +2147,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.orders"
+        "value": "/mcp#tools/call#orders"
       },
-      "endpoint_key": "delivery.orders.v2",
+      "endpoint_key": "/mcp#tools/call#orders.v2",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2301,9 +2301,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.track\n*"
+        "value": "/mcp#tools/call#track\n*"
       },
-      "endpoint_key": "delivery.track\npackage",
+      "endpoint_key": "/mcp#tools/call#track\npackage",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2316,9 +2316,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.*"
+        "value": "/mcp#tools/call#*"
       },
-      "endpoint_key": "delivery.track\npackage",
+      "endpoint_key": "/mcp#tools/call#track\npackage",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2332,9 +2332,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.orders"
+        "value": "/mcp#tools/call#orders"
       },
-      "endpoint_key": "delivery.orders\n",
+      "endpoint_key": "/mcp#tools/call#orders\n",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2348,9 +2348,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.*"
+        "value": "/mcp#tools/call#*"
       },
-      "endpoint_key": "Delivery.track_package",
+      "endpoint_key": "/MCP#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2364,9 +2364,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "Delivery.*"
+        "value": "/MCP#tools/call#*"
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2379,9 +2379,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "café.*"
+        "value": "/mcp#tools/call#café.*"
       },
-      "endpoint_key": "café.orders",
+      "endpoint_key": "/mcp#tools/call#café.orders",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2395,9 +2395,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "café.*"
+        "value": "/mcp#tools/call#café.*"
       },
-      "endpoint_key": "café.orders",
+      "endpoint_key": "/mcp#tools/call#café.orders",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2411,9 +2411,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.?rders"
+        "value": "/mcp#tools/call#?rders"
       },
-      "endpoint_key": "delivery.orders",
+      "endpoint_key": "/mcp#tools/call#orders",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2427,9 +2427,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.?rders"
+        "value": "/mcp#tools/call#?rders"
       },
-      "endpoint_key": "delivery.?rders",
+      "endpoint_key": "/mcp#tools/call#?rders",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2442,9 +2442,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.[ab]"
+        "value": "/mcp#tools/call#[ab]"
       },
-      "endpoint_key": "delivery.a",
+      "endpoint_key": "/mcp#tools/call#a",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2458,9 +2458,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.[ab]"
+        "value": "/mcp#tools/call#[ab]"
       },
-      "endpoint_key": "delivery.[ab]",
+      "endpoint_key": "/mcp#tools/call#[ab]",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2473,9 +2473,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.a\\b"
+        "value": "/mcp#tools/call#a\\b"
       },
-      "endpoint_key": "delivery.a\\b",
+      "endpoint_key": "/mcp#tools/call#a\\b",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2488,9 +2488,9 @@
       "condition": {
         "field": "endpoint_key",
         "operator": "matches",
-        "value": "delivery.a\\*"
+        "value": "/mcp#tools/call#a\\*"
       },
-      "endpoint_key": "delivery.aX",
+      "endpoint_key": "/mcp#tools/call#aX",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2520,13 +2520,13 @@
         ],
         "bindings": [
           {
-            "endpoint_key": "delivery.other",
+            "endpoint_key": "delivery#/mcp#tools/call#other",
             "mode": "open",
             "policy_ids": []
           }
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2573,7 +2573,7 @@
         ],
         "bindings": [
           {
-            "endpoint_key": "delivery.track_package",
+            "endpoint_key": "delivery#/mcp#tools/call#track_package",
             "mode": "gated",
             "policy_ids": [
               "5c8f1e42-0000-4000-8000-000000000002"
@@ -2581,7 +2581,7 @@
           }
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2616,13 +2616,13 @@
         ],
         "bindings": [
           {
-            "endpoint_key": "delivery.track_package",
+            "endpoint_key": "delivery#/mcp#tools/call#track_package",
             "mode": "open",
             "policy_ids": []
           }
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2669,7 +2669,7 @@
         ],
         "bindings": [
           {
-            "endpoint_key": "delivery.track_package",
+            "endpoint_key": "delivery#/mcp#tools/call#track_package",
             "mode": "gated",
             "policy_ids": [
               "5c8f1e42-0000-4000-8000-000000000001"
@@ -2677,7 +2677,7 @@
           }
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2724,7 +2724,7 @@
         ],
         "bindings": [
           {
-            "endpoint_key": "delivery.track_package",
+            "endpoint_key": "delivery#/mcp#tools/call#track_package",
             "mode": "gated",
             "policy_ids": [
               "5C8F1E42-0000-4000-8000-000000000002"
@@ -2732,7 +2732,7 @@
           }
         ]
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2779,7 +2779,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2826,7 +2826,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2873,7 +2873,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2908,7 +2908,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -2955,7 +2955,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3016,7 +3016,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3078,7 +3078,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3116,7 +3116,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3152,7 +3152,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3187,7 +3187,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3222,7 +3222,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3257,7 +3257,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3292,7 +3292,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3327,7 +3327,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3348,7 +3348,7 @@
         "policies": [],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3382,7 +3382,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3416,7 +3416,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3451,7 +3451,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3498,7 +3498,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3545,7 +3545,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3592,7 +3592,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3635,7 +3635,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3677,7 +3677,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "header": null,
       "expect": {
@@ -3719,7 +3719,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3764,7 +3764,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3797,7 +3797,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",
@@ -3843,7 +3843,7 @@
         ],
         "bindings": []
       },
-      "endpoint_key": "delivery.track_package",
+      "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
         "agent_id": "agent-1",

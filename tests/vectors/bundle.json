@@ -1129,13 +1129,9 @@
         "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk": {
           "mode": "open",
           "policy_ids": []
-        },
-        "": {
-          "mode": "open",
-          "policy_ids": []
         }
       },
-      "note": "The asymmetry is deliberate and Rail Center shares it. A content hash is refused for a character no log line can hold, for being empty and for being over-long; an endpoint key gets none of those checks, because a key is composed by the control plane from a name that is close to free text, and refusing one here would make an endpoint that registers cleanly impossible to bind. Copying the content hash's rules onto keys is the reimplementation this case exists to catch."
+      "note": "The asymmetry is deliberate and Rail Center shares it. A content hash is refused for a character no log line can hold, for being empty and for being over-long; an endpoint key gets none of those checks, because a key is composed by the control plane from a name that is close to free text, and refusing one here would make an endpoint that registers cleanly impossible to bind. Copying the content hash's rules onto keys is the reimplementation this case exists to catch. The empty key is absent from the index rather than in it: a key this gateway cannot reduce to anything narrows nothing, and is logged and skipped so that every other binding still stands."
     },
     {
       "name": "a content hash is carried exactly as it arrived",

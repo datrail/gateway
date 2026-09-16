@@ -143,6 +143,28 @@ class EndpointResolution:
     status: ResolutionStatus
 
 
+def strip_slug(full_key: str) -> str:
+    """A bundle's key, reduced to the form this gateway can compose.
+
+    Rail Center publishes `<slug>#<path>#<method>#<call>`. This gateway holds no
+    data source slug — one gateway fronts several data sources and a data source
+    may sit behind several gateways, so nothing local can name that relationship
+    — and composes `<path>#<method>#<call>` from the request. The two meet here.
+
+    **Split once, from the left.** Rail Center's slug pattern excludes the
+    separator, so the first one is unambiguously the slug boundary; a tool name
+    may contain it freely, which is why nothing splits further. A `rpartition`,
+    or a split with no bound, mangles exactly the keys whose tool names carry
+    one.
+
+    A key with no separator at all is returned unchanged rather than emptied. It
+    is a producer this gateway cannot read keys from, and a binding that matches
+    nothing is a safer reading of that than a binding that matches everything.
+    """
+    _slug, separator, rest = full_key.partition(SEPARATOR)
+    return rest if separator else full_key
+
+
 def resolve_endpoint_key(
     method: Any, tool_name: Any, upstream_path: str
 ) -> EndpointResolution:

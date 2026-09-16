@@ -30,7 +30,7 @@ from types import MappingProxyType
 from typing import Any, Final, Literal
 
 from gateway.bundle.uuid import canonical_uuid
-from gateway.endpoint import SEPARATOR
+from gateway.endpoint import strip_slug
 from gateway.json_wire import MAX_SAFE_INTEGER
 from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_characters
 from gateway.key_safety import safe_for_log as _safe
@@ -291,28 +291,6 @@ def _order(policies: list[Any]) -> tuple[Policy, ...]:
     return tuple(sorted(chain, key=lambda p: (p.priority, p.id)))
 
 
-def strip_slug(full_key: str) -> str:
-    """A bundle's key, reduced to the form this gateway can compose.
-
-    Rail Center publishes `<slug>#<path>#<method>#<call>`. This gateway holds no
-    data source slug — one gateway fronts several data sources and a data source
-    may sit behind several gateways, so nothing local can name that relationship
-    — and composes `<path>#<method>#<call>` from the request. The two meet here.
-
-    **Split once, from the left.** Rail Center's slug pattern excludes the
-    separator, so the first one is unambiguously the slug boundary; a tool name
-    may contain it freely, which is why nothing splits further. A `rpartition`,
-    or a split with no bound, mangles exactly the keys whose tool names carry
-    one.
-
-    A key with no separator at all is returned unchanged rather than emptied. It
-    is a producer this gateway cannot read keys from, and a binding that matches
-    nothing is a safer reading of that than a binding that matches everything.
-    """
-    _slug, separator, rest = full_key.partition(SEPARATOR)
-    return rest if separator else full_key
-
-
 def _index(bindings: list[Any]) -> dict[str, Binding]:
     """The binding index, or a refusal.
 
@@ -345,6 +323,22 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
                 f"a binding whose endpoint_key is not a string ({_q(key)})"
             )
         comparable = strip_slug(key)
+        if not comparable:
+            # **Logged and skipped, where a collision refuses the whole bundle**,
+            # and the difference is what each one costs to act on. A key this
+            # gateway cannot reduce to anything narrows one endpoint and says
+            # nothing about the others; refusing the bundle over it would take
+            # every other binding down with it, and the endpoint it names goes
+            # to the whole chain — which is the strict reading, not the lax one.
+            # A collision is not like that: it is two bindings an operator has
+            # to choose between, and serving either would be this gateway
+            # choosing for them.
+            logger.warning(
+                "policy bundle carries a binding this gateway cannot read as a "
+                "key (%s); it narrows nothing and every other binding stands",
+                _safe(key),
+            )
+            continue
         if comparable in out:
             # **Both full keys, because neither alone identifies the fault.**
             # The stripped form is what collided and the slugs are what an

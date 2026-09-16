@@ -1,0 +1,12 @@
+# The upstreams the e2e gateways front. One each, at the root — the
+# single-upstream deployment, where nothing is stripped and the path an endpoint
+# key is composed from is the one the upstream serves.
+#
+# `name` is a label and carries no Rail Center slug: the gateway composes
+# `<path>#<method>#<call>` with no slug in it, and the bundle's keys are
+# stripped to meet it.
+schema_version: "1.0"
+mcp:
+  servers:
+    - name: delivery
+      url: http://upstream:8080/mcp

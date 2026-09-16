@@ -51,6 +51,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Final
 
+from gateway.endpoint import strip_slug
 from gateway.key_safety import safe_for_log
 from gateway.ticket import ParseResult
 
@@ -343,9 +344,24 @@ def _resolve(field: str, request: ConditionInput) -> Any:
         skills = claims.get("skills")
         if not isinstance(skills, list):
             return _ABSENT
+        # **Each skill is stripped before it is compared**, exactly as a
+        # binding's key is. Rail Center mints a ticket's `skills` as full keys —
+        # `<slug>#<path>#<method>#<call>` — and this gateway composes no slug, so
+        # comparing them whole would match nothing and turn every
+        # `skill_match present` rule off.
+        #
+        # The cost is written down rather than designed around: stripping widens
+        # what a skill covers, so an agent reaching two gateways whose data
+        # sources share a full three-part key satisfies a `present` rule on the
+        # one nobody declared a skill for. It needs all three conditions at once,
+        # and the alternatives cost either correctness on unbound calls or the
+        # slug-ignorance the rest of this design rests on.
         return (
             request.endpoint_key
-            if any(skill == request.endpoint_key for skill in skills)
+            if any(
+                isinstance(skill, str) and strip_slug(skill) == request.endpoint_key
+                for skill in skills
+            )
             else _ABSENT
         )
 
