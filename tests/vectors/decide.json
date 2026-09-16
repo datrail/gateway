@@ -2502,7 +2502,8 @@
     {
       "name": "an endpoint with no binding entry is subject to every policy",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -2523,8 +2524,7 @@
             "mode": "open",
             "policy_ids": []
           }
-        ],
-        "rejected": []
+        ]
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2543,7 +2543,8 @@
     {
       "name": "a binding narrows to the policies it names",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -2578,8 +2579,7 @@
               "5c8f1e42-0000-4000-8000-000000000002"
             ]
           }
-        ],
-        "rejected": []
+        ]
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2598,7 +2598,8 @@
     {
       "name": "a binding in mode open narrows to nothing and the walk allows",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -2619,8 +2620,7 @@
             "mode": "open",
             "policy_ids": []
           }
-        ],
-        "rejected": []
+        ]
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2639,7 +2639,8 @@
     {
       "name": "a binding naming only a disabled policy narrows to nothing too",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -2674,8 +2675,7 @@
               "5c8f1e42-0000-4000-8000-000000000001"
             ]
           }
-        ],
-        "rejected": []
+        ]
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2694,7 +2694,8 @@
     {
       "name": "a bound id spelled non-canonically still narrows",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -2729,8 +2730,7 @@
               "5C8F1E42-0000-4000-8000-000000000002"
             ]
           }
-        ],
-        "rejected": []
+        ]
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2749,7 +2749,8 @@
     {
       "name": "the first matching denying policy wins and stops the walk",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -2776,8 +2777,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2796,7 +2796,8 @@
     {
       "name": "priority 9 precedes priority 10",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000002",
@@ -2823,8 +2824,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2843,7 +2843,8 @@
     {
       "name": "equal priorities are separated by the canonical id",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000002",
@@ -2870,8 +2871,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2890,7 +2890,8 @@
     {
       "name": "a non-canonically spelled id is reported canonically",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "{5C8F1E42-0000-4000-8000-000000000001}",
@@ -2905,8 +2906,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2925,7 +2925,8 @@
     {
       "name": "the denial names the policy that actually matched",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -2952,8 +2953,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -2974,7 +2974,8 @@
     {
       "name": "alerts that accumulated before a denial travel with it",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3013,8 +3014,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3036,7 +3036,8 @@
     {
       "name": "alerts accumulate in evaluation order, not in the order the bundle listed them",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000002",
@@ -3075,8 +3076,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3098,7 +3098,8 @@
     {
       "name": "an alert never denies",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3113,8 +3114,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3134,7 +3134,8 @@
     {
       "name": "any action that is not alert denies — an action this build cannot read",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3149,8 +3150,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3169,7 +3169,8 @@
     {
       "name": "any action that is not alert denies — the right action in the wrong case",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3184,8 +3185,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3204,7 +3204,8 @@
     {
       "name": "any action that is not alert denies — a near miss for `alert`",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3219,8 +3220,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3239,7 +3239,8 @@
     {
       "name": "any action that is not alert denies — no action at all",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3254,8 +3255,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3274,7 +3274,8 @@
     {
       "name": "any action that is not alert denies — an action that is not a string",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3289,8 +3290,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3309,7 +3309,8 @@
     {
       "name": "a policy that matches nothing denies nothing",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3324,8 +3325,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3343,10 +3343,10 @@
     {
       "name": "an empty chain allows",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3364,7 +3364,8 @@
     {
       "name": "a chain of only disabled policies allows",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3379,8 +3380,7 @@
             "enabled": false
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3399,7 +3399,8 @@
     {
       "name": "a policy missing the enabled key is enabled",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3413,8 +3414,7 @@
             "action": "block"
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3433,7 +3433,8 @@
     {
       "name": "enabled must be exactly false to skip",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3448,8 +3449,7 @@
             "enabled": []
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3468,7 +3468,8 @@
     {
       "name": "a disabled policy's condition is never read",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3495,8 +3496,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3515,7 +3515,8 @@
     {
       "name": "a rule the walk never reaches changes nothing",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3542,8 +3543,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3562,7 +3562,8 @@
     {
       "name": "a rule the walk does reach refuses the request, alerts and all",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3589,8 +3590,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3605,7 +3605,8 @@
     {
       "name": "a rule behind an unreadable one is never consulted",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-000000000001",
@@ -3632,8 +3633,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3648,7 +3648,8 @@
     {
       "name": "the seeded chain denies a request carrying no ticket",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-0000000000f0",
@@ -3674,8 +3675,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3690,7 +3690,8 @@
     {
       "name": "the seeded chain denies a low-scoring agent by the rule for it",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-0000000000f0",
@@ -3716,8 +3717,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3735,7 +3735,8 @@
     {
       "name": "the seeded chain allows a scored agent presenting a valid ticket",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-0000000000f0",
@@ -3761,8 +3762,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3780,7 +3780,8 @@
     {
       "name": "an unscored agent is denied by a rule about an absent score",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-0000000000f1",
@@ -3794,8 +3795,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,
@@ -3814,7 +3814,8 @@
     {
       "name": "an unscored agent is not caught by the low-score rule",
       "bundle": {
-        "version": "v-decide",
+        "schema_version": "1.0",
+        "content_hash": "v-decide",
         "policies": [
           {
             "id": "5c8f1e42-0000-4000-8000-0000000000f0",
@@ -3840,8 +3841,7 @@
             "enabled": true
           }
         ],
-        "bindings": [],
-        "rejected": []
+        "bindings": []
       },
       "endpoint_key": "delivery.track_package",
       "now": 1700000000,

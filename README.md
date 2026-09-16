@@ -22,7 +22,9 @@ To proxy a real MCP server:
 ```bash
 docker run --rm -p 8080:8080 \
   -e RAIL_GATEWAY_UPSTREAM_URL=http://your-mcp-server:8000/mcp \
+  -e RAIL_PLUGIN_ENABLED=true \
   -e RAIL_CENTER_URL=https://rail-center.example.com \
+  -e RAIL_GATEWAY_SLUG=edge \
   -e RAIL_DATASOURCE_SLUG=delivery \
   ghcr.io/datrail/gateway:latest
 ```
@@ -41,11 +43,12 @@ flowchart LR
   gateway -->|denial event| center
 ```
 
-`RAIL_TICKET_MODE` selects `none` or `plugin`: whether this gateway has a
-control plane at all. **How much of a decision it acts on is the bundle's to
-say, not the deployment's** — the bundle carries an `enforcement` posture, so
-moving a gateway between judging nothing, reporting and refusing is a poll
-rather than a redeploy. Decisions use the last valid policy bundle, so a failed
+`RAIL_PLUGIN_ENABLED` says whether RailXia is installed on this deployment at
+all: false is a plain gateway that contacts no control plane, true one that
+polls Rail Center for its policy bundle by `RAIL_GATEWAY_SLUG`. **How much of a
+decision it acts on is the bundle's to say, not the deployment's** — the bundle
+carries an `enforcement` posture, so moving a gateway between judging nothing,
+reporting and refusing is a poll rather than a redeploy. Decisions use the last valid policy bundle, so a failed
 refresh does not silently become an empty policy. The schemas in
 [`schemas/`](schemas/) define the ticket, bundle, and denial-event wire shapes.
 

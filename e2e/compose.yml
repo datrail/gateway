@@ -20,9 +20,9 @@ x-gateway: &gateway
     dockerfile: Dockerfile
   healthcheck:
     # Liveness, not readiness — and the distinction is why this is `/health`.
-    # `/ready` answers 503 until a bundle is held, except under
-    # `RAIL_TICKET_MODE=none` — the pass-through this anchor also serves —
-    # which builds no holder and so is ready at once. Waiting on `/ready` here
+    # `/ready` answers 503 until a bundle is held, except where
+    # `RAIL_PLUGIN_ENABLED` is false — the pass-through this anchor also serves
+    # — which builds no holder and so is ready at once. Waiting on `/ready` here
     # would make the two evaluating gateways' startup depend on the control
     # plane being up, which is the coupling the two routes exist to keep apart.
     test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/health').read()"]
@@ -65,7 +65,7 @@ services:
   # that is the assertion rather than a tidy-up. Their postures differ only in
   # the bundle each is served, and what selects the bundle is the credential each
   # presents — which is how Rail Center resolves a gateway in production, and why
-  # `RAIL_TICKET_MODE` no longer spells a posture. An operator moving one of
+  # no deployment variable spells a posture. An operator moving one of
   # these from `enforce` to `none` changes a row in a control plane; none of
   # these three containers is redeployed, restarted, or touched.
   #
@@ -80,7 +80,8 @@ services:
       RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
       RAIL_CENTER_URL: http://rail-center:8080
       RAIL_DATASOURCE_SLUG: delivery
-      RAIL_TICKET_MODE: plugin
+      RAIL_GATEWAY_SLUG: edge
+      RAIL_PLUGIN_ENABLED: "true"
       RAIL_AUTH_MODE: bearer
       RAIL_AUTH_TOKEN: e2e-enforce
       # An hour, so the refresh loop never fires during a run. The driver counts
@@ -100,7 +101,8 @@ services:
       RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
       RAIL_CENTER_URL: http://rail-center:8080
       RAIL_DATASOURCE_SLUG: delivery
-      RAIL_TICKET_MODE: plugin
+      RAIL_GATEWAY_SLUG: edge
+      RAIL_PLUGIN_ENABLED: "true"
       RAIL_AUTH_MODE: bearer
       RAIL_AUTH_TOKEN: e2e-observe
       RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS: "3600"
@@ -118,7 +120,8 @@ services:
       RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
       RAIL_CENTER_URL: http://rail-center:8080
       RAIL_DATASOURCE_SLUG: delivery
-      RAIL_TICKET_MODE: plugin
+      RAIL_GATEWAY_SLUG: edge
+      RAIL_PLUGIN_ENABLED: "true"
       RAIL_AUTH_MODE: bearer
       RAIL_AUTH_TOKEN: e2e-fallback
       RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS: "3600"
@@ -127,17 +130,18 @@ services:
       upstream: {condition: service_healthy}
 
   # A pass-through, and the one gateway here whose posture is *not* the bundle's
-  # to say. No `RAIL_CENTER_URL` and no `RAIL_DATASOURCE_SLUG` are set, and that
-  # is the assertion rather than an omission: `RAIL_TICKET_MODE=none` is a
-  # deployment with no control plane at all, so it builds no holder and needs no
-  # control-plane configuration. It is not the same state as a gateway whose
-  # bundle says `enforcement.mode: none` — that one polls, and can be told
+  # to say. No `RAIL_CENTER_URL`, no `RAIL_GATEWAY_SLUG` and no
+  # `RAIL_DATASOURCE_SLUG` are set, and that is the assertion rather than an
+  # omission: with RailXia not installed there is no control plane at all, so it
+  # builds no holder and needs none of that configuration — setting any of it
+  # here would be refused at startup. It is not the same state as a gateway
+  # whose bundle says `enforcement.mode: none` — that one polls, and can be told
   # something else.
   gateway-passthrough:
     <<: *gateway
     environment:
       RAIL_GATEWAY_UPSTREAM_URL: http://upstream:8080/mcp
-      RAIL_TICKET_MODE: none
+      RAIL_PLUGIN_ENABLED: "false"
     depends_on:
       upstream: {condition: service_healthy}
 

@@ -42,7 +42,8 @@ DENY_ID = "5c8f1e42-0000-4000-8000-0000000000d1"
 ALERT_ID = "5c8f1e42-0000-4000-8000-0000000000a1"
 
 BUNDLE = {
-    "version": "v-evaluate",
+    "schema_version": "1.0",
+    "content_hash": "v-evaluate",
     "policies": [
         {
             "id": DENY_ID,
@@ -66,13 +67,16 @@ BUNDLE = {
         },
     ],
     "bindings": [],
-    "rejected": [],
+    # Beside `bindings`, because it is what a call none of them matched is
+    # judged to be. No binding is declared here, so nothing reaches it at a
+    # posture that consults it.
+    "binding_fallback": "block",
     # The posture these tests run at, and it arrives here rather than in
     # `build_app` because that is where it arrives in production (RC-312).
     # `observe` evaluates every call and refuses none, which is what makes a
     # would-deny assertable without a 403 standing in the way of the forward
     # path most of these cases are checking.
-    "enforcement": {"mode": "observe", "fallback": "block"},
+    "enforcement": {"mode": "observe"},
 }
 
 
@@ -105,7 +109,9 @@ def evaluating(upstream):
     @asynccontextmanager
     async def start(bundle=BUNDLE):
         port = _free_port()
-        app = build_app(upstream, serving(bundle), slug=SLUG, rail_center=RAIL_CENTER)
+        app = build_app(
+            upstream, serving(bundle), plugin=True, slug=SLUG, rail_center=RAIL_CENTER
+        )
         async with serve(app, port):
             yield f"http://127.0.0.1:{port}"
 
@@ -283,17 +289,19 @@ async def test_a_condition_outside_the_grammar_forwards_and_reports_the_drift(
 
 
 @pytest.mark.asyncio
-async def test_none_evaluates_nothing_and_is_ready_without_a_bundle(upstream, caplog):
+async def test_a_plain_gateway_evaluates_nothing_and_is_ready_without_a_bundle(
+    upstream, caplog
+):
     """A pass-through. No holder is built, so nothing polls Rail Center and
-    `/ready` cannot be waiting on a bundle — the deployment that turns
-    enforcement off must not be the one that never serves."""
+    `/ready` cannot be waiting on a bundle — the deployment with no RailXia
+    installed must not be the one that never serves."""
     port = _free_port()
 
     with caplog.at_level(logging.INFO, logger="gateway"):
         # Built inside the capture: the mode's startup line is written by
         # `build_gateway`, so building it first would emit the one line this
         # case is about before anything was listening.
-        app = build_app(upstream, enrolled="none", slug=SLUG, rail_center=RAIL_CENTER)
+        app = build_app(upstream, plugin=False, slug=SLUG, rail_center=RAIL_CENTER)
         async with serve(app, port):
             url = f"http://127.0.0.1:{port}"
             async with httpx.AsyncClient() as client:
@@ -302,7 +310,7 @@ async def test_none_evaluates_nothing_and_is_ready_without_a_bundle(upstream, ca
 
     assert answer == "delivered:77123"
     written = "\n".join(caplog.messages)
-    assert "no control plane" in written
+    assert "not installed" in written
     assert "fetches no policy bundle" in written
     # Nothing was judged, so nothing may be reported as judged.
     assert "would deny" not in written
@@ -312,7 +320,7 @@ async def test_none_evaluates_nothing_and_is_ready_without_a_bundle(upstream, ca
 # --- RC-312: the posture arrives in the bundle, and moves without a restart ---
 #
 # PTH.G1's own Verify, and the reason the holder inversion exists. Before this,
-# `RAIL_TICKET_MODE` was read once at start-up and a gateway told `none` built no
+# the posture was read once at start-up and a gateway told `none` built no
 # holder at all — so the operator who disabled enforcement during an incident
 # needed a redeploy to undo it, and the kill switch turned one way only.
 
@@ -320,17 +328,19 @@ async def test_none_evaluates_nothing_and_is_ready_without_a_bundle(upstream, ca
 def bundle_at(enforcement: str, fallback: str = "block"):
     """`BUNDLE`, at the posture a case is about.
 
-    **The version moves with the posture, because in production it does.** Rail
-    Center hashes `enforcement` into `version` (RC-312), and a fixture that held
-    the version constant across a posture change would be modelling a control
-    plane that does not exist — one whose kill switch cannot arrive. That is not
-    a detail of this helper: it was written the other way first, and the Verify
-    below failed against it exactly as the plan says it would.
+    **The content hash moves with the posture, because in production it does.**
+    Rail Center hashes `enforcement` and `binding_fallback` into `content_hash`
+    (RC-312), and a fixture that held the hash constant across a posture change
+    would be modelling a control plane that does not exist — one whose kill
+    switch cannot arrive. That is not a detail of this helper: it was written
+    the other way first, and the Verify below failed against it exactly as the
+    plan says it would.
     """
     return {
         **BUNDLE,
-        "version": f"v-evaluate-{enforcement}-{fallback}",
-        "enforcement": {"mode": enforcement, "fallback": fallback},
+        "content_hash": f"v-evaluate-{enforcement}-{fallback}",
+        "enforcement": {"mode": enforcement},
+        "binding_fallback": fallback,
     }
 
 
@@ -371,7 +381,7 @@ async def test_moving_the_posture_takes_effect_on_the_next_poll(upstream, caplog
         lambda: httpx.Response(200, json=bundle_at(posture["mode"]))
     )
     port = _free_port()
-    app = build_app(upstream, holder, slug=SLUG, rail_center=RAIL_CENTER)
+    app = build_app(upstream, holder, plugin=True, slug=SLUG, rail_center=RAIL_CENTER)
 
     async with serve(app, port):
         url = f"http://127.0.0.1:{port}"
@@ -408,19 +418,24 @@ async def test_the_three_pass_traffic_states_are_not_each_other(upstream):
                 return (await client.get(f"http://127.0.0.1:{port}/ready")).status_code
 
         no_data_path = await readiness(
-            build_app(upstream, enrolled="none", slug=SLUG, rail_center=RAIL_CENTER)
+            build_app(upstream, plugin=False, slug=SLUG, rail_center=RAIL_CENTER)
         )
         holding_none = await readiness(
             build_app(
                 upstream,
                 holder_serving(unreachable),
+                plugin=True,
                 slug=SLUG,
                 rail_center=RAIL_CENTER,
             )
         )
         told_none = await readiness(
             build_app(
-                upstream, serving(bundle_at("none")), slug=SLUG, rail_center=RAIL_CENTER
+                upstream,
+                serving(bundle_at("none")),
+                plugin=True,
+                slug=SLUG,
+                rail_center=RAIL_CENTER,
             )
         )
 
@@ -435,9 +450,9 @@ async def test_a_posture_change_under_an_unchanged_version_never_arrives(
 ):
     """The other side of the same coin, and the reason Rail Center hashes this.
 
-    A holder caches on `version`, so a control plane that moved a posture without
-    moving the version would be telling a gateway nothing at all — every poller
-    keeps what it holds and the change is silently dropped. This pins the
+    A holder caches on `content_hash`, so a control plane that moved a posture
+    without moving the hash would be telling a gateway nothing at all — every
+    poller keeps what it holds and the change is silently dropped. This pins the
     dependency from the gateway's side: it is not a Rail Center implementation
     detail this component is indifferent to, it is the thing that makes the field
     work at all.
@@ -449,12 +464,12 @@ async def test_a_posture_change_under_an_unchanged_version_never_arrives(
             200,
             json={
                 **BUNDLE,
-                "enforcement": {"mode": posture["mode"], "fallback": "block"},
+                "enforcement": {"mode": posture["mode"]},
             },
         )
     )
     port = _free_port()
-    app = build_app(upstream, holder, slug=SLUG, rail_center=RAIL_CENTER)
+    app = build_app(upstream, holder, plugin=True, slug=SLUG, rail_center=RAIL_CENTER)
 
     async with serve(app, port):
         url = f"http://127.0.0.1:{port}"

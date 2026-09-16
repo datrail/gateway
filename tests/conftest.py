@@ -46,18 +46,24 @@ RAIL_CENTER = ("http://rail-center.test", {})
 #: still composes the keys its bundles are bound on.
 SLUG = "delivery"
 
+#: The gateway every test gateway is. Injected for the same reason `SLUG` is,
+#: and a different value from it on purpose: a gateway's own identity and the
+#: slug of a data source it fronts are two names, and a suite that used one
+#: string for both would pass with them confused.
+GATEWAY_SLUG = "edge"
+
 #: One valid bundle, for tests whose subject is what holding one does rather
 #: than what makes one valid. `tests/test_bundle_holder.py` keeps its own
-#: `bundle()` factory: that one exists to vary versions, policies and rejects
+#: `bundle()` factory: that one exists to vary content hashes and policies
 #: across a hundred cases, and this is a single fixed example — collapsing them
 #: would give that factory a second caller with different reasons to change it.
 POLICY_BUNDLE = {
-    "version": "v1",
+    "schema_version": "1.0",
+    "content_hash": "v1",
     "policies": [
         {"id": "5c8f1e42-0000-4000-8000-0000000000a1", "name": "P", "priority": 1}
     ],
     "bindings": [],
-    "rejected": [],
 }
 
 
@@ -97,6 +103,7 @@ def holder_serving(
     return BundleHolder(
         "http://rail-center.test",
         {},
+        GATEWAY_SLUG,
         interval_seconds=interval_seconds,
         transport=httpx.MockTransport(lambda _request: answer()),
         sleep=sleep,
@@ -260,6 +267,6 @@ async def gateway_url(upstream):
     """
     port = _free_port()
     holder = holder_serving(unreachable)
-    app = build_app(upstream, holder, slug=SLUG, rail_center=RAIL_CENTER)
+    app = build_app(upstream, holder, plugin=True, slug=SLUG, rail_center=RAIL_CENTER)
     async with serve(app, port):
         yield f"http://127.0.0.1:{port}"

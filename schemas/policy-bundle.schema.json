@@ -2,30 +2,36 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/datrail/gateway/schemas/policy-bundle.schema.json",
   "title": "Policy bundle",
-  "description": "The body of `GET /v1/policy-bundle` — the ruleset an enforcement point caches and evaluates every request against.\n\nWhat this schema can express is shape. Three of the bundle's rules are about meaning and are stated here in prose because no schema carries them:\n\n1. **An endpoint with no binding entry is subject to every policy in `policies`.** An empty `bindings` list means nothing is narrowed, not that nothing applies. Read the other way round it is a total loss of enforcement.\n2. **A failed fetch is not an empty bundle.** An empty chain allows, so a reader that treats an unreachable control plane as a bundle with no rules converts an outage of Rail Center into an outage of enforcement. Keep serving the last bundle held. A reader that has **never** held one is in a different state and forwards rather than refusing: it has been told no posture at all, so refusing enforces a decision the control plane never made — and it would black-hole traffic on a gateway whose posture is `none` or `observe`, which is the one thing those values exist to promise. What keeps traffic off a reader in that state is readiness: report unready until a bundle is held. Where nothing honours readiness the window is real, and this says so rather than closing it with a refusal that is wrong more often than it is right.\n3. **A bundle valid against this schema can still be unusable.** Four classes: a policy id or a bound id in a spelling the contract does not name; a `version` carrying a character no log line can hold; a duplicate policy id; and two bindings for one endpoint. Three of the four are beyond what this file can say. Uniqueness across a list has no keyword at all. The version's character rule is defined by Unicode general category. `pattern` is ECMA-262, which can say that with `\\p{...}` under the `u` flag — but a reader validating with Python's `jsonschema` cannot, because it compiles patterns with `re`, and enumerating the code points instead would be a snapshot that a later Unicode revision silently invalidates. A rule half the readers of this file cannot evaluate is worse than one stated in prose. The id grammar *is* expressible as a `pattern`, and is deliberately not written as one: it would be a second copy of a rule that already lives in code and in vectors, and the loop that produced this file kept finding second copies that had stopped agreeing with the first. The `gated`/`open` arity rules are the one case where a schema rule is both expressible and cheap to keep true, so they are stated below.\n\nA reader is therefore not conformant by validating against this file. It is conformant by passing the vectors that accompany it.",
+  "description": "The body of `GET /v1/policy-bundle` — the ruleset an enforcement point caches and evaluates every request against.\n\nWhat this schema can express is shape. Three of the bundle's rules are about meaning and are stated here in prose because no schema carries them:\n\n1. **An endpoint with no binding entry is subject to every policy in `policies`.** An empty `bindings` list means nothing is narrowed, not that nothing applies. Read the other way round it is a total loss of enforcement.\n2. **A failed fetch is not an empty bundle.** An empty chain allows, so a reader that treats an unreachable control plane as a bundle with no rules converts an outage of Rail Center into an outage of enforcement. Keep serving the last bundle held. A reader that has **never** held one is in a different state and forwards rather than refusing: it has been told no posture at all, so refusing enforces a decision the control plane never made — and it would black-hole traffic on a gateway whose posture is `none` or `observe`, which is the one thing those values exist to promise. What keeps traffic off a reader in that state is readiness: report unready until a bundle is held. Where nothing honours readiness the window is real, and this says so rather than closing it with a refusal that is wrong more often than it is right.\n3. **A bundle valid against this schema can still be unusable.** Four classes: a policy id or a bound id in a spelling the contract does not name; a `schema_version` or a `content_hash` carrying a character no log line can hold; a duplicate policy id; and two bindings for one endpoint. Three of the four are beyond what this file can say. Uniqueness across a list has no keyword at all. Those two strings' character rule is defined by Unicode general category. `pattern` is ECMA-262, which can say that with `\\p{...}` under the `u` flag — but a reader validating with Python's `jsonschema` cannot, because it compiles patterns with `re`, and enumerating the code points instead would be a snapshot that a later Unicode revision silently invalidates. A rule half the readers of this file cannot evaluate is worse than one stated in prose. The id grammar *is* expressible as a `pattern`, and is deliberately not written as one: it would be a second copy of a rule that already lives in code and in vectors, and the loop that produced this file kept finding second copies that had stopped agreeing with the first. The `gated`/`open` arity rules are the one case where a schema rule is both expressible and cheap to keep true, so they are stated below.\n\nA reader is therefore not conformant by validating against this file. It is conformant by passing the vectors that accompany it.",
   "type": "object",
   "required": [
-    "version",
+    "schema_version",
+    "content_hash",
     "policies",
-    "bindings",
-    "rejected"
+    "bindings"
   ],
   "additionalProperties": true,
   "properties": {
-    "version": {
+    "schema_version": {
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "description": "A content hash of the `enforcement`, the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy, and a version over the policies alone would let a reader hold a stale narrowing indefinitely. `enforcement` is covered for the same reason taken further: it changes what happens to every call while changing no rule at all, so a caller comparing a version that ignored it would take the `304` path across the one change an operator most needs to land.\n\nBounded, and refused if it carries a character no log line can hold — a control, a format character, a line or paragraph separator, or a lone surrogate: it is held for as long as the bundle is and re-echoed on every failed refresh after that, so one accepted once keeps arriving in an operator's log."
+      "description": "The shape of this document, so a reader can tell an unsupported bundle from a malformed one and refuse it whole rather than half-read it. At the root beside `content_hash` because it describes the document: a reader must find it before parsing, so it cannot live inside a sub-object whose own shape it explains. Named `schema_version` rather than `version` because a content hash sits beside it and only one of the two is a version."
+    },
+    "content_hash": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "A content hash of the `schema_version`, the `enforcement`, the `binding_fallback`, the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy; `binding_fallback` is covered because it decides every unmatched call; `schema_version` is covered because a reader that must refuse an unsupported shape has to discover the bump. **It is a hash and not a version**: two builds of the same inputs produce the same value, nothing stores it, and it orders nothing."
     },
     "generated_at": {
       "type": "string",
       "format": "date-time",
-      "description": "When Rail Center assembled this bundle. Informational — a reader caches on `version`, never on this. `format` is an annotation in draft 2020-12 and most validators do not check it; nothing turns on this value here."
+      "description": "When Rail Center assembled this bundle. Informational — a reader caches on `content_hash`, never on this. `format` is an annotation in draft 2020-12 and most validators do not check it; nothing turns on this value here."
     },
     "policies": {
       "type": "array",
-      "description": "The tenant's chain apart from the entries under `rejected`, unpaginated, and including disabled ones. Never truncated for length: a reader that received part of a chain would enforce part of a chain and have no way to tell.",
+      "description": "The tenant's whole chain, unpaginated, and including disabled ones. Never truncated for length: a reader that received part of a chain would enforce part of a chain and have no way to tell.",
       "items": {
         "$ref": "#/$defs/policy"
       }
@@ -37,16 +43,9 @@
         "$ref": "#/$defs/binding"
       }
     },
-    "rejected": {
-      "type": "array",
-      "description": "Policies Rail Center excluded because their condition is not evaluable, or is evaluable but cannot be re-published faithfully. A reader does not act on it; it is there so an operator sees that a rule is not in force rather than inferring it from an absence. Required, and refused rather than read as empty when it is the wrong shape: 'nothing was rejected' is precisely the silent narrowing this field exists to prevent.",
-      "items": {
-        "type": "object"
-      }
-    },
     "enforcement": {
       "type": "object",
-      "description": "What Rail Center says to do with a call, and what to do with one no binding matches. Absent means a Rail Center older than RC-312, which a reader takes as judging nothing rather than as any posture in particular — inventing one enforces a decision the control plane never stated. Not in `required` for that reason.",
+      "description": "What Rail Center says to do with a call. Absent means a Rail Center older than RC-312, which a reader takes as judging nothing rather than as any posture in particular — inventing one enforces a decision the control plane never stated. Not in `required` for that reason.",
       "required": [
         "mode"
       ],
@@ -60,16 +59,16 @@
             "enforce"
           ],
           "description": "none — judge nothing, and keep polling so a move off it arrives. observe — evaluate, log every verdict, block none. enforce — evaluate, act, report denials. A component polls at all three: one that stopped at `none` could never be told it had been moved off it."
-        },
-        "fallback": {
-          "type": "string",
-          "enum": [
-            "pass",
-            "block"
-          ],
-          "description": "What happens to a call no binding matches, consulted only at `enforce`. block — refused, and the chain is not consulted, a refusal being something the chain cannot tighten. pass — judged by the whole chain rather than refused; it does not mean unjudged. Absent is read as `block`."
         }
       }
+    },
+    "binding_fallback": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "block"
+      ],
+      "description": "What happens to a call no binding key matches at all. A property of the binding set, which is why it sits beside `bindings` rather than inside `enforcement` or inside a binding — a posture says how much of a verdict is acted on, this says what the verdict *is* where nothing matched, and it cannot live in a binding because it is precisely what applies when there is none. `block` refuses without consulting the chain; `pass` means *not refused for being unbound* and hands the call to the whole chain. Absent is `block`. Evaluated wherever the chain is walked and acted on only at `enforce`, so an operator sees what it would refuse before it refuses anything."
     }
   },
   "$defs": {
@@ -201,7 +200,8 @@
   },
   "examples": [
     {
-      "version": "a3f1c09e7b2d4485",
+      "schema_version": "1.0",
+      "content_hash": "a3f1c09e7b2d4485",
       "generated_at": "2026-07-28T20:41:07.512247Z",
       "policies": [
         {
@@ -231,11 +231,10 @@
           "policy_ids": []
         }
       ],
-      "rejected": [],
       "enforcement": {
-        "mode": "enforce",
-        "fallback": "block"
-      }
+        "mode": "enforce"
+      },
+      "binding_fallback": "block"
     }
   ]
 }

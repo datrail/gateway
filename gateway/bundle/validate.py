@@ -22,6 +22,7 @@ happens before interpreting.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -39,6 +40,11 @@ from gateway.mode import (
     Enforcement,
     Fallback,
 )
+
+#: The holder's logger, shared so that everything an operator reads about one
+#: bundle — the fetch, the refusal, the posture, and the warnings below —
+#: arrives under one name.
+logger = logging.getLogger("gateway.bundle")
 
 
 def _q(value: object) -> str:
@@ -104,7 +110,17 @@ class Binding:
 class UsableBundle:
     """A bundle that can be walked."""
 
-    version: str
+    #: The bundle's shape, as the responder declares it. Read but not yet acted
+    #: on: refusing an unsupported one is its own change, and a reader that
+    #: refused before anything else in this component understood the new root
+    #: would refuse the only bundles it can read.
+    schema_version: str
+    #: A sha256 over the fields that change behaviour, truncated. **A content
+    #: hash and not a version**: two builds of the same inputs produce the same
+    #: value, nothing stores it, and it orders nothing. It is what a poller
+    #: compares to decide whether anything changed, and what `If-None-Match`
+    #: will carry when a conditional fetch lands.
+    content_hash: str
     #: Enabled policies, ordered: ``priority`` ascending, ties by canonical id.
     chain: tuple[Policy, ...]
     #: Resolved endpoint key to its narrowing. **A key with no entry here is
@@ -120,26 +136,28 @@ class UsableBundle:
     #: mappingproxy. A caller wanting any of those wants a snapshot of what is
     #: held, and `dict(bundle.bindings)` is the line that gives it one.
     bindings: Mapping[str, Binding]
-    #: Policies Rail Center could not compile. Not an error channel to drop: it
-    #: is how an operator sees a rule is not in force rather than inferring it
-    #: from an absence.
-    rejected: tuple[Any, ...]
-    #: What Rail Center says to do with a call, and what to do with one no
-    #: binding matches (RC-312). Read from the bundle on every poll rather than
-    #: from the environment at start-up, which is what lets an operator move a
-    #: gateway's posture and have it take effect on the next refresh.
+    #: What Rail Center says to do with a call (RC-312). Read from the bundle on
+    #: every poll rather than from the environment at start-up, which is what
+    #: lets an operator move a gateway's posture and have it take effect on the
+    #: next refresh.
     #:
     #: A bundle naming no `enforcement` is one from a Rail Center older than
-    #: RC-312, and is read as `none`/`block` — judge nothing, and carry the
-    #: conservative half of a pair whose other half admits unbound endpoints.
-    #: Judging nothing is the safe reading here and not the timid one: the
-    #: alternative is enforcing a posture the control plane never stated.
+    #: RC-312, and is read as `none` — judge nothing. That is the safe reading
+    #: here and not the timid one: the alternative is enforcing a posture the
+    #: control plane never stated.
     enforcement: Enforcement
+    #: What happens to a call no binding matches. **A property of the binding
+    #: set, not of the posture**, which is why it sits beside `bindings` at the
+    #: bundle root rather than inside `enforcement`: a posture says how much of a
+    #: verdict is acted on, a fallback says what the verdict *is* for a call
+    #: nothing matched.
     fallback: Fallback
     #: Whether the bundle *said* so. False only for a bundle naming no
-    #: `enforcement` at all, which resolves to the same `none`/`block` a bundle
-    #: naming them resolves to — so the posture alone cannot tell a control
-    #: plane that chose to judge nothing from one that has said nothing.
+    #: `enforcement` at all, which resolves to the same `none` a bundle naming
+    #: `none` resolves to — so the posture alone cannot tell a control plane
+    #: that chose to judge nothing from one that has said nothing. The fallback
+    #: is no help either way: it is read from the root and resolves whatever the
+    #: posture says, so the two fields say nothing about each other.
     #:
     #: Nothing decides traffic on this. It exists because the two states are
     #: not equal in consequence to the operator being told about them: silence
@@ -317,15 +335,15 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
     return out
 
 
-def _posture(value: object) -> tuple[Enforcement, Fallback, bool]:
+def _posture(value: object) -> tuple[Enforcement, bool]:
     """The enforcement value this bundle carries, or what an older one means.
 
-    Returns the posture and whether the bundle stated it. The third value is
+    Returns the posture and whether the bundle stated it. The second value is
     the only thing that keeps the two apart downstream, since absent and an
     explicit `none` resolve identically and deliberately so.
 
-    **Absent is `none`/`block`, and present-but-wrong is refused.** The two are
-    not the same claim and must not collapse into one. An absent field is a Rail
+    **Absent is `none`, and present-but-wrong is refused.** The two are not the
+    same claim and must not collapse into one. An absent field is a Rail
     Center that predates RC-312 and has said nothing about posture, which this
     component reads as "judge nothing" — the alternative, inventing a posture,
     enforces a decision no operator made. A field that is present and outside
@@ -338,22 +356,39 @@ def _posture(value: object) -> tuple[Enforcement, Fallback, bool]:
     is nothing to fall back to and the gateway reports itself unready.
     """
     if value is None:
-        return UNTOLD_ENFORCEMENT, DEFAULT_FALLBACK, False
+        return UNTOLD_ENFORCEMENT, False
     if not isinstance(value, dict):
         raise UnusableBundle("`enforcement` is not an object")
     mode = value.get("mode")
     if mode not in ENFORCEMENTS:
         raise UnusableBundle(f"an enforcement mode outside the contract ({_q(mode)})")
-    # Read independently of the mode. It is consulted only at `enforce`, but a
-    # bundle carrying a malformed one at `observe` is still a responder that
-    # disagrees about the vocabulary — and the posture it disagrees about is one
-    # poll away from being the one that decides.
-    fallback = value.get("fallback")
-    if fallback is None:
-        return mode, DEFAULT_FALLBACK, True
-    if fallback not in FALLBACKS:
-        raise UnusableBundle(f"a fallback outside the contract ({_q(fallback)})")
-    return mode, fallback, True
+    return mode, True  # type: ignore[return-value]
+
+
+def _fallback(value: object) -> Fallback:
+    """What a call no binding matches is judged to be.
+
+    **Read from the bundle root, beside `bindings`, and not from
+    `enforcement`.** It is a property of the binding set rather than of the
+    posture: a posture says how much of a verdict is acted on, a fallback says
+    what the verdict *is* where nothing matched. It cannot sit inside a binding
+    for the same reason — it is precisely what applies when there is no binding.
+
+    Absent is `block`, the conservative half of a pair whose other half admits
+    unbound endpoints. Present and outside the vocabulary is refused, for the
+    reason `_posture` gives: a responder disagreeing with the contract about
+    what these values are is one whose chain should not be enforced.
+
+    Read whatever the posture says. It is acted on only at `enforce`, but a
+    bundle carrying a malformed one at `observe` is a responder that disagrees
+    about the vocabulary — and the posture it disagrees about is one poll away
+    from being the one that decides.
+    """
+    if value is None:
+        return DEFAULT_FALLBACK
+    if value not in FALLBACKS:
+        raise UnusableBundle(f"a fallback outside the contract ({_q(value)})")
+    return value  # type: ignore[return-value]
 
 
 def validate_bundle(body: object) -> UsableBundle:
@@ -373,16 +408,37 @@ def validate_bundle(body: object) -> UsableBundle:
     if not isinstance(body, dict):
         raise UnusableBundle("the response is not an object")
 
-    version = body.get("version")
-    if not isinstance(version, str) or version == "":
-        raise UnusableBundle("no version to cache on")
-    # A version is a content hash, so it is a short token of ordinary
-    # characters. Refusing anything else closes this off at the source rather
-    # than at each place it is printed: it is held for as long as the bundle
-    # is, and re-echoed on every failed refresh after that, so one accepted
-    # once keeps arriving in an operator's log every refresh interval.
-    if has_unsafe_key_characters(version) or len(version) > MAX_ENDPOINT_KEY_LENGTH:
-        raise UnusableBundle(f"a version that cannot be recorded ({_q(version)})")
+    # Read first, because it describes the shape of everything read after it —
+    # a reader that parsed the document and then asked what shape it was in has
+    # already made the assumption the field exists to check. **Not acted on
+    # here**: refusing an unsupported version is its own change, and this one
+    # only teaches the component where to find it.
+    schema_version = body.get("schema_version")
+    if not isinstance(schema_version, str) or schema_version == "":
+        raise UnusableBundle("no schema_version to read the bundle against")
+    if (
+        has_unsafe_key_characters(schema_version)
+        or len(schema_version) > MAX_ENDPOINT_KEY_LENGTH
+    ):
+        raise UnusableBundle(
+            f"a schema_version that cannot be recorded ({_q(schema_version)})"
+        )
+
+    content_hash = body.get("content_hash")
+    if not isinstance(content_hash, str) or content_hash == "":
+        raise UnusableBundle("no content_hash to cache on")
+    # A content hash is a short token of ordinary characters. Refusing anything
+    # else closes this off at the source rather than at each place it is
+    # printed: it is held for as long as the bundle is, and re-echoed on every
+    # failed refresh after that, so one accepted once keeps arriving in an
+    # operator's log every refresh interval.
+    if (
+        has_unsafe_key_characters(content_hash)
+        or len(content_hash) > MAX_ENDPOINT_KEY_LENGTH
+    ):
+        raise UnusableBundle(
+            f"a content_hash that cannot be recorded ({_q(content_hash)})"
+        )
 
     policies = body.get("policies")
     if not isinstance(policies, list):
@@ -392,27 +448,46 @@ def validate_bundle(body: object) -> UsableBundle:
     bindings = body.get("bindings")
     if not isinstance(bindings, list):
         raise UnusableBundle("`bindings` is not a list")
-    # Refused rather than coerced to empty, like the two above — and this one
-    # is strictness the contract does not ask for, so it is worth saying what
-    # it buys and what it costs. Nothing here reads `rejected`; it is carried
-    # for an operator, and a wrong-shaped one narrows nothing. What it does say
-    # is that the responder is not Rail Center, and the cheapest moment to
-    # notice that is before a chain assembled by something else is enforced.
-    # The cost is bounded by the contract's own rule that a reader keeps
-    # serving the last bundle it holds, so this refuses an update rather than
-    # enforcement — except on a first fetch, where there is nothing to fall
-    # back to and the gateway refuses traffic.
-    rejected = body.get("rejected")
-    if not isinstance(rejected, list):
-        raise UnusableBundle("`rejected` is not a list")
+    # `rejected` is not read. It carried the policies Rail Center could not
+    # compile, for an operator to see; nothing in this component ever narrowed
+    # anything with it, and it is gone from the root rather than carried
+    # unused. A bundle that still sends one is not refused for it — an unknown
+    # root field is a newer or older responder, not a broken one.
 
-    enforcement, fallback, posture_told = _posture(body.get("enforcement"))
+    told_enforcement = body.get("enforcement")
+    enforcement, posture_told = _posture(told_enforcement)
+    fallback = _fallback(body.get("binding_fallback"))
+
+    # Last, because the two of them are what can still refuse the bundle whole.
+    chain = _order(policies)
+    indexed = MappingProxyType(_index(bindings))
+
+    # The fallback is read from `binding_fallback` at the root and from nowhere
+    # else, so a `fallback` inside `enforcement` is a value the responder states
+    # and this reader does not consult — a stated `pass` held as `block` refuses
+    # every unmatched call at `enforce`, with nothing saying why.
+    #
+    # Warned and not refused. The bundle is well-formed and the chain in it is
+    # enforceable; refusing would take enforcement down over a field that
+    # decides nothing, which is a worse outcome than the one being reported.
+    # That both hold is why the warning sits below the two calls above rather
+    # than beside the read: a bundle those refuse applies nothing, and a line
+    # naming the fallback that "applies" would name neither this bundle's nor
+    # the held one still deciding traffic.
+    if isinstance(told_enforcement, Mapping) and "fallback" in told_enforcement:
+        logger.warning(
+            "policy bundle states %s inside `enforcement`; the fallback is read "
+            "from `binding_fallback` at the bundle root, so %s applies and the "
+            "stated one decides nothing",
+            _q(told_enforcement.get("fallback")),
+            _q(fallback),
+        )
 
     return UsableBundle(
-        version=version,
-        chain=_order(policies),
-        bindings=MappingProxyType(_index(bindings)),
-        rejected=tuple(rejected),
+        schema_version=schema_version,
+        content_hash=content_hash,
+        chain=chain,
+        bindings=indexed,
         enforcement=enforcement,
         fallback=fallback,
         posture_told=posture_told,

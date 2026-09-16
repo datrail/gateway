@@ -43,7 +43,8 @@ BY_KEY = "5c8f1e42-0000-4000-8000-0000000000a1"
 def bundle(bindings: list[dict[str, Any]] | None = None):
     return validate_bundle(
         {
-            "version": "v-keyless",
+            "schema_version": "1.0",
+            "content_hash": "v-keyless",
             "policies": [
                 {
                     "id": LOW_SCORE,
@@ -71,7 +72,6 @@ def bundle(bindings: list[dict[str, Any]] | None = None):
                 },
             ],
             "bindings": bindings or [],
-            "rejected": [],
         }
     )
 
@@ -140,7 +140,8 @@ def test_an_endpoint_rule_is_dropped_from_a_keyless_chain():
     an agent whose declared skills were exactly right."""
     only_by_key = validate_bundle(
         {
-            "version": "v-keyless",
+            "schema_version": "1.0",
+            "content_hash": "v-keyless",
             "policies": [
                 {
                     "id": BY_KEY,
@@ -156,7 +157,6 @@ def test_an_endpoint_rule_is_dropped_from_a_keyless_chain():
                 }
             ],
             "bindings": [],
-            "rejected": [],
         }
     )
 
@@ -182,7 +182,8 @@ def test_every_operator_endpoint_key_admits_declines_against_an_absence():
     ]:
         rule = validate_bundle(
             {
-                "version": "v-keyless",
+                "schema_version": "1.0",
+                "content_hash": "v-keyless",
                 "policies": [
                     {
                         "id": BY_KEY,
@@ -198,7 +199,6 @@ def test_every_operator_endpoint_key_admits_declines_against_an_absence():
                     }
                 ],
                 "bindings": [],
-                "rejected": [],
             }
         )
         verdict = decide(rule, request(None, ticket(posture_score=10)))

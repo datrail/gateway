@@ -80,11 +80,15 @@ def test_the_bundle_schema_refuses_what_it_says_it_refuses() -> None:
     carry, the arity rules below included.
     """
     validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
-    base = {"version": "v1", "policies": [], "bindings": [], "rejected": []}
+    base = {
+        "schema_version": "1.0",
+        "content_hash": "v1",
+        "policies": [],
+        "bindings": [],
+    }
 
     for bad in (
-        {k: v for k, v in base.items() if k != "rejected"},
-        {**base, "version": ""},
+        {**base, "content_hash": ""},
         {
             **base,
             "bindings": [{"endpoint_key": "e", "mode": "closed", "policy_ids": []}],
@@ -111,7 +115,7 @@ def test_the_bundle_schema_carries_the_binding_arity_rules() -> None:
     carrying no entry at all.
     """
     validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
-    base = {"version": "v1", "policies": [], "rejected": []}
+    base = {"schema_version": "1.0", "content_hash": "v1", "policies": []}
     one = "5c8f1e42-0000-4000-8000-0000000000a1"
 
     def binding(mode: str, ids: list[str]) -> dict[str, Any]:
@@ -133,11 +137,16 @@ def test_the_bundle_schema_requires_what_it_says_is_required() -> None:
     schema that documents a rule and enforces nothing.
     """
     validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
-    base = {"version": "v1", "policies": [], "bindings": [], "rejected": []}
+    base = {
+        "schema_version": "1.0",
+        "content_hash": "v1",
+        "policies": [],
+        "bindings": [],
+    }
     one = "5c8f1e42-0000-4000-8000-0000000000a1"
     binding = {"endpoint_key": "e", "mode": "gated", "policy_ids": [one]}
 
-    for field in ("version", "policies", "bindings", "rejected"):
+    for field in ("schema_version", "content_hash", "policies", "bindings"):
         assert not validator.is_valid({k: v for k, v in base.items() if k != field}), (
             field
         )
@@ -164,10 +173,10 @@ def test_the_bundle_schema_requires_what_it_says_is_required() -> None:
     assert validator.is_valid(
         {**base, "bindings": [{**binding, "endpoint_key": "e" * 255}]}
     )
-    # The version's bound is the same one, and for the same reason: it is held
-    # for as long as the bundle is and re-echoed on every failed refresh.
-    assert not validator.is_valid({**base, "version": "v" * 256})
-    assert validator.is_valid({**base, "version": "v" * 255})
+    # The content hash's bound is the same one, and for the same reason: it is
+    # held for as long as the bundle is and re-echoed on every failed refresh.
+    assert not validator.is_valid({**base, "content_hash": "v" * 256})
+    assert validator.is_valid({**base, "content_hash": "v" * 255})
     # Unrecognised keys travel through here too, for the reason the ticket
     # schema gives: adding a field to the grammar must not be a flag day.
     assert validator.is_valid(
@@ -183,7 +192,6 @@ def test_the_bundle_schema_requires_what_it_says_is_required() -> None:
     assert not validator.is_valid(
         {**base, "policies": [{"id": one, "priority": 1, "name": 1}]}
     )
-    assert not validator.is_valid({**base, "rejected": ["not an object"]})
 
 
 def test_the_bundle_schema_keeps_the_remedy_it_promises() -> None:
@@ -195,7 +203,7 @@ def test_the_bundle_schema_keeps_the_remedy_it_promises() -> None:
     disabled policy would refuse exactly the bundle that remedy produces.
     """
     validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
-    base = {"version": "v1", "bindings": [], "rejected": []}
+    base = {"schema_version": "1.0", "content_hash": "v1", "bindings": []}
     one = "5c8f1e42-0000-4000-8000-0000000000a1"
 
     assert validator.is_valid(
@@ -225,13 +233,21 @@ def test_the_schemas_state_the_types_they_document() -> None:
         return 0
 
     # The count, so that a `type` added without an assertion beside it fails
-    # here rather than going unnoticed. Raise it when you add the assertion.
+    # here rather than going unnoticed. Move it when you add the assertion.
     # 16 → 19 with RC-312's `enforcement`: the object, and its two members.
-    assert types(_schema("policy-bundle.schema.json")) == 19
+    # 19 → 18 with the reshaped root: `rejected` leaves with its `items`, the
+    # fallback leaves `enforcement` and returns at the root as
+    # `binding_fallback`, and `schema_version` arrives beside `content_hash`.
+    assert types(_schema("policy-bundle.schema.json")) == 18
     assert types(_schema("x-rail-ticket.schema.json")) == 12
 
     bundle = Draft202012Validator(_schema("policy-bundle.schema.json"))
-    base = {"version": "v1", "policies": [], "bindings": [], "rejected": []}
+    base = {
+        "schema_version": "1.0",
+        "content_hash": "v1",
+        "policies": [],
+        "bindings": [],
+    }
     one = "5c8f1e42-0000-4000-8000-0000000000a1"
 
     assert not bundle.is_valid({**base, "policies": "not a list"})
@@ -244,8 +260,7 @@ def test_the_schemas_state_the_types_they_document() -> None:
 
     # The seven the first pass missed, each shown by a document that flips.
     assert not bundle.is_valid(["not an object"])
-    assert not bundle.is_valid({**base, "version": 17})
-    assert not bundle.is_valid({**base, "rejected": "none"})
+    assert not bundle.is_valid({**base, "content_hash": 17})
     assert not bundle.is_valid({**base, "policies": [{"id": 17, "priority": 1}]})
     assert not bundle.is_valid({**base, "bindings": ["not an object"]})
     assert not bundle.is_valid(
@@ -263,16 +278,15 @@ def test_the_schemas_state_the_types_they_document() -> None:
     # which is the half `required` would not cover even if it named it.
     assert not bundle.is_valid({**base, "enforcement": "enforce"})
     assert not bundle.is_valid({**base, "enforcement": {"mode": 17}})
-    assert not bundle.is_valid(
-        {**base, "enforcement": {"mode": "enforce", "fallback": 17}}
-    )
+    assert not bundle.is_valid({**base, "binding_fallback": 17})
+    assert not bundle.is_valid({**base, "schema_version": 17})
     # And the vocabulary, which is the part a wrong reading acts on: a mode
-    # outside the three is not a posture this component can hold.
+    # outside the three is not a posture this component can hold, and a
+    # fallback outside the pair decides nothing this component can do.
     assert not bundle.is_valid({**base, "enforcement": {"mode": "halt"}})
-    assert not bundle.is_valid(
-        {**base, "enforcement": {"mode": "enforce", "fallback": "allow"}}
-    )
+    assert not bundle.is_valid({**base, "binding_fallback": "allow"})
     assert bundle.is_valid({**base, "enforcement": {"mode": "observe"}})
+    assert bundle.is_valid({**base, "binding_fallback": "pass"})
 
     ticket = Draft202012Validator(_schema("x-rail-ticket.schema.json"))
     good = _schema("x-rail-ticket.schema.json")["examples"][0]
@@ -289,13 +303,18 @@ def test_the_safe_integer_bounds_admit_the_bound_itself() -> None:
     reader accepts.
     """
     bundle = Draft202012Validator(_schema("policy-bundle.schema.json"))
-    base = {"version": "v1", "policies": [], "bindings": [], "rejected": []}
+    base = {
+        "schema_version": "1.0",
+        "content_hash": "v1",
+        "policies": [],
+        "bindings": [],
+    }
     one = "5c8f1e42-0000-4000-8000-0000000000a1"
     safe = 2**53 - 1
 
     assert bundle.is_valid({**base, "policies": [{"id": one, "priority": safe}]})
     assert bundle.is_valid({**base, "policies": [{"id": one, "priority": -safe}]})
-    assert bundle.is_valid({**base, "version": "v"})
+    assert bundle.is_valid({**base, "content_hash": "v"})
 
     ticket = Draft202012Validator(_schema("x-rail-ticket.schema.json"))
     good = _schema("x-rail-ticket.schema.json")["examples"][0]
