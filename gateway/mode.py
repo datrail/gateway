@@ -115,7 +115,11 @@ ENFORCEMENTS: Final[tuple[Enforcement, ...]] = ("none", "observe", "enforce")
 #: it in that window wherever an orchestrator honours readiness.
 UNTOLD_ENFORCEMENT: Final[Enforcement] = "none"
 
-#: What happens to a call no binding matches, at `enforce` and nowhere else.
+#: What happens to a call no binding matches. **Evaluated wherever the chain
+#: is walked and acted on only at `enforce`**: at `observe` the would-be
+#: refusal is logged and the walk still runs, so an operator sees what
+#: `block` would refuse before it refuses anything — which is what makes
+#: `observe` a preview of enforcement rather than of everything but this.
 Fallback = Literal["pass", "block"]
 
 FALLBACKS: Final[tuple[Fallback, ...]] = ("pass", "block")

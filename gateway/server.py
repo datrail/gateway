@@ -164,6 +164,25 @@ STARTUP_FETCH_GRACE_SECONDS = 5.0
 #: "Level <n>" for anything else, so a typo would set a level nobody chose.
 LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
 
+#: The most denial reports this gateway will hold in flight at once, past which
+#: a report is shed with a log rather than queued. The fallback refusal is
+#: reached without a ticket, without a valid tool name and without any binding
+#: existing, so anything that can reach this gateway can turn its own request
+#: rate into one bearer-authenticated POST to Rail Center per request. Shedding
+#: costs the record and not the enforcement — nothing the 403 is built from is
+#: read back out of a report — while a gateway that has run out of sockets
+#: reports nothing at all and stops refusing too.
+MAX_REPORTS_IN_FLIGHT = 64
+
+#: How much of that budget a report naming no policy may hold. The fallback
+#: refusal is the class reachable with nothing in hand, so sharing one budget
+#: first-come lets it evict the class that carries a verdict: a full set holds
+#: every rule-decided denial off Rail Center's record for as long as it stays
+#: full, and one slow Rail Center does the same with no caller meaning to.
+#: Reserving the remainder is a comparison and a count, where making room by
+#: cancelling a POST already in flight is neither.
+MAX_FALLBACK_REPORTS_IN_FLIGHT = 16
+
 
 def _required(name: str) -> str:
     """Read a variable that has no sensible default.
@@ -849,6 +868,11 @@ class _Enforcement:
         # mid-flight and simply never arrive — a missing row with nothing in the
         # log to say why.
         self._reports: set[asyncio.Task[Any]] = set()
+        # The subset of those carrying no policy id — the fallback refusal,
+        # which is the class reachable without a ticket, a tool name or a
+        # binding. Counted apart from the whole so that class cannot spend the
+        # budget the class carrying a verdict needs.
+        self._unruled_reports: set[asyncio.Task[Any]] = set()
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http" or scope.get("method") != "POST":
@@ -932,11 +956,14 @@ class _Enforcement:
             return None
         blocking = blocks(bundle.enforcement)
 
-        # **Asked instead of the walk, not before it as a filter.** `fallback`
-        # is consulted only at `enforce`, which is what `blocking` already
-        # means, and a `block` fallback refuses the call without the chain
-        # being consulted at all — so there is no verdict here, and nothing to
-        # report to Rail Center.
+        # **Asked instead of the walk, wherever the chain would be walked.**
+        # `block` refuses a call no binding matched without the chain being
+        # consulted at all — but the *asking* happens at `observe` too, and only
+        # the acting is held back to `enforce`. An operator has to be able to
+        # see what `block` would refuse before it refuses anything, which is the
+        # whole of what `observe` is for; a fallback silent until the day it
+        # blocks makes the rung that exists to preview enforcement the one rung
+        # that previews none of it.
         # **One reading, asked twice.** `resolution.key` is None for both keyless
         # outcomes and only one of them earns the narrowing: a message that
         # names no tool by design has no subject for an endpoint-derived rule,
@@ -946,13 +973,34 @@ class _Enforcement:
         # two spellings of it that can drift apart.
         keyless = resolution.status == "keyless"
 
-        if blocking and refuses_unbound(bundle, resolution.key, keyless=keyless):
+        unbound = refuses_unbound(bundle, resolution.key, keyless=keyless)
+        if unbound and not blocking:
+            # **Said, and then not acted on — which is the whole distinction.**
+            # Returning here would *act* on the fallback: at `enforce` a `block`
+            # refuses without the chain being consulted, so short-circuiting
+            # would make this mode enforce the one verdict it is supposed only
+            # to preview. The walk below still runs, so an operator sees both
+            # what the fallback would do and what the chain says about the same
+            # call.
             log.warning(
-                "denied %s (no binding entry, fallback=block; ticket %s); "
-                "no policy judged it, so nothing was reported",
+                "would deny %s (no binding entry, fallback=block; ticket %s) — "
+                "this mode enforces nothing, so it was forwarded",
                 named,
                 ticket.state,
             )
+        if unbound and blocking:
+            log.warning(
+                "denied %s (no binding entry, fallback=block; ticket %s); "
+                "no policy judged it",
+                named,
+                ticket.state,
+            )
+            # **Reported as an ordinary denial carrying no policy.** A refusal
+            # nobody hears about is a refusal an operator debugs from the
+            # caller's side: the fallback is the one verdict reached without a
+            # rule, and leaving it unreported would make the endpoints nobody
+            # bound the only ones whose refusals never appear.
+            self._send_report(scope, resolution, ticket, policy=None, bundle=bundle)
             # **The caller is told what any denied caller is told.** A distinct
             # status or reason here would let anyone holding a tool name probe
             # which endpoints this gateway has bindings for, one call at a
@@ -1015,7 +1063,7 @@ class _Enforcement:
             safe_for_log(policy.id),
             ticket.state,
         )
-        self._send_report(scope, resolution, ticket, policy)
+        self._send_report(scope, resolution, ticket, policy, bundle=bundle)
         # **The policy id does not go back to the caller.** The `x-rail` ticket
         # is unsigned and this gateway is the only thing in front of the
         # upstream, so a caller that reads which id stopped each attempt can
@@ -1025,17 +1073,50 @@ class _Enforcement:
         # Center — both on the trusted side of the boundary.
         return 403, "denied by policy"
 
-    def _send_report(self, scope, resolution, ticket, policy) -> None:
+    def _send_report(self, scope, resolution, ticket, policy, bundle=None) -> None:
         """Report the denial without the caller waiting for it.
 
         Fire-and-forget: the caller has already been refused, so awaiting this
         would put Rail Center's availability into how long a denied request
         takes, and a failed report would look like a failed refusal.
+
+        `policy` is None for a fallback refusal — the one verdict reached
+        without a rule — and the report carries no `policy_id` rather than
+        inventing one.
+
+        **The key reported is the fullest one this gateway holds.** Where a
+        binding matched, that is the key Rail Center published, slug and all,
+        taken off the binding rather than recomposed; where none did, it is the
+        slug-less form this gateway composed, which is all there is. The
+        receiver resolves the data source from the reporting gateway and
+        whichever it gets.
+
+        **The budget is reserved by class.** A fallback refusal is reachable
+        with nothing in hand — no ticket, no tool name, no binding — while a
+        denial naming a policy took a rule that matched, so one shared budget
+        makes the first class an eviction lever over the second: fill it with
+        arbitrary bytes and every rule-decided denial is shed. A Rail Center
+        slow enough to hold the tasks open reaches the same state with nobody
+        meaning to. The policy-less class is held to
+        `MAX_FALLBACK_REPORTS_IN_FLIGHT` of the `MAX_REPORTS_IN_FLIGHT` total,
+        so the remainder is headroom a denial that names a rule always has.
         """
+        unruled = policy is None
+        if len(self._reports) >= MAX_REPORTS_IN_FLIGHT or (
+            unruled and len(self._unruled_reports) >= MAX_FALLBACK_REPORTS_IN_FLIGHT
+        ):
+            log.warning(
+                "denial report not sent — %d already in flight, %d of them "
+                "naming no policy; this refusal stands and is absent from "
+                "Rail Center",
+                len(self._reports),
+                len(self._unruled_reports),
+            )
+            return
         claims = ticket.token or {}
         body = build_report(
-            policy_id=policy.id,
-            endpoint_key=resolution.key,
+            policy_id=policy.id if policy is not None else None,
+            endpoint_key=_reportable_key(bundle, resolution.key),
             endpoint_status=resolution.status,
             ticket_state=ticket.state,
             agent_id=claims.get("agent_id"),
@@ -1047,6 +1128,36 @@ class _Enforcement:
         )
         self._reports.add(task)
         task.add_done_callback(self._reports.discard)
+        if unruled:
+            self._unruled_reports.add(task)
+            task.add_done_callback(self._unruled_reports.discard)
+
+
+def _reportable_key(bundle, composed: str | None) -> str | None:
+    """The full key where a binding matched, the composed one where none did.
+
+    Reporting the binding's own key rather than the one this gateway composed
+    hands the receiver an attribution it would otherwise re-derive: the whole
+    key is the contract's, names one endpoint unambiguously, and arrived in the
+    bundle rather than being guessed at here.
+
+    **What it cannot promise is that the slug names the upstream the call
+    reached.** The lookup is by the composed key, which has no data source in
+    it — so where two upstreams behind this gateway share a stripped key and
+    only one of them is bound, a call to either is reported under that one
+    binding's slug. That is this implementation's stripped-key limitation
+    showing up in the report rather than in the verdict, and it is the same
+    limitation `bundle.validate` states at the collision refusal. A gateway
+    resolving the data source from the route would match on the whole key and
+    have neither face of it.
+
+    Reporting the slug-less form instead is the alternative, and it is worse:
+    it would lose an attribution that is correct in every case but this one.
+    """
+    if bundle is None or composed is None:
+        return composed
+    binding = bundle.bindings.get(composed)
+    return binding.full_key if binding is not None else composed
 
 
 async def _drained(receive):

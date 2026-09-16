@@ -136,6 +136,16 @@ class Binding:
 
     mode: Literal["gated", "open"]
     policy_ids: frozenset[str]
+    #: The key exactly as Rail Center published it, slug and all.
+    #:
+    #: **Kept because a denial reports it, not because anything matches on it.**
+    #: The index is keyed on the stripped form — that is what this gateway can
+    #: compose — but a refusal on a matched binding can name the whole key
+    #: rather than the part this gateway happens to hold, and a key that
+    #: originated in Rail Center is one Rail Center can resolve without
+    #: re-deriving. Where nothing matched there is no full key to name, and the
+    #: report carries the stripped form instead.
+    full_key: str
 
 
 @dataclass(frozen=True)
@@ -403,7 +413,9 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
                 )
             canonical.add(resolved)
 
-        out[comparable] = Binding(mode=mode, policy_ids=frozenset(canonical))
+        out[comparable] = Binding(
+            mode=mode, policy_ids=frozenset(canonical), full_key=key
+        )
 
     return out
 

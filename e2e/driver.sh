@@ -67,6 +67,16 @@ denials_naming() {
     "{\"method\":\"POST\",\"urlPath\":\"/v1/denials\",\"bodyPatterns\":[{\"matchesJsonPath\":\"\$[?(@.policy_id == '$1')]\"}]}"
 }
 
+# Denials naming no policy at all — the fallback's own. `block` refuses a call no
+# binding matched without the chain being consulted, so there is no rule to
+# name, and the report omits `policy_id` rather than sending it null. The JSONPath
+# asks for the field's *absence*, which is what tells this apart from a report
+# that named a policy and from one that sent a null.
+denials_naming_no_policy() {
+  count "$RAIL_CENTER" \
+    "{\"method\":\"POST\",\"urlPath\":\"/v1/denials\",\"bodyPatterns\":[{\"matchesJsonPath\":\"\$[?(!@.policy_id)]\"}]}"
+}
+
 # Requests no stub answered, as 0 or 1 so `expect ... none` reads it. Every
 # other assertion counts requests a stub *matched*, and a stub that went missing
 # is invisible to all of them. There is no count endpoint for the unmatched
@@ -298,13 +308,15 @@ reset_journals
 expect "an endpoint with no binding entry is refused 403" 403 \
   "$(status gateway-fallback undeclared_tool -H "x-rail: $GOOD_TICKET")"
 expect "no call reached the upstream" 0 "$(forwarded_tool_calls)"
-# **No policy judged it, so there is nothing a report could honestly name.** A
-# denial report names the policy that matched and Rail Center records that
-# attribution without re-deriving it; `policy_id` has no absent form. The
-# refusal is in the gateway's log and nowhere else, and this assertion is what
-# pins that rather than leaving it to be discovered from an empty denials table.
-sleep 2  # long enough for a report to have arrived if one were sent
-expect "no denial was reported" 0 "$(denials)"
+# **No policy judged it, and the refusal is reported anyway.** `block` refuses a
+# call no binding matched without the chain being consulted at all, so there is
+# no rule to name — the report omits `policy_id` rather than inventing one.
+# Reporting it is what keeps the endpoints nobody bound from being the only ones
+# whose refusals never reach an operator, and asserting the *absence* of the
+# field is what separates this from a denial that named a policy.
+sleep 2  # long enough for the fire-and-forget report to arrive
+expect "the fallback refusal is reported" 1 "$(denials)"
+expect "it named no policy, because none judged it" 1 "$(denials_naming_no_policy)"
 
 printf '\n== none: a pass-through that asks the control plane nothing ==\n'
 reset_journals

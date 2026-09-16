@@ -169,7 +169,7 @@ def _reads_as_number(value: Any) -> bool:
 
 def build_report(
     *,
-    policy_id: str,
+    policy_id: str | None,
     endpoint_key: str | None,
     endpoint_status: str,
     ticket_state: str,
@@ -209,7 +209,11 @@ def build_report(
         metadata[CLAIMED_STATUS_KEY] = claimed_status
 
     report: dict[str, Any] = {
-        "policy_id": policy_id,
+        # **Absent rather than null for a fallback refusal.** The one verdict
+        # this gateway reaches without a rule is the `block` fallback, and there
+        # is no policy to name; omitting the key says that, where a null would
+        # be a reporter that had a policy and lost it.
+        **({"policy_id": policy_id} if policy_id is not None else {}),
         # **No `datasource_slug`.** This gateway holds none: it fronts several
         # data sources and composes a key with no slug in it, so naming one here
         # would mean asserting a value it does not have. The schema requires
@@ -260,7 +264,8 @@ async def report(
             response = await client.post(url, json=body, headers=headers)
     except Exception as exc:  # noqa: BLE001 - a report may not break a refusal
         logger.warning(
-            "denial report for policy %s could not be sent: %s: %s",
+            "denial report for %s (policy %s) could not be sent: %s: %s",
+            safe_for_log(body.get("endpoint_key")),
             safe_for_log(body.get("policy_id")),
             type(exc).__name__,
             exc,
@@ -271,7 +276,8 @@ async def report(
         # Named rather than swallowed: a 422 here means this gateway and Rail
         # Center disagree about the shape of a denial, and the row is missing.
         logger.warning(
-            "denial report for policy %s was refused: HTTP %d",
+            "denial report for %s (policy %s) was refused: HTTP %d",
+            safe_for_log(body.get("endpoint_key")),
             safe_for_log(body.get("policy_id")),
             response.status_code,
         )

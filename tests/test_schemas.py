@@ -387,22 +387,27 @@ def test_the_denial_schema_describes_what_this_gateway_actually_sends() -> None:
         )
 
 
-def test_the_denial_schema_refuses_a_report_naming_no_policy() -> None:
-    """`policy_id` is what makes a report an attribution rather than a note.
+def test_the_denial_schema_admits_a_report_naming_no_policy() -> None:
+    """A `block` fallback refuses a call no binding matched without the chain
+    being consulted, so there is no rule to name — and that refusal is reported
+    like any other.
 
-    Rail Center records the attribution and does not re-derive it, so a report
-    that names no policy has nothing downstream to supply one.
+    Absent rather than null, asserted both ways: a schema admitting null would
+    let a reporter that had a policy and lost it look like one that never had
+    one, and the two are not the same event.
     """
     validator = Draft202012Validator(_schema("denial-event.schema.json"))
     body = build_report(
-        policy_id=POLICY,
+        policy_id=None,
         endpoint_key="/mcp#tools/call#track_package",
         endpoint_status="resolved",
         ticket_state="valid",
     )
-    del body["policy_id"]
+
+    assert "policy_id" not in body
+    validator.validate(body)
     with pytest.raises(ValidationError):
-        validator.validate(body)
+        validator.validate({**body, "policy_id": None})
 
 
 def test_the_denial_schema_refuses_a_status_this_gateway_cannot_report() -> None:
