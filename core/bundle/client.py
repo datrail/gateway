@@ -36,9 +36,9 @@ from urllib.parse import urlencode
 
 import httpx
 
-from gateway.bundle.validate import UnusableBundle, UsableBundle, validate_bundle
-from gateway.key_safety import safe_for_log
-from gateway.mode import describe_enforcement
+from core.bundle.validate import UnusableBundle, UsableBundle, validate_bundle
+from core.key_safety import safe_for_log
+from core.mode import describe_enforcement
 
 logger = logging.getLogger("gateway.bundle")
 
@@ -619,7 +619,7 @@ class BundleHolder:
             # JSON, and a policy operand carrying one is a shape the contract
             # names outright: a `NaN` satisfies neither `lt 40` nor `gte 40`, so
             # it escapes a threshold rule from both directions while every type
-            # check calls it a number. `gateway.ticket` refuses them at the
+            # check calls it a number. `core.ticket` refuses them at the
             # other door for the same reason.
             #
             # This is **not** the rule about an operand that *overflows* to

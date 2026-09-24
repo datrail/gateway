@@ -39,10 +39,10 @@ from typing import Any
 import httpx
 import pytest
 
-from gateway.bundle.validate import validate_bundle
-from gateway.endpoint import MAX_BODY_NESTING_DEPTH
-from gateway.key_safety import MAX_LOGGED_LENGTH
-from gateway.server import (
+from core.bundle.validate import validate_bundle
+from core.endpoint import MAX_BODY_NESTING_DEPTH
+from core.key_safety import MAX_LOGGED_LENGTH
+from standalone.server import (
     MAX_FALLBACK_REPORTS_IN_FLIGHT,
     MAX_REPORTS_IN_FLIGHT,
     _Enforcement,
@@ -721,7 +721,7 @@ async def test_a_posture_score_that_overflows_is_dropped_rather_than_losing_the_
     `allow_nan=False` and `report` catches everything, so passing one through
     loses the whole denial silently — the suppression a caller gets for free on
     an unsigned claim. Written as the raw literal it is on the wire: `json.dumps`
-    would emit `Infinity`, which is not JSON and which `gateway.ticket` refuses
+    would emit `Infinity`, which is not JSON and which `core.ticket` refuses
     at its own door."""
     enforcement, _, reports = layer(bundle(DENIES_ANY_TICKET))
 
@@ -982,7 +982,7 @@ async def test_a_walk_that_raises_forwards_rather_than_refusing(caplog, monkeypa
     def explode(*_args, **_kwargs):
         raise RuntimeError("a defect in the walk")
 
-    monkeypatch.setattr("gateway.server.decide", explode)
+    monkeypatch.setattr("standalone.server.decide", explode)
     enforcement, downstream, reports = layer(bundle(DENIES_EVERYTHING))
 
     with caplog.at_level(logging.ERROR, logger="gateway"):

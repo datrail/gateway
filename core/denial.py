@@ -46,7 +46,7 @@ from typing import Any
 
 import httpx
 
-from gateway.key_safety import safe_for_log
+from core.key_safety import safe_for_log
 
 logger = logging.getLogger("gateway.denial")
 

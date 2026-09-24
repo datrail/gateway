@@ -77,7 +77,7 @@ jobs:
       # one end is invisible from the other and this project has shipped two.
       # `ruff.toml` declares 3.10 the floor and the image ships 3.12, and ruff's
       # target version gates syntax alone. `wait_for`'s cancellation semantics
-      # differ across that span, `gateway/bundle/client.py` calls it on every
+      # differ across that span, `core/bundle/client.py` calls it on every
       # fetch, and which stdlib attributes exist differs across it too — that
       # second one is why the same call is `wait_for` and not the
       # `asyncio.timeout` block a reader of 3.12 alone would reach for. A

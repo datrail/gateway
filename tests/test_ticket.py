@@ -9,7 +9,7 @@ default every real caller takes.
 
 import time
 
-from gateway.ticket import parse_rail_header
+from core.ticket import parse_rail_header
 
 VALID = "eyJhZ2VudF9pZCI6ImEiLCJleHAiOjE3MDAwMDM2MDB9"
 """`{"agent_id":"a","exp":1700003600}` — expires 2023-11-14T23:53:20Z."""

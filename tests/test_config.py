@@ -8,16 +8,16 @@ import logging
 import httpx
 import pytest
 
-from gateway.auth import AuthConfigurationError
-from gateway.mode import (
+from core.auth import AuthConfigurationError
+from core.mode import (
     ENFORCEMENTS,
     PluginConfigError,
     describe_enforcement,
     describe_plugin,
     plugin_enabled,
 )
-from gateway.routes import Route, RoutesError
-from gateway.server import (
+from standalone.routes import Route, RoutesError
+from standalone.server import (
     DEFAULT_PORT,
     _Enforcement,
     _holder_from_environment,

@@ -29,12 +29,12 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Final, Literal
 
-from gateway.bundle.uuid import canonical_uuid
-from gateway.endpoint import strip_slug
-from gateway.json_wire import MAX_SAFE_INTEGER
-from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_characters
-from gateway.key_safety import safe_for_log as _safe
-from gateway.mode import (
+from core.bundle.uuid import canonical_uuid
+from core.endpoint import strip_slug
+from core.json_wire import MAX_SAFE_INTEGER
+from core.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_characters
+from core.key_safety import safe_for_log as _safe
+from core.mode import (
     DEFAULT_FALLBACK,
     ENFORCEMENTS,
     FALLBACKS,

@@ -26,7 +26,7 @@ import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
-from gateway.server import build_app
+from standalone.server import build_app
 from tests.conftest import (
     RAIL_CENTER,
     _free_port,

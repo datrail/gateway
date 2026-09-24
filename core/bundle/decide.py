@@ -57,13 +57,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from gateway.bundle.conditions import (
+from core.bundle.conditions import (
     ConditionInput,
     UninterpretableCondition,
     holds,
     keys_on_endpoint,
 )
-from gateway.bundle.validate import Policy, UsableBundle
+from core.bundle.validate import Policy, UsableBundle
 
 
 @dataclass(frozen=True)
@@ -133,7 +133,7 @@ def chain_for(
     with no ticket is still stopped at the first keyless message that can
     return content — ``resources/read``, ``prompts/get``. The session messages
     themselves (``initialize``, ``tools/list`` and the rest of
-    `gateway.endpoint.DISCOVERY_METHODS`) never reach this walk: the
+    `core.endpoint.DISCOVERY_METHODS`) never reach this walk: the
     enforcement layer forwards them unjudged, because a binding cannot narrow a
     message that names no endpoint, and judging one would let a rule bound to a
     single endpoint close the whole session.

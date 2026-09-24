@@ -1,6 +1,6 @@
 """Which MCP messages resolve to an endpoint key, and which do not.
 
-`gateway/endpoint.py` is this gateway's own composition and appears nowhere in
+`core/endpoint.py` is this gateway's own composition and appears nowhere in
 rail-center's `docs/policy-evaluation-contract.md`: the contract hands an
 evaluator a key that has already been resolved, and says so under *What the
 vectors cannot reach*. No vector file covers any of this, which is why these
@@ -18,14 +18,14 @@ from __future__ import annotations
 
 import pytest
 
-from gateway.endpoint import (
+from core.endpoint import (
     MAX_BODY_NESTING_DEPTH,
     resolve_endpoint_key,
     resolve_from_body,
     strip_slug,
 )
-from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH
-from gateway.ticket import MAX_NESTING_DEPTH as TICKET_NESTING_DEPTH
+from core.key_safety import MAX_ENDPOINT_KEY_LENGTH
+from core.ticket import MAX_NESTING_DEPTH as TICKET_NESTING_DEPTH
 
 #: The path the upstream serves, as the gateway sees it once the route prefix
 #: is removed. It is what the first segment of a composed key is, and it is not

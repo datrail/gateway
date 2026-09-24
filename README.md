@@ -125,6 +125,16 @@ form instead would lose an attribution that is correct in every other case.
 
 ## Architecture
 
+The repository has one dependency direction: the standalone host imports the
+vendor-neutral enforcement core. The core never imports the host or a future
+plugin. [`docs/layout.md`](docs/layout.md) records the layout decisions shared
+with DatRail Proxy.
+
+```text
+core/        x-rail parsing, endpoint resolution, policy ingestion and decisions
+standalone/  FastMCP/Starlette host, process configuration, and route file
+```
+
 ```mermaid
 flowchart LR
   agent[Agent] -->|MCP plus x-rail| gateway[DatRail Gateway]

@@ -8,7 +8,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 
-from gateway.server import build_app
+from standalone.server import build_app
 from tests.conftest import one_route
 
 

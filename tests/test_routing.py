@@ -21,9 +21,9 @@ import pytest_asyncio
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 
-from gateway.routes import Route
-from gateway.server import _raw_beneath, _under_prefix, build_app
-from gateway.server import unquote as server_unquote
+from standalone.routes import Route
+from standalone.server import _raw_beneath, _under_prefix, build_app
+from standalone.server import unquote as server_unquote
 from tests.conftest import (
     RAIL_CENTER,
     _free_port,
@@ -522,7 +522,7 @@ def test_the_prefix_scan_is_bounded_by_the_prefix_and_not_by_the_path(monkeypatc
         decoded += 1
         return real(text, *args, **kwargs)
 
-    monkeypatch.setattr("gateway.server.unquote", counting)
+    monkeypatch.setattr("standalone.server.unquote", counting)
     prefix = "/delivery"
     long_path = b"/" + b"x" * 4000
     assert _raw_beneath(long_path, prefix) == long_path

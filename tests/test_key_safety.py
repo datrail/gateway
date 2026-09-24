@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from gateway.key_safety import (
+from core.key_safety import (
     MAX_ENDPOINT_KEY_LENGTH,
     MAX_LOGGED_LENGTH,
     has_unsafe_key_characters,

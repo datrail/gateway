@@ -10,7 +10,7 @@ MCP is why there is such a case. A call's identity lives in the message rather
 than the URL, and only `tools/call` names a tool — `resources/read` and
 `prompts/get` name none, and a `tools/call` whose tool name is unusable
 resolves to no key either. (`initialize`, `tools/list` and the other session
-messages never reach this walk: `gateway/endpoint.py` resolves them to
+messages never reach this walk: `core/endpoint.py` resolves them to
 `discovery` and the enforcement layer forwards them.) The rule the rest land on:
 **no key is not a pass.** Both keyless outcomes are judged by the chain, because
 a message that can return content must not pass for lack of a name.
@@ -29,10 +29,10 @@ import base64
 import json
 from typing import Any
 
-from gateway.bundle.conditions import ConditionInput
-from gateway.bundle.decide import chain_for, decide
-from gateway.bundle.validate import validate_bundle
-from gateway.ticket import parse_rail_header
+from core.bundle.conditions import ConditionInput
+from core.bundle.decide import chain_for, decide
+from core.bundle.validate import validate_bundle
+from core.ticket import parse_rail_header
 
 NOW = 1700000000
 KEY = "delivery.track_package"

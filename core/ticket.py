@@ -44,7 +44,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from gateway.json_wire import MAX_SAFE_INTEGER
+from core.json_wire import MAX_SAFE_INTEGER
 
 #: How a ticket classified. **Only `valid` is usable**, and every claim of
 #: anything else resolves to absent however readable the payload is.
