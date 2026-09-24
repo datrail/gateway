@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from gateway.auth import AUTH_MODES, AuthConfigurationError, auth_headers
+from core.auth import AUTH_MODES, AuthConfigurationError, auth_headers
 
 SECRET = "s3cr3t-token-nobody-should-see"
 

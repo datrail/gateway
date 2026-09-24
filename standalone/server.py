@@ -133,21 +133,21 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
-from gateway.auth import auth_headers
-from gateway.bundle.client import BundleHolder, refresh_seconds
-from gateway.bundle.conditions import ConditionInput, UninterpretableCondition
-from gateway.bundle.decide import decide, refuses_unbound
-from gateway.denial import build_report, report
-from gateway.endpoint import resolve_from_body
-from gateway.key_safety import safe_for_log
-from gateway.mode import (
+from core.auth import auth_headers
+from core.bundle.client import BundleHolder, refresh_seconds
+from core.bundle.conditions import ConditionInput, UninterpretableCondition
+from core.bundle.decide import decide, refuses_unbound
+from core.denial import build_report, report
+from core.endpoint import resolve_from_body
+from core.key_safety import safe_for_log
+from core.mode import (
     blocks,
     describe_plugin,
     judges,
     plugin_enabled,
 )
-from gateway.routes import Route, load_routes
-from gateway.ticket import parse_rail_header
+from core.ticket import parse_rail_header
+from standalone.routes import Route, load_routes
 
 log = logging.getLogger("gateway")
 
@@ -628,7 +628,7 @@ class _Routed:
     **The prefix is the only thing that decides routing.** An MCP `tools/call`
     names a tool and nothing else, so two upstreams reachable at one address are
     indistinguishable in the message — which is why the agent-facing URL becomes
-    per-upstream and why `gateway.routes` refuses overlapping prefixes at
+    per-upstream and why `standalone.routes` refuses overlapping prefixes at
     startup. A request matching two routes has no answer this gateway could
     give, and one matching none is a 404 rather than a guess.
 
@@ -822,7 +822,7 @@ class _Enforcement:
     destroyed the evidence the contract says to check before reading the value.
 
     A session or discovery message — ``initialize``, ``tools/list`` and the
-    rest `gateway.endpoint.DISCOVERY_METHODS` names — is forwarded before any
+    rest `core.endpoint.DISCOVERY_METHODS` names — is forwarded before any
     of the below and reported to nobody: nothing in it is a call, and judging
     it would let a rule bound to one endpoint close the session in which every
     other endpoint is reached. Enforcement is per ``tools/call``.

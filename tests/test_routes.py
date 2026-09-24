@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from gateway.routes import CONFIG_SCHEMA_MAJOR, RoutesError, load_routes
+from standalone.routes import CONFIG_SCHEMA_MAJOR, RoutesError, load_routes
 
 
 @pytest.fixture

@@ -51,9 +51,9 @@ import math
 from dataclasses import dataclass
 from typing import Any, Final
 
-from gateway.endpoint import strip_slug
-from gateway.key_safety import safe_for_log
-from gateway.ticket import ParseResult
+from core.endpoint import strip_slug
+from core.key_safety import safe_for_log
+from core.ticket import ParseResult
 
 
 class UninterpretableCondition(Exception):

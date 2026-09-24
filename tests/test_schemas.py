@@ -16,7 +16,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
-from gateway.denial import build_report
+from core.denial import build_report
 
 AGENT = "550e8400-e29b-41d4-a716-446655440000"
 POLICY = "11111111-0000-4000-8000-000000000001"

@@ -6,8 +6,11 @@ import logging
 
 import pytest
 
-from gateway.routes import Route
-from gateway.server import _configure_logging, _safe_to_log, build_gateway, log
+from core.bundle.client import logger as bundle_client_logger
+from core.bundle.validate import logger as bundle_validation_logger
+from core.denial import logger as denial_logger
+from standalone.routes import Route
+from standalone.server import _configure_logging, _safe_to_log, build_gateway, log
 
 
 @pytest.mark.parametrize(
@@ -79,6 +82,18 @@ def test_configuring_twice_does_not_double_every_line(monkeypatch):
     before = len(log.handlers)
     _configure_logging()
     assert len(log.handlers) == before
+
+
+def test_core_logs_remain_children_of_the_configured_component_logger():
+    """Moving code into ``core`` must not move its operational log hierarchy.
+
+    The process installs its handler and selected level on ``gateway``. A
+    ``core.*`` logger would bypass that handler, dropping bundle INFO events and
+    leaving warnings to Python's unformatted last-resort handler.
+    """
+    assert bundle_client_logger.name == "gateway.bundle"
+    assert bundle_validation_logger.name == "gateway.bundle"
+    assert denial_logger.name == "gateway.denial"
 
 
 @pytest.mark.parametrize("raw", ["verbose", "20", "TRACE"])

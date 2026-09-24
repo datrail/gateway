@@ -29,9 +29,9 @@ import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
-from gateway import server
-from gateway.bundle.client import FETCH_DEADLINE_SECONDS, BundleHolder
-from gateway.server import _bundle_lifespan, build_app
+from core.bundle.client import FETCH_DEADLINE_SECONDS, BundleHolder
+from standalone import server
+from standalone.server import _bundle_lifespan, build_app
 from tests.conftest import (
     GATEWAY_SLUG,
     POLICY_BUNDLE,

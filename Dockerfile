@@ -9,7 +9,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # The licence travels with the distribution. An image is a way of shipping this
 # software, and Apache-2.0 asks that recipients get a copy.
 COPY LICENSE NOTICE ./
-COPY gateway/ ./gateway/
+COPY core/ ./core/
+COPY standalone/ ./standalone/
 
 # python:3.12-slim defines no non-root user. Nothing past the install step needs
 # root, and this process listens on a network for agents it is placed in front
@@ -29,4 +30,4 @@ EXPOSE 8080
 # Exec form: python is PID 1 and receives SIGTERM directly rather than waiting
 # out docker's ten seconds. What happens next is uvicorn's default and not
 # something this image sets — `main()` says why the drain is not bounded there.
-CMD ["python", "-m", "gateway.server"]
+CMD ["python", "-m", "standalone.server"]

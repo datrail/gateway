@@ -63,7 +63,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from gateway.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_characters
+from core.key_safety import MAX_ENDPOINT_KEY_LENGTH, has_unsafe_key_characters
 
 #: The MCP method that names a tool. Every other method is keyless.
 CALL_METHOD = "tools/call"
@@ -186,11 +186,11 @@ def resolve_endpoint_key(
     `<slug>#<path>#<method>#<call>` and publishes that whole key; this gateway
     holds no slug to compose one with, so it builds the three parts it can and
     the bundle's keys are stripped of their first segment to meet it. See
-    `gateway.bundle.validate`, which does the stripping and refuses a bundle
+    `core.bundle.validate`, which does the stripping and refuses a bundle
     whose keys collide once stripped.
 
     `upstream_path` is the path **as the upstream will see it** — the route
-    prefix this gateway matched has already been removed by `gateway.routes`.
+    prefix this gateway matched has already been removed by `standalone.routes`.
     That is what keeps one endpoint to one key: Rail Center stores one row per
     endpoint, and the same MCP server behind two gateways mounted at different
     prefixes would otherwise produce two keys for one row.

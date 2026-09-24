@@ -22,9 +22,9 @@ import pytest_asyncio
 import uvicorn
 from fastmcp import Context, FastMCP
 
-from gateway.bundle.client import BundleHolder
-from gateway.routes import Route
-from gateway.server import build_app
+from core.bundle.client import BundleHolder
+from standalone.routes import Route
+from standalone.server import build_app
 
 
 def _free_port() -> int:

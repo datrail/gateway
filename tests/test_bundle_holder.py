@@ -28,8 +28,8 @@ from typing import Any
 import httpx
 import pytest
 
-from gateway.bundle import client as bundle_client
-from gateway.bundle.client import (
+from core.bundle import client as bundle_client
+from core.bundle.client import (
     BUNDLE_PATH,
     DEFAULT_REFRESH_SECONDS,
     FETCH_DEADLINE_SECONDS,
@@ -890,7 +890,7 @@ async def test_a_reason_never_carries_a_character_a_log_line_cannot_hold() -> No
     reports a line and column, which is why the case that reaches the guard is a
     protocol error rather than a decode error.
     """
-    from gateway.key_safety import has_unsafe_key_characters
+    from core.key_safety import has_unsafe_key_characters
 
     h = holder(
         httpx.RemoteProtocolError(
@@ -1338,7 +1338,7 @@ async def test_the_loop_survives_an_attempt_that_raises() -> None:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("something unforeseen")
-        from gateway.bundle.client import RefreshOutcome
+        from core.bundle.client import RefreshOutcome
 
         return RefreshOutcome("unreachable", None)
 

@@ -9,7 +9,7 @@ Center's data source slugs do not appear here at all, because a gateway fronts
 several data sources and a data source may sit behind several gateways, so
 nothing local can name the relationship. What the gateway composes from a
 request is a *comparable* key with no slug in it, and what it compares against
-is a bundle key with the slug stripped off — see `gateway.endpoint`.
+is a bundle key with the slug stripped off — see `core.endpoint`.
 
 **`prefix` is the gateway's own field**, and the proxy has no use for one. It is
 where this gateway listens for that upstream, and it is the only thing that
@@ -48,7 +48,7 @@ DEFAULT_ROUTES_FILE: Final[Path] = Path("/etc/rail/routes.yaml")
 #: the proxy applies to the same file**, deliberately: an operator writes one
 #: document for two components and should not have to learn two rules for it.
 #:
-#: It is not quite the rule `gateway.bundle.validate` applies to the bundle's
+#: It is not quite the rule `core.bundle.validate` applies to the bundle's
 #: own `schema_version`, and the difference is the documents rather than an
 #: oversight. This file is local and hand-written, so an absent version is a
 #: file that predates the field and is warned about; a bundle arrives from a

@@ -22,18 +22,18 @@ from typing import Any
 
 import pytest
 
-from gateway.bundle.conditions import ConditionInput, UninterpretableCondition
-from gateway.bundle.decide import decide, refuses_unbound
-from gateway.bundle.validate import (
+from core.bundle.conditions import ConditionInput, UninterpretableCondition
+from core.bundle.decide import decide, refuses_unbound
+from core.bundle.validate import (
     _SCHEMA_VERSION,
     SUPPORTED_SCHEMA_MAJOR,
     Binding,
     UnusableBundle,
     validate_bundle,
 )
-from gateway.key_safety import has_unsafe_key_characters
-from gateway.mode import ENFORCEMENTS, FALLBACKS, blocks
-from gateway.ticket import parse_rail_header
+from core.key_safety import has_unsafe_key_characters
+from core.mode import ENFORCEMENTS, FALLBACKS, blocks
+from core.ticket import parse_rail_header
 
 VECTORS = Path(__file__).parent / "vectors"
 SCHEMAS = Path(__file__).parent.parent / "schemas"
@@ -741,7 +741,7 @@ def test_every_enforcement_object_resolves_or_is_refused() -> None:
     readings it meant is the choice the contract refuses to make.
 
     `schemas/policy-bundle.schema.json` asserts the same vocabulary, but nothing
-    under `gateway/` applies that schema at runtime — `validate_bundle` is
+    under `core/` applies that schema at runtime — `validate_bundle` is
     hand-rolled — so those assertions pin the published document rather than this
     reader.
 
