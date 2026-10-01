@@ -35,7 +35,8 @@ permissions:
 # The actions below are pinned to a major tag, which floats: they build nothing
 # that is released, and a workflow that cannot pick up a runner-compatibility
 # fix without a commit is a workflow that breaks on GitHub's schedule rather
-# than this repository's. The trade is `contents: read` above, plus the actions
+# than this repository's. setup-uv is the exception: since v8 it publishes only
+# immutable exact tags, so there is no major tag to follow. The trade is `contents: read` above, plus the actions
 # cache these jobs necessarily reach — and that one is not bounded by the ref:
 # cache writes are per-ref, but a run restores from its own branch *and* the
 # default branch, so anything written here on master is reachable from every
@@ -59,10 +60,14 @@ jobs:
           ref: ${{ inputs.ref }}
 
       # The same uv the Dockerfile copies in. Python comes from
-      # `.python-version`, which uv reads and installs itself.
-      - uses: astral-sh/setup-uv@v10
+      # `.python-version`, which uv reads and installs itself. The action
+      # caches uv's downloads, keyed on uv.lock and the pyproject.toml files;
+      # `cache-python` adds the Python install, which it otherwise fetches
+      # again on every run.
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.21"
+          cache-python: true
 
       # The dev group pins ruff exactly, so this runs the same tool at the same
       # version a contributor runs locally.
@@ -87,9 +92,10 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.21"
+          cache-python: true
 
       # Every member and the dev group, from uv.lock: the suite runs against
       # exactly the packages the image installs.
