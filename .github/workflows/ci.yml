@@ -1,10 +1,5 @@
-# Lint and test on every change, so a break surfaces on the pull request rather
-# than after a release tag exists.
-#
-# container-release.yml calls this workflow and gates publishing on it. A tag
-# can sit on any commit — including one that never went through a pull request
-# — so the release path re-runs these checks rather than trusting that they ran
-# earlier.
+# Lint, test, and check the image on every change. container-release.yml calls
+# this workflow as its gate too: a tag can sit on a commit no pull request ran.
 
 name: CI
 
@@ -16,11 +11,8 @@ on:
     inputs:
       ref:
         description: >-
-          Commit-ish to check out. A called workflow's `github.ref` is the
-          caller's, which on workflow_dispatch is the branch the run was
-          launched from rather than the tag being published — so the release
-          path passes the resolved tag explicitly. Empty means "whatever
-          triggered this run", which is right for pull_request and push.
+          Commit to check out. The release passes its tag: a called workflow's
+          own ref is the caller's, not the tag. Empty means the triggering commit.
         type: string
         required: false
         default: ""
@@ -28,30 +20,16 @@ on:
 permissions:
   contents: read
 
-# Two pinning regimes, deliberately. Python packages are pinned exactly — direct
-# ones in each member's pyproject.toml, everything else by uv.lock, with hashes
-# — because they are what the image ships and what a bug report is written
-# against. uv itself is pinned for the same reason: it is what reads the lock.
-# The actions below are pinned to a major tag, which floats: they build nothing
-# that is released, and a workflow that cannot pick up a runner-compatibility
-# fix without a commit is a workflow that breaks on GitHub's schedule rather
-# than this repository's. setup-uv is the exception: since v8 it publishes only
-# immutable exact tags, so there is no major tag to follow. The trade is `contents: read` above, plus the actions
-# cache these jobs necessarily reach — and that one is not bounded by the ref:
-# cache writes are per-ref, but a run restores from its own branch *and* the
-# default branch, so anything written here on master is reachable from every
-# later pull request. Nothing secret goes there.
+# Python packages and uv are pinned exactly: they are what the image ships.
+# Actions float on a major tag, so runner fixes arrive without a commit, except
+# setup-uv, which since v8 publishes only exact tags.
 
-# Every uv command in these jobs asserts that uv.lock already matches the
-# pyproject.toml files, rather than quietly re-resolving: a pin moved without
-# its lock is a failure here, not a different set of packages under test.
+# Every uv command fails if uv.lock does not match the pyproject.toml files.
 env:
   UV_LOCKED: "1"
 
 jobs:
   lint:
-    # Named, not ubuntu-latest: that label moves to 26.04 from 2026-10-19 to
-    # 11-19, run by run (actions/runner-images#14748). Move on purpose (DR-133).
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
@@ -59,33 +37,19 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      # The same uv the Dockerfile copies in. Python comes from
-      # `.python-version`, which uv reads and installs itself. The action
-      # caches uv's downloads, keyed on uv.lock and the pyproject.toml files;
-      # `cache-python` adds the Python install, which it otherwise fetches
-      # again on every run.
+      # The uv the Dockerfile uses. It installs Python from `.python-version`,
+      # and caches its downloads and that Python between runs.
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.21"
           cache-python: true
 
-      # The dev group pins ruff exactly, so this runs the same tool at the same
-      # version a contributor runs locally.
       - run: make init
-
-      # `ruff check` plus `ruff format --check`, per the Makefile.
       - run: make lint
 
-  # Bounded because the default is six hours, and a stuck job holds a runner for
-  # an afternoon. Ten minutes rather than one: pytest's own `timeout` already
-  # fails an individual test at thirty seconds, so this is the ceiling on
-  # everything around the suite — checkout, the interpreter, a cold cache — none
-  # of which the suite's own twenty seconds predicts.
-  #
-  # One interpreter: the image's. Python 3.12 is the only version this project
-  # supports, and `.python-version` and every `requires-python` say so.
   test:
     runs-on: ubuntu-26.04
+    # Each test already times out at 30s; this bounds everything around them.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -97,26 +61,17 @@ jobs:
           version: "0.12.21"
           cache-python: true
 
-      # Every member and the dev group, from uv.lock: the suite runs against
-      # exactly the packages the image installs.
       - run: make init
 
-      # Unbuffered and verbose. `-q` to a pipe is block-buffered, so a run that
-      # hangs prints nothing at all and the log cannot say which test it
-      # stopped in — which is exactly what happened, for fifty-four minutes.
+      # Unbuffered, and one line per test, so a hang shows which test it is in.
+      # `-vv` because ADDOPTS is prepended: `-v` would cancel the Makefile's `-q`.
       - run: make test
         env:
           PYTHONUNBUFFERED: "1"
-          # -vv, not -v. Verbosity is additive and ADDOPTS is prepended, so
-          # -v against the Makefile's -q nets zero and prints dots, which is
-          # the state this was meant to fix.
           PYTEST_ADDOPTS: "-vv"
 
-
-  # Build-only, amd64 only. The question here is "does the image still build",
-  # which the arm64 leg answers no differently — it would just spend minutes
-  # doing it under emulation. Without this job the Dockerfile is first built by
-  # container-release.yml, on a tag, after the gate has already passed.
+  # amd64 only: the release builds arm64 as well, and emulating it here would
+  # answer "does it build" no differently.
   image:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
@@ -127,16 +82,9 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # The scope the release build reads from. A literal name rather than
-      # `github.workflow`: when called from container-release.yml it resolves
-      # to the caller's name and would match, but this workflow also runs
-      # directly on master, where it resolves to `CI` — so those warm caches would
-      # never be visible to a release. Named after the member, because each
-      # image's layers are its own and another image must not evict them.
-      #
-      # The context is the repository root: the image installs from the
-      # workspace's uv.lock, which lives there. What is actually sent is
-      # limited by `gateway-standalone/Dockerfile.dockerignore`.
+      # Context is the repo root, for uv.lock; Dockerfile.dockerignore limits
+      # what is sent. The cache scope is shared with container-release.yml, so a
+      # release reuses these layers: keep the two names in step.
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -147,26 +95,12 @@ jobs:
           cache-from: type=gha,scope=image-standalone
           cache-to: type=gha,mode=max,scope=image-standalone
 
-      # `docker build` exiting 0 proves the image assembles, not that it runs:
-      # a CMD naming a module that does not exist builds cleanly and fails on
-      # start. This is the cheapest thing that tells the two apart.
-      # Both addresses are unresolvable, which is the point: this asks whether
-      # the image starts and tells the truth about itself while it can reach
-      # nothing, and that is the state every deployment is in for its first few
-      # seconds. A gateway that needed its control plane in order to come up
-      # would fail here rather than in production.
+      # A build can succeed and the image still fail to start. Run it with every
+      # variable `.env.example` requires, on a non-default port (to catch
+      # RAIL_GATEWAY_PORT being ignored), and with a control plane it cannot
+      # reach: it must still come up live and report itself unready.
       - name: The image starts, serves liveness, and reports itself unready
         run: |
-          set -euo pipefail
-          # A non-default port on purpose. With 8080 this step passes against
-          # an image that validates RAIL_GATEWAY_PORT and then listens
-          # somewhere else, which is the defect it exists to catch.
-          # Every variable `.env.example` says this gateway needs, and the
-          # step exists to catch the day that list grows: a required variable
-          # added without a line here is a container that cannot start, and
-          # this is the only check that runs one. `RAIL_PLUGIN_ENABLED` is set
-          # rather than left to its default, because the enrolled path is the
-          # one with variables to get wrong — a plain gateway needs one line.
           docker run -d --name gw -p 9100:9100 \
             -e RAIL_GATEWAY_PORT=9100 \
             -e RAIL_PLUGIN_ENABLED=true \
@@ -175,45 +109,23 @@ jobs:
             -e RAIL_GATEWAY_ROUTES_FILE=/etc/rail/routes.yaml \
             -v "$PWD/e2e/routes.yaml:/etc/rail/routes.yaml:ro" gateway:ci
 
-          # Forty rather than twenty, for a wait that should be under six: the
-          # lifespan awaits its first bundle fetch before uvicorn serves
-          # anything, and that wait is bounded by STARTUP_FETCH_GRACE_SECONDS
-          # (5s) — not by the holder's own deadline, which a fetch left running
-          # past the grace goes on paying in the background. An unresolvable
-          # host fails in milliseconds in any case, so this margin is for the
-          # runner having a bad day rather than for the expected path.
-          live=""
-          for _ in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:9100/health >/dev/null; then
-              live=yes; break
-            fi
-            sleep 1
-          done
-          if [ -z "$live" ]; then
-            echo "::error::the image did not serve /health within 40s"
-            docker logs gw; docker rm -f gw >/dev/null; exit 1
-          fi
-          echo "liveness ok"
+          # Startup waits up to 5s for a first bundle fetch; 40 tries is margin.
+          curl -fsS -o /dev/null --retry 40 --retry-delay 1 --retry-all-errors \
+            http://127.0.0.1:9100/health \
+            || { echo "::error::the image did not serve /health"; exit 1; }
 
-          # `-o /dev/null -w` rather than `-f`: the expected answer is a 503,
-          # which `-f` turns into a non-zero exit and this step into a failure
-          # for the image behaving correctly.
           code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9100/ready)
-          if [ "$code" != "503" ]; then
+          if [ "$code" != 503 ]; then
             echo "::error::/ready answered $code holding no bundle, expected 503"
-            docker logs gw; docker rm -f gw >/dev/null; exit 1
+            exit 1
           fi
-          echo "readiness ok"
-          docker rm -f gw >/dev/null
 
-  # The e2e stack, which is the only gate that exercises a decision over the
-  # wire: the suite runs a real gateway against a real upstream, but its control
-  # plane is a mocked transport, so no test in it decides a call against a
-  # bundle that was fetched over the wire — and the `image` job above runs one
-  # container that reaches nothing. Neither can answer whether a policy fetched
-  # from a control plane refuses a real MCP call and reports it. Without this
-  # job that stack is a file nobody runs, and it would decay within a release or
-  # two while still reading as coverage.
+      - name: Logs, on failure
+        if: failure()
+        run: docker logs gw
+
+  # The only check of a decision over the wire: a policy fetched from a control
+  # plane refusing a real MCP call, and the denial reaching it.
   e2e:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
@@ -224,30 +136,14 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # `--exit-code-from driver` is what makes this a gate: it propagates the
-      # driver's exit code and, with `--abort-on-container-exit`, tears the rest
-      # of the stack down when it finishes. Without it compose reports its own
-      # success at bringing containers up, which is true of a run where every
-      # assertion failed.
-      #
-      # `--force-recreate` does nothing on a fresh runner, which has no
-      # container to reuse, and it is here anyway: it makes this the same string
-      # both READMEs and `e2e/compose.yml`'s header document, so the command a
-      # stranger copies is the command this gate runs. A quickstart that has
-      # drifted from the gate is green here and broken on every machine that
-      # follows it.
+      # The exact command the READMEs document. `--exit-code-from driver` makes
+      # the driver's assertions the result.
       - name: A policy refuses a real call, and the denial is reported
         run: |
-          set -euo pipefail
           docker compose -f e2e/compose.yml up --build --force-recreate \
             --abort-on-container-exit --exit-code-from driver
 
-      # The driver asserts against request journals, so a failure names which
-      # assertion went and nothing about why. These are where that lives.
+      # The driver says which assertion failed; the logs say why.
       - name: Logs, on failure
         if: failure()
         run: docker compose -f e2e/compose.yml logs --no-color
-
-      - name: Down
-        if: always()
-        run: docker compose -f e2e/compose.yml down -v --remove-orphans
