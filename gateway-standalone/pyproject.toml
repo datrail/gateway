@@ -1,0 +1,40 @@
+[project]
+name = "gateway-standalone"
+# Never published on its own: what is released is the image, versioned by its
+# git tag, so a version here would only be a second number to keep in step.
+version = "0"
+description = "DatRail Gateway's standalone FastMCP/Starlette host."
+requires-python = ">=3.12"
+# Pinned exactly rather than floored, because republishing a version by hand is
+# a documented path and a floor would let one tag resolve to two different
+# direct dependencies. uv.lock pins everything these pull in.
+dependencies = [
+    "gateway-core",
+    "fastmcp==3.4.6",
+    # `[standard]` is not optional: it brings uvloop and httptools, which
+    # uvicorn picks up on its own when they are installed, so dropping it
+    # changes the event loop and HTTP parser the image runs on.
+    "uvicorn[standard]==0.52.1",
+    # Imported directly by gateway.standalone.server for JSONResponse and the
+    # ASGI types. It arrives transitively through fastmcp as well, but a module
+    # that imports a package names it.
+    "starlette==1.4.1",
+    # Imported directly by gateway.standalone.routes, which reads the file
+    # naming the upstreams this gateway fronts. The same version the proxy
+    # pins, because the two read the same document and a parser difference
+    # between them would be a difference in what an operator's file means.
+    "pyyaml==6.0.1",
+]
+
+[project.scripts]
+gateway-standalone = "gateway.standalone.server:main"
+
+[tool.uv.sources]
+gateway-core = { workspace = true }
+
+[build-system]
+requires = ["uv_build==0.12.21"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "gateway.standalone"

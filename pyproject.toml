@@ -1,0 +1,73 @@
+# Workspace root: not a package itself (no build-system), it only groups the
+# members and the dev tools. It depends on every member, so a plain `uv sync`
+# or `uv run` installs all of them.
+[project]
+name = "datrail-gateway"
+version = "0"
+requires-python = ">=3.12"
+dependencies = ["gateway-core", "gateway-standalone"]
+
+[tool.uv.workspace]
+members = ["gateway-*"]
+
+[tool.uv.sources]
+gateway-core = { workspace = true }
+gateway-standalone = { workspace = true }
+
+# Never installed into an image: each Dockerfile syncs with `--no-dev`.
+#
+# Pinned exactly, not `>=`, as everything here is: an unpinned linter goes red
+# on someone else's release day with nothing in this repo having changed.
+[dependency-groups]
+dev = [
+    "ruff==0.16.1",
+    # 8.4.0 or newer is the floor, and not by preference: through 8.3.x an
+    # async test missing its marker is skipped with a warning and the run still
+    # exits 0, so the one place the strictness below matters — the CI job
+    # gating the release — is the one place it would not have held. 8.4.0
+    # replaced that skip with a failure.
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    # The schemas under `schemas/` are published as a contract, so something
+    # has to check they are valid JSON Schema and that the examples in them
+    # satisfy their own rules. It arrives transitively through mcp either way;
+    # pinning it here says the suite depends on it rather than borrowing it.
+    "jsonschema==4.26.0",
+    # Turns a hung test into a failure that names itself. Without it a test
+    # that never returns is indistinguishable from a slow one until the job's
+    # own limit fires, and the log says only that the job was cancelled.
+    "pytest-timeout==2.3.1",
+]
+
+
+# Lint and format configuration. `make lint` and CI read this same file, so
+# both run the same rules with the same settings.
+#
+# Stock ruff rules. Curating a rule set is an argument every one of the datrail
+# components would have to have again; the default set is the one nobody has to
+# justify. The target version is read from `requires-python` above.
+[tool.ruff]
+# `gateway` has no __init__.py in any member: without this, ruff takes
+# gateway-*/src/gateway for a top-level package of its own.
+namespace-packages = ["gateway-*/src/gateway"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gateway", "standalone_support"]
+
+[tool.pytest.ini_options]
+testpaths = ["gateway-*"]
+# Every member has a tests/ folder: import them by path, not as one top-level
+# `tests` package.
+addopts = "--import-mode=importlib"
+# Where a member keeps test helpers that are not fixtures, which importlib mode
+# otherwise gives no way to import: see gateway-standalone/tests/standalone_support.py.
+pythonpath = ["gateway-standalone/tests"]
+# Strict mode: pytest-asyncio runs an async test only when it carries the
+# marker. One that forgets is not claimed by the plugin and pytest fails it as
+# unsupported — checked, not assumed — so a test cannot be counted as passing
+# without having run.
+asyncio_mode = "strict"
+# Every test here either computes or talks to a loopback server; none should
+# take a second. Thirty is loose enough never to fire on a slow runner and
+# tight enough that a hang is reported rather than waited out.
+timeout = 30

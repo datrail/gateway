@@ -1,0 +1,24 @@
+[project]
+name = "gateway-core"
+# Never published on its own: what is released is the image, versioned by its
+# git tag, so a version here would only be a second number to keep in step.
+version = "0"
+description = "DatRail Gateway's vendor-neutral enforcement core: x-rail parsing, endpoint resolution, policy ingestion and decisions."
+requires-python = ">=3.12"
+dependencies = [
+    # Imported directly by gateway.core.bundle.client, which is the only place
+    # this gateway calls out to Rail Center, and by gateway.core.denial. It
+    # arrives through fastmcp as well, but a module that imports a package
+    # names it: the transitive path is held in place by nothing this
+    # repository controls.
+    "httpx==0.28.1",
+]
+
+[build-system]
+requires = ["uv_build==0.12.21"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Namespace package: src/gateway/ has no __init__.py, so every member can add a
+# module under `gateway.`.
+module-name = "gateway.core"
