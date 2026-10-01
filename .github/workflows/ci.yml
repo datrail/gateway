@@ -28,19 +28,24 @@ on:
 permissions:
   contents: read
 
-# Two pinning regimes, deliberately. Python packages are pinned exactly, because
-# they are what the image ships and what a bug report is written against. The
-# actions below are pinned to a major tag, which floats: they build nothing that
-# is released, and a workflow that cannot pick up a runner-compatibility fix
-# without a commit is a workflow that breaks on GitHub's schedule rather than
-# this repository's. The trade is `contents: read` above, plus the actions cache
-# these jobs necessarily reach — and that one is not bounded by the ref: cache
-# writes are per-ref, but a run restores from its own branch *and* the default
-# branch, so anything written here on master is reachable from every later pull
-# request. Nothing secret goes there, and nothing here closes it: pip reuses a
-# cached wheel under its pinned version without checking it, so the exact pins
-# two files over do not help, and requirements.txt says itself that most of what
-# lands in that cache is unpinned anyway. Closing it wants hashes.
+# Two pinning regimes, deliberately. Python packages are pinned exactly — direct
+# ones in each member's pyproject.toml, everything else by uv.lock, with hashes
+# — because they are what the image ships and what a bug report is written
+# against. uv itself is pinned for the same reason: it is what reads the lock.
+# The actions below are pinned to a major tag, which floats: they build nothing
+# that is released, and a workflow that cannot pick up a runner-compatibility
+# fix without a commit is a workflow that breaks on GitHub's schedule rather
+# than this repository's. The trade is `contents: read` above, plus the actions
+# cache these jobs necessarily reach — and that one is not bounded by the ref:
+# cache writes are per-ref, but a run restores from its own branch *and* the
+# default branch, so anything written here on master is reachable from every
+# later pull request. Nothing secret goes there.
+
+# Every uv command in these jobs asserts that uv.lock already matches the
+# pyproject.toml files, rather than quietly re-resolving: a pin moved without
+# its lock is a failure here, not a different set of packages under test.
+env:
+  UV_LOCKED: "1"
 
 jobs:
   lint:
@@ -53,64 +58,42 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - uses: actions/setup-python@v5
+      # The same uv the Dockerfile copies in. Python comes from
+      # `.python-version`, which uv reads and installs itself.
+      - uses: astral-sh/setup-uv@v10
         with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+          version: "0.12.21"
 
-      # requirements-dev.txt pins ruff exactly, so this runs the same tool at
-      # the same version a contributor runs locally.
-      - run: pip install -r requirements-dev.txt
+      # The dev group pins ruff exactly, so this runs the same tool at the same
+      # version a contributor runs locally.
+      - run: uv sync
 
       # `ruff check` plus `ruff format --check`, per the Makefile.
       - run: make lint
 
   # Bounded because the default is six hours, and a stuck job holds a runner for
-  # an afternoon. Ten minutes rather than one: `pytest.ini` already fails an
-  # individual test at thirty seconds, so this is the ceiling on everything
-  # around the suite — checkout, the interpreter, a cold pip cache — none of
-  # which the suite's own five seconds predicts.
+  # an afternoon. Ten minutes rather than one: pytest's own `timeout` already
+  # fails an individual test at thirty seconds, so this is the ceiling on
+  # everything around the suite — checkout, the interpreter, a cold cache — none
+  # of which the suite's own twenty seconds predicts.
+  #
+  # One interpreter: the image's. Python 3.12 is the only version this project
+  # supports, and `.python-version` and every `requires-python` say so.
   test:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
-    strategy:
-      # Both ends of the supported range, because a defect that only exists at
-      # one end is invisible from the other and this project has shipped two.
-      # `ruff.toml` declares 3.10 the floor and the image ships 3.12, and ruff's
-      # target version gates syntax alone. `wait_for`'s cancellation semantics
-      # differ across that span, `core/bundle/client.py` calls it on every
-      # fetch, and which stdlib attributes exist differs across it too — that
-      # second one is why the same call is `wait_for` and not the
-      # `asyncio.timeout` block a reader of 3.12 alone would reach for. A
-      # linter reads neither. A single interpreter here checked whichever end
-      # it ran and called it the whole range.
-      #
-      # Moving the floor means moving `target-version` in `ruff.toml` with it;
-      # moving the ceiling means moving the Dockerfile. Neither is derivable
-      # from this file, so this list is written out rather than computed.
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
 
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v10
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-          # Both files, because requirements-test.txt only `-r`s the other one:
-          # keyed on the including file alone, a runtime pin could move and the
-          # cache would not rotate.
-          cache-dependency-path: |
-            requirements-test.txt
-            requirements.txt
+          version: "0.12.21"
 
-      # requirements-test.txt includes requirements.txt, so the suite runs
-      # against the exact pins the image installs.
-      - run: pip install -r requirements-test.txt
+      # Every member and the dev group, from uv.lock: the suite runs against
+      # exactly the packages the image installs.
+      - run: uv sync
 
       # Unbuffered and verbose. `-q` to a pipe is block-buffered, so a run that
       # hangs prints nothing at all and the log cannot say which test it
@@ -142,15 +125,21 @@ jobs:
       # `github.workflow`: when called from container-release.yml it resolves
       # to the caller's name and would match, but this workflow also runs
       # directly on master, where it resolves to `CI` — so those warm caches would
-      # never be visible to a release.
+      # never be visible to a release. Named after the member, because each
+      # image's layers are its own and another image must not evict them.
+      #
+      # The context is the repository root: the image installs from the
+      # workspace's uv.lock, which lives there. What is actually sent is
+      # limited by `gateway-standalone/Dockerfile.dockerignore`.
       - uses: docker/build-push-action@v6
         with:
           context: .
+          file: gateway-standalone/Dockerfile
           push: false
           load: true
           tags: gateway:ci
-          cache-from: type=gha,scope=image
-          cache-to: type=gha,mode=max,scope=image
+          cache-from: type=gha,scope=image-standalone
+          cache-to: type=gha,mode=max,scope=image-standalone
 
       # `docker build` exiting 0 proves the image assembles, not that it runs:
       # a CMD naming a module that does not exist builds cleanly and fails on

@@ -11,8 +11,10 @@
 # one-time copy living outside this repository — nothing in this repo depends
 # on it, and it will not overwrite an edit made here.)
 #
-# Requires a Dockerfile at the repository root; a component that keeps one
-# elsewhere has to edit the build step.
+# Builds gateway-standalone/Dockerfile, with the repository root as context
+# (the image installs from the workspace's uv.lock). A second image needs a
+# build step of its own, under an image name of its own: this one publishes
+# as the repository's name, which existing deployments pull.
 name: container-release
 
 on:
@@ -151,6 +153,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: gateway-standalone/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -168,8 +171,8 @@ jobs:
           # would work — a called workflow sees the caller's name — but ci.yml
           # also runs directly on master, where it resolves to `CI`, so those
           # warm caches would systematically never be visible to a release.
-          cache-from: type=gha,scope=image
-          cache-to: type=gha,mode=max,scope=image
+          cache-from: type=gha,scope=image-standalone
+          cache-to: type=gha,mode=max,scope=image-standalone
 
       # Signed, verifiable statement that this digest came from this workflow:
       # `gh attestation verify oci://ghcr.io/<owner>/<repo>:<tag> --owner <org>`.

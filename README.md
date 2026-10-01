@@ -130,9 +130,14 @@ vendor-neutral enforcement core. The core never imports the host or a future
 plugin. [`docs/layout.md`](docs/layout.md) records the layout decisions shared
 with DatRail Proxy.
 
+Each part is its own package in one [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/),
+with one `uv.lock` pinning every dependency, and each image installs only the
+packages it runs:
+
 ```text
-core/        x-rail parsing, endpoint resolution, policy ingestion and decisions
-standalone/  FastMCP/Starlette host, process configuration, and route file
+gateway-core/        gateway.core: x-rail parsing, endpoint resolution, policy ingestion and decisions
+gateway-standalone/  gateway.standalone: FastMCP/Starlette host, process configuration, and route file;
+                     its Dockerfile builds ghcr.io/datrail/gateway
 ```
 
 ```mermaid
@@ -164,12 +169,19 @@ issue.
 
 ## Development
 
+Requires [uv](https://docs.astral.sh/uv/), which also installs the Python
+version in `.python-version`.
+
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements-test.txt -r requirements-dev.txt
+uv sync      # every member, editable, plus the pinned dev tools
 make test
-make lint
+make lint    # `make fmt` formats and fixes instead of only checking
+```
+
+Build the image from the repository root:
+
+```bash
+docker build -f gateway-standalone/Dockerfile -t gateway .
 ```
 
 ## Related projects
