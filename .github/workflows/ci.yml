@@ -44,7 +44,9 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    # Named, not ubuntu-latest: that label moves to 26.04 from 2026-10-19 to
+    # 11-19, run by run (actions/runner-images#14748). Move on purpose (DR-133).
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +72,7 @@ jobs:
   # around the suite — checkout, the interpreter, a cold pip cache — none of
   # which the suite's own five seconds predicts.
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     strategy:
       # Both ends of the supported range, because a defect that only exists at
@@ -127,7 +129,7 @@ jobs:
   # doing it under emulation. Without this job the Dockerfile is first built by
   # container-release.yml, on a tag, after the gate has already passed.
   image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -218,7 +220,7 @@ jobs:
   # job that stack is a file nobody runs, and it would decay within a release or
   # two while still reading as coverage.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
