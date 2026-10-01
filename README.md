@@ -173,7 +173,7 @@ Requires [uv](https://docs.astral.sh/uv/), which also installs the Python
 version in `.python-version`.
 
 ```bash
-uv sync      # every member, editable, plus the pinned dev tools
+make init    # uv sync: every member, editable, plus the pinned dev tools
 make test
 make lint    # `make fmt` formats and fixes instead of only checking
 ```

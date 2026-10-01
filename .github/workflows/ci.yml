@@ -66,7 +66,7 @@ jobs:
 
       # The dev group pins ruff exactly, so this runs the same tool at the same
       # version a contributor runs locally.
-      - run: uv sync
+      - run: make init
 
       # `ruff check` plus `ruff format --check`, per the Makefile.
       - run: make lint
@@ -93,7 +93,7 @@ jobs:
 
       # Every member and the dev group, from uv.lock: the suite runs against
       # exactly the packages the image installs.
-      - run: uv sync
+      - run: make init
 
       # Unbuffered and verbose. `-q` to a pipe is block-buffered, so a run that
       # hangs prints nothing at all and the log cannot say which test it
