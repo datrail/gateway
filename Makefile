@@ -1,18 +1,21 @@
-.PHONY: lint test
+.PHONY: init fmt lint test
 
-# The gate is defined here rather than in .github/workflows/ci.yml, so the command
-# CI runs is the one you can run before opening a pull request.
-#
-# The two halves cover different files. `ruff check` reads Python; `ruff format`
-# also reads Python fenced in Markdown. And ruff honours git's global excludes
-# file, which a runner does not have: a path you exclude globally is linted in
-# CI and skipped locally.
+# CI runs these same targets.
+
+# Every member, editable, plus the pinned dev tools. Run once, and after pulling.
+init:
+	uv sync
+
+# Format, and fix what ruff can.
+fmt:
+	uv run ruff format .
+	uv run ruff check --fix .
+
+# Check only. Ruff honours git's global excludes, which CI does not have.
 lint:
-	ruff check .
-	ruff format --check .
+	uv run ruff check .
+	uv run ruff format --check .
 
-# The suite stands up a real upstream and a real gateway on ephemeral ports:
-# the gateway reaches its upstream as an MCP client, so an in-process transport
-# would exercise a shape no deployment has.
+# Runs a real gateway and upstream on ephemeral ports.
 test:
-	python -m pytest -q
+	uv run pytest -q

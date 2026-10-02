@@ -1,0 +1,42 @@
+# Workspace root, not a package. Depends on every member so `uv sync` installs them all.
+[project]
+name = "datrail-gateway"
+version = "0"
+requires-python = ">=3.12"
+dependencies = ["gateway-core", "gateway-standalone"]
+
+[tool.uv.workspace]
+members = ["gateway-*"]
+
+[tool.uv.sources]
+gateway-core = { workspace = true }
+gateway-standalone = { workspace = true }
+
+# Dev tools; never in an image (Dockerfiles sync with `--no-dev`).
+[dependency-groups]
+dev = [
+    "ruff==0.16.1",
+    "pytest==9.1.1",  # >=8.4: earlier versions skip, not fail, an unmarked async test
+    "pytest-asyncio==1.4.0",
+    "jsonschema==4.26.0",  # validates the published schemas in schemas/
+    "pytest-timeout==2.3.1",
+]
+
+# Stock ruff rules; the target version comes from `requires-python`.
+[tool.ruff]
+# `gateway` is a namespace package (no __init__.py in any member).
+namespace-packages = ["gateway-*/src/gateway"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gateway", "standalone_support"]
+
+[tool.pytest.ini_options]
+testpaths = ["gateway-*"]
+# Several members have a tests/ folder, so tests are imported by path.
+addopts = "--import-mode=importlib"
+# So tests can import standalone_support.py, which importlib mode otherwise prevents.
+pythonpath = ["gateway-standalone/tests"]
+# An async test missing its marker fails instead of silently not running.
+asyncio_mode = "strict"
+# Seconds per test: turns a hang into a named failure.
+timeout = 30
