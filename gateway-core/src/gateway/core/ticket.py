@@ -102,11 +102,9 @@ _BASE64_BODY = re.compile(r"[A-Za-z0-9\-_+/]*")
 #: How deeply a ticket's JSON may nest before it is refused as `undecodable`.
 #:
 #: **Ours, not the interpreter's.** `json.loads` recurses per level and raises
-#: where the runtime decides: measured, that is depth 994 on Python 3.10, 9997
-#: on 3.12, and never in the TypeScript reference, whose parser is iterative. On
-#: 3.10 it also moves with the caller's own stack depth, so the same header
-#: classified two ways depending on where it was read from. A gateway parses
-#: headers from inside a request handler, which is a deep stack.
+#: where the runtime decides: measured, that is depth 9997 on 3.12, and never in
+#: the TypeScript reference, whose parser is iterative. Left to the runtime, the
+#: same header would classify differently across implementations and versions.
 #:
 #: Sixty-four because a ticket is a flat object of scalars with one array of
 #: skills — two levels used, and sixty-two spare for a shape nobody has

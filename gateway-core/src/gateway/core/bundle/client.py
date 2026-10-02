@@ -387,15 +387,12 @@ class BundleHolder:
 
     async def _loop(self, epoch: int) -> None:
         # What ends this loop is the epoch `stop()` retires, not the
-        # cancellation it then issues. On 3.10 — the floor `ruff.toml` declares
-        # — `asyncio.wait_for` discards a `CancelledError` that arrives after
-        # the coroutine it wraps has already finished, so the cancel sent into
-        # a refresh below can be swallowed whole: `_fetch`'s `except Exception`
-        # would turn it into a routine `unreachable`, the loop would carry on
-        # refreshing as fast as it could, and `stop()` — having spent its one
-        # `task.cancel()` — would wait on it for ever. Reading the epoch makes
+        # cancellation it then issues. A cancel sent into a refresh can be
+        # swallowed — `_fetch`'s `except Exception` would turn it into a
+        # routine `unreachable` — and `stop()`, having spent its one
+        # `task.cancel()`, would then wait for ever. Reading the epoch makes
         # termination a fact about this object rather than about the
-        # interpreter's cancellation semantics, on either version.
+        # interpreter's cancellation semantics.
         while epoch == self._epoch:
             await self._sleep(self._interval)
             try:
@@ -483,33 +480,12 @@ class BundleHolder:
             # arrives, so it bounds a silence and not an attempt. This bounds
             # the attempt, and with it the lock `refresh()` is holding while it
             # runs.
-            #
-            # `wait_for` rather than an `asyncio.timeout` block, which reads
-            # better and arrived in 3.11: `ruff.toml` declares 3.10 as the
-            # lowest interpreter this project supports, and there the attribute
-            # does not exist at all. The `except Exception` below would turn
-            # that `AttributeError` into an ordinary `unreachable` on every
-            # attempt — a gateway that never holds a bundle, forwards every
-            # request unjudged, and reports itself unready for the life of the
-            # process, while the log blames a control plane that is answering
-            # perfectly well. Ruff's target version gates syntax, not stdlib
-            # attributes, and CI runs one interpreter, so nothing else here
-            # would catch it.
-            #
-            # What it costs on 3.10 is that a cancellation arriving after
-            # `_attempt` has already completed is discarded rather than
-            # propagated. `_loop` therefore ends on the epoch rather than on the
-            # cancel, so a shutdown does not depend on which interpreter this
-            # line is running under.
             return await asyncio.wait_for(self._attempt(), self._deadline)
         except _Unreachable:
             raise
         except TimeoutError as error:
             # The deadline, not the socket: `str(TimeoutError())` is empty, so
             # the generic branch below would log the fault without naming it.
-            # Spelled `asyncio.TimeoutError` because that is only the builtin
-            # from 3.11 on; on 3.10 it is a separate class, and catching the
-            # builtin there would leave the deadline unnamed.
             raise _Unreachable(
                 f"policy bundle fetch ran past {self._deadline} seconds"
             ) from error

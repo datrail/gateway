@@ -104,11 +104,9 @@ def is_discovery(method: Any) -> bool:
 #:
 #: **Ours, not the interpreter's**, for the reason `ticket.MAX_NESTING_DEPTH`
 #: gives: `json.loads` recurses per nesting level and raises where the runtime
-#: decides. Measured on the same body of brackets from a shallow stack, that is
-#: depth 1000 on Python 3.10 and depth 10000 on 3.12 — and on 3.10 it moves down
-#: with the caller's own stack depth, which inside an ASGI handler is deep. Left
-#: to the runtime, the same body is read on one interpreter and raises out of
-#: the layer on the other.
+#: decides — depth 10000 on 3.12, measured on a body of brackets. Left to the
+#: runtime, that raise would escape the layer instead of reading as
+#: ``unrecognised``.
 #:
 #: **Deliberately not the sixty-four the header uses.** A ticket is a flat
 #: object of scalars a mint issues; a body carries ``params.arguments``, which is
@@ -120,8 +118,7 @@ def is_discovery(method: Any) -> bool:
 #: the bound is here for. Two hundred and fifty-six spends three levels on the
 #: JSON-RPC frame and leaves the remaining two hundred and fifty-three to the
 #: tool's argument tree, past anything a hand-written or generated schema nests,
-#: while still clearing the 3.10 floor by a factor near four before the
-#: handler's own stack is counted.
+#: and far below where the runtime would raise.
 MAX_BODY_NESTING_DEPTH = 256
 
 #: Read as byte values, because the body arrives as bytes and is scanned as bytes.

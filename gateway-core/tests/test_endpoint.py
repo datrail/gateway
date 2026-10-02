@@ -216,9 +216,7 @@ def test_a_body_deep_enough_to_exhaust_the_stack_answers_rather_than_raising(dep
     the forward path. A raise here leaves the caller with neither a refusal nor
     a forward.
 
-    The depths cover both declared interpreters: 1000 raises on 3.10 and 10000
-    on 3.12, from a shallow stack, and the 3.10 threshold falls further the
-    deeper the caller's own stack — an ASGI handler's is deep."""
+    The depths straddle where 3.12 raises, at 10000 from a shallow stack."""
     resolution = resolve_from_body(nested_call(depth), MOUNT)
     assert (resolution.key, resolution.status) == (None, "unrecognised")
 
