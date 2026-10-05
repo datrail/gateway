@@ -1,0 +1,16 @@
+[project]
+name = "gateway-core"
+version = "0"  # never published; the image is versioned by its git tag
+description = "DatRail Gateway's vendor-neutral enforcement core: x-rail parsing, endpoint resolution, policy ingestion and decisions."
+requires-python = ">=3.12"
+dependencies = [
+    "httpx==0.28.1",
+]
+
+[build-system]
+requires = ["uv_build==0.12.21"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# src/gateway/ has no __init__.py: `gateway` is a namespace shared by every member.
+module-name = "gateway.core"

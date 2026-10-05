@@ -1,0 +1,13 @@
+# Used instead of a root .dockerignore when building with
+# -f gateway-standalone/Dockerfile. Send only what this image needs: another
+# member's changes never touch its cache.
+**
+!LICENSE
+!NOTICE
+!pyproject.toml
+!uv.lock
+!gateway-core/pyproject.toml
+!gateway-core/src/**
+!gateway-standalone/pyproject.toml
+!gateway-standalone/src/**
+**/__pycache__
