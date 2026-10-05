@@ -88,6 +88,11 @@ make lint    # `make fmt` formats and fixes instead of only checking
 
 ## Related projects
 
+- [datrail-project](https://github.com/datrail/datrail-project#readme) is the
+  entry point to DatRail: how the components fit together, and a quick start for
+  RailMon and RailDash. The
+  [DatRail glossary](https://github.com/datrail/datrail-project/blob/master/docs/glossary.md)
+  defines the terms they share.
 - [DatRail Proxy](https://github.com/datrail/proxy) injects `x-rail` tickets.
 - [RailMon](https://github.com/datrail/railmon) observes agent traffic.
 - [RailDash](https://github.com/datrail/raildash) presents captures locally.
