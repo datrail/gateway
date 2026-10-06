@@ -43,6 +43,10 @@ version the wire contract.
 The schemas in [`schemas/`](schemas/) define the ticket, bundle, and
 denial-event wire shapes.
 
+Each interface puts the gateway in the agent's path in its own way: see
+[gateway-standalone's](gateway-standalone/README.md#architecture)
+architecture.
+
 ## Layout
 
 Each part is its own package in one [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/),

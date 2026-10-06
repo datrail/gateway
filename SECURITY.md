@@ -52,6 +52,12 @@ Anything that gets a request past the gateway that should have been refused:
 - Header smuggling: a request that presents differently to the gateway than to
   the upstream behind it.
 
-Out of scope: vulnerabilities in FastMCP or other dependencies (report
-upstream, we will help), and policy that is permissive because it was
+## Scope
+
+In scope: this repository, its images, anything that gets a request past the
+gateway that should have been refused, and anything that suppresses or forges
+the record of a decision.
+
+Out of scope: vulnerabilities in FastMCP or other dependencies — report those
+upstream and we will help; and policy that is permissive because it was
 configured that way.
