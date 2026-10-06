@@ -21,7 +21,8 @@ e2e/
 
 ## What it proves that the unit suite cannot
 
-- the **image** runs: entrypoint, non-root user, mounted routes file;
+- the **image** runs: entrypoint, non-root user, mounted routes file, the
+  configured port;
 - a **real socket**, DNS name and TCP connection;
 - a **policy fetched** from a control plane, and a **denial reaching it**;
 - a **stateful MCP handshake** through the gateway;
@@ -51,9 +52,10 @@ literally with a `200`, and the client fails later with a JSON parse error.
 | `gateway-observe` | enrolled, credential `e2e-observe` | `observe` |
 | `gateway-fallback` | enrolled, credential `e2e-fallback` | `enforce`, `fallback: block`, one binding |
 | `gateway-passthrough` | `RAIL_PLUGIN_ENABLED=false`, no control plane | none |
+| `gateway-unreachable` | enrolled, Rail Center unreachable, `RAIL_GATEWAY_PORT=9100` | no bundle ever arrives |
 | `image-user` | the same image, sleeping | its healthcheck asserts uid 10001 |
 
-The three enrolled gateways are configured identically: the credential selects
+`gateway-enforce`, `-observe` and `-fallback` are configured identically: the credential selects
 the bundle, as in production, so no deployment variable sets a posture. The
 pass-through is not the same as a bundle saying `mode: none`, which still polls.
 
@@ -68,6 +70,8 @@ What the driver asserts:
 - `observe` and the pass-through refuse and report nothing;
 - `fallback: block` forwards the bound call and refuses an unbound one, reporting
   a denial with no `policy_id`;
+- a gateway that can't reach Rail Center still starts, serves `/health` on the
+  port it was given, and answers `/ready` with `503`;
 - every request found a stub.
 
 ### Easy to get wrong

@@ -174,6 +174,17 @@ def open_session(url, headers=None):
     return sid if 200 <= status < 300 else None
 
 
+def get_status(url):
+    """The HTTP status of a GET, or None if nothing answered."""
+    try:
+        with _send("GET", url) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except OSError:
+        return None
+
+
 # `initialize` names no endpoint, so it is forwarded without a policy walk.
 def handshake_status(url, headers=None):
     try:

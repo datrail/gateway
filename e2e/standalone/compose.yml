@@ -18,8 +18,8 @@ x-gateway: &gateway
     timeout: 3s
     retries: 15
 
-# The three enrolled gateways differ only in the credential they present, which
-# selects the bundle, and so the posture, the stub serves them.
+# The enforce, observe and fallback gateways differ only in the credential they
+# present, which selects the bundle, and so the posture, the stub serves them.
 x-enrolled: &enrolled
   RAIL_GATEWAY_ROUTES_FILE: /etc/rail/routes.yaml
   RAIL_CENTER_URL: http://rail-center:8080
@@ -70,6 +70,24 @@ services:
     depends_on:
       upstream: {condition: service_healthy}
 
+  # Enrolled, on a non-default port, with a Rail Center it can't reach: it must
+  # still start, and serve on the port it was given.
+  gateway-unreachable:
+    <<: *gateway
+    environment:
+      RAIL_GATEWAY_ROUTES_FILE: /etc/rail/routes.yaml
+      RAIL_CENTER_URL: http://rail-center.invalid
+      RAIL_GATEWAY_SLUG: edge
+      RAIL_PLUGIN_ENABLED: "true"
+      RAIL_GATEWAY_PORT: "9100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:9100/health').read()"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    depends_on:
+      upstream: {condition: service_healthy}
+
   # The healthcheck asserts the image's uid; the driver waits on it. It sleeps
   # because an exiting container would trip --abort-on-container-exit.
   image-user:
@@ -96,4 +114,5 @@ services:
       gateway-observe: {condition: service_healthy}
       gateway-fallback: {condition: service_healthy}
       gateway-passthrough: {condition: service_healthy}
+      gateway-unreachable: {condition: service_healthy}
       image-user: {condition: service_healthy}

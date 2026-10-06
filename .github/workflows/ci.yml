@@ -89,19 +89,13 @@ jobs:
           context: .
           file: gateway-${{ matrix.stack }}/Dockerfile
           push: false
-          load: true
-          tags: gateway-${{ matrix.stack }}:ci
           cache-from: type=gha,scope=image-${{ matrix.stack }}
           cache-to: type=gha,mode=max,scope=image-${{ matrix.stack }}
-
-      - run: sh .github/smoke/${{ matrix.stack }}.sh gateway-${{ matrix.stack }}:ci
 
       - run: make e2e-${{ matrix.stack }}
 
       - if: failure()
-        run: |
-          docker logs smoke || true
-          docker compose -f e2e/${{ matrix.stack }}/compose.yml logs --no-color
+        run: docker compose -f e2e/${{ matrix.stack }}/compose.yml logs --no-color
 
   # The check the ruleset requires, in place of one per stack. always(): a
   # failed stack would otherwise skip it, and a skipped check counts as passing.

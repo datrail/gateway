@@ -15,6 +15,7 @@ from lib import (
     fail,
     finish,
     forwarded_tool_calls,
+    get_status,
     handshake_status,
     ok,
     open_session,
@@ -161,6 +162,18 @@ reset_journals()
 expect("initialize is not refused", 200, handshake_status(PASSTHROUGH))
 settle()
 expect("no denial was reported", 0, denials())
+
+block("unreachable: a gateway with no bundle still serves, on the port it was given")
+expect(
+    "/health answers on RAIL_GATEWAY_PORT",
+    200,
+    get_status("http://gateway-unreachable:9100/health"),
+)
+expect(
+    "/ready reports no bundle held",
+    503,
+    get_status("http://gateway-unreachable:9100/ready"),
+)
 
 block("every request found a stub")
 sweep_unmatched()
