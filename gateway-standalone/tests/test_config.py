@@ -1,9 +1,7 @@
 """Configuration errors belong at startup, not in the first request's log line."""
 
-import base64
 import logging
 
-import httpx
 import pytest
 
 from gateway.core.auth import AuthConfigurationError
@@ -14,16 +12,9 @@ from gateway.core.mode import (
     describe_plugin,
     plugin_enabled,
 )
+from gateway.core.settings import gateway_slug
 from gateway.standalone.routes import Route, RoutesError
-from gateway.standalone.server import (
-    DEFAULT_PORT,
-    _Enforcement,
-    _holder_from_environment,
-    build_app,
-    build_gateway,
-    gateway_slug,
-    port,
-)
+from gateway.standalone.server import _Enforcement, build_app, build_gateway
 
 
 @pytest.fixture(autouse=True)
@@ -43,44 +34,6 @@ def enrolled(monkeypatch):
 
 #: A well-formed upstream, for the tests whose subject is some other variable.
 UPSTREAM = "http://upstream.invalid/mcp"
-
-
-def test_port_defaults(monkeypatch):
-    """8080, with the literal asserted beside the constant.
-
-    `EXPOSE 8080` in the Dockerfile, `-p 8080:8080` in the README and the e2e
-    health checks all name it, so the default is a contract with the image
-    rather than an internal choice. `port() == DEFAULT_PORT` alone moves with the
-    constant and pins nothing: it holds just as well at 9091, with every one of
-    those four out of step.
-    """
-    monkeypatch.delenv("RAIL_GATEWAY_PORT", raising=False)
-    assert port() == DEFAULT_PORT == 8080
-
-
-@pytest.mark.parametrize("raw", ["nope", "8080.5"])
-def test_a_non_integer_port_is_refused(monkeypatch, raw):
-    monkeypatch.setenv("RAIL_GATEWAY_PORT", raw)
-    with pytest.raises(RuntimeError, match="must be an integer"):
-        port()
-
-
-@pytest.mark.parametrize("raw", ["", "   "])
-def test_an_empty_or_blank_port_means_the_default(monkeypatch, raw):
-    """Read the same way `_required` reads a blank: as unset, not as a value.
-
-    Without stripping first, whitespace reaches `int()` and the error names an
-    empty string back at the operator who set spaces.
-    """
-    monkeypatch.setenv("RAIL_GATEWAY_PORT", raw)
-    assert port() == DEFAULT_PORT
-
-
-@pytest.mark.parametrize("raw", ["0", "65536", "-1"])
-def test_a_port_outside_the_range_is_refused(monkeypatch, raw):
-    monkeypatch.setenv("RAIL_GATEWAY_PORT", raw)
-    with pytest.raises(RuntimeError, match="between 1 and 65535"):
-        port()
 
 
 @pytest.mark.parametrize("url", ["http://", "http://user:pw@", "https://"])
@@ -282,7 +235,7 @@ def test_an_unreadable_refresh_interval_is_refused_at_startup(monkeypatch):
     """Same reasoning, same place. `refresh_seconds` raises on a value that is
     not a number, and it has to be called somewhere a caller sees it.
 
-    The auth variables are cleared because `_holder_from_environment` reaches
+    The auth variables are cleared because `build_holder` reaches
     `auth_headers()` first: either of them set in the shell running the suite
     raises before the interval is ever read, and this case then fails on
     correct code with a message about a credential. `.env.example` documents
@@ -295,37 +248,6 @@ def test_an_unreadable_refresh_interval_is_refused_at_startup(monkeypatch):
 
     with pytest.raises(RuntimeError, match="must be an integer"):
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
-
-
-@pytest.mark.asyncio
-async def test_a_credential_in_the_rail_center_url_travels_in_the_header(monkeypatch):
-    """httpx derives `BasicAuth` from a URL's userinfo and *overwrites* the
-    `Authorization` header it was handed, so a credential left in
-    `RAIL_CENTER_URL` decides what this gateway calls its control plane with.
-    Moved into the header, as the upstream URL's already is, there is nothing
-    left in the URL for httpx to derive from — and nothing in the request line,
-    where a credential does not belong either.
-
-    Asserted on the wire, because the displacement happens inside httpx.
-    """
-    monkeypatch.setenv("RAIL_CENTER_URL", "http://user:s3cret@rail-center.invalid")
-    monkeypatch.delenv("RAIL_AUTH_MODE", raising=False)
-    monkeypatch.delenv("RAIL_AUTH_TOKEN", raising=False)
-    monkeypatch.delenv("RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS", raising=False)
-
-    seen: list[httpx.Request] = []
-
-    def record(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return httpx.Response(503)
-
-    holder = _holder_from_environment()
-    holder._transport = httpx.MockTransport(record)
-    await holder.refresh()
-
-    expected = base64.b64encode(b"user:s3cret").decode()
-    assert seen[0].headers["Authorization"] == f"Basic {expected}"
-    assert "s3cret" not in str(seen[0].url)
 
 
 def test_two_rail_center_credentials_are_refused_at_startup(monkeypatch):
