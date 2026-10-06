@@ -6,6 +6,7 @@ from gateway.core.bundle.client import logger as bundle_client_logger
 from gateway.core.bundle.validate import logger as bundle_validation_logger
 from gateway.core.denial import logger as denial_logger
 from gateway.core.enforcement import log as enforcement_logger
+from gateway.core.lifecycle import log as lifecycle_logger
 from gateway.standalone.routes import Route
 from gateway.standalone.routes import log as routes_logger
 from gateway.standalone.server import build_gateway
@@ -46,6 +47,7 @@ def test_core_logs_remain_children_of_the_configured_component_logger():
         bundle_validation_logger,
         denial_logger,
         enforcement_logger,
+        lifecycle_logger,
         routes_logger,
         server_logger,
     ):
