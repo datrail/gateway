@@ -278,7 +278,7 @@ def resolve_from_body(body: bytes, upstream_path: str) -> EndpointResolution:
 
     A body nesting past `MAX_BODY_NESTING_DEPTH` lands there as well, and is
     refused on that count before it is parsed. **This never raises**, which is
-    load-bearing: `_judge` calls it on its first line, above the `try` whose
+    load-bearing: `judge` calls it on its first line, above the `try` whose
     `except Exception` keeps a defect in the walk off the forward path, so an
     exception escaping here leaves the caller with neither a refusal nor a
     forward — and under `observe` the call is not forwarded at all, which is the

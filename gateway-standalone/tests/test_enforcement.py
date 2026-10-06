@@ -39,12 +39,12 @@ import pytest
 
 from gateway.core.bundle.validate import validate_bundle
 from gateway.core.endpoint import MAX_BODY_NESTING_DEPTH
-from gateway.core.key_safety import MAX_LOGGED_LENGTH
-from gateway.standalone.server import (
+from gateway.core.enforcement import (
     MAX_FALLBACK_REPORTS_IN_FLIGHT,
     MAX_REPORTS_IN_FLIGHT,
-    _Enforcement,
 )
+from gateway.core.key_safety import MAX_LOGGED_LENGTH
+from gateway.standalone.server import _Enforcement
 
 SLUG = "delivery"
 KEY = "/mcp#tools/call#track_package"
@@ -329,7 +329,7 @@ async def drive(
 def reported(caplog) -> list[str]:
     """Only what the reporter itself wrote.
 
-    `caplog` captures every logger, and `_judge` writes its own denial line on
+    `caplog` captures every logger, and `judge` writes its own denial line on
     the same path — so an assertion meant for the reporter can be satisfied by
     the layer's line instead, in both directions.
     """
@@ -960,27 +960,30 @@ async def test_a_report_in_flight_is_held_by_a_strong_reference():
     for _ in range(50):
         await asyncio.sleep(0)
 
-    assert len(enforcement._reports) == 1
-    assert not next(iter(enforcement._reports)).done()
+    assert len(enforcement._reporter._reports) == 1
+    assert not next(iter(enforcement._reporter._reports)).done()
 
     hold.set()
     await settled(reports, expecting=1)
 
-    assert enforcement._reports == set()
+    assert enforcement._reporter._reports == set()
 
 
 @pytest.mark.asyncio
 async def test_a_walk_that_raises_forwards_rather_than_refusing(caplog, monkeypatch):
     """A defect in the walk must not take the forward path down. The trade is
-    stated in `_judge` and is the same one `_UpstreamErrorBoundary` makes — a
+    stated in `judge` and is the same one `_UpstreamErrorBoundary` makes — a
     gateway that forwards nothing is worse than one that enforces nothing — and
     turning this into a 503 reverses it, so an unforeseen bug becomes a total
     outage rather than a logged traceback."""
 
+    exploded: list[bool] = []
+
     def explode(*_args, **_kwargs):
+        exploded.append(True)
         raise RuntimeError("a defect in the walk")
 
-    monkeypatch.setattr("gateway.standalone.server.decide", explode)
+    monkeypatch.setattr("gateway.core.enforcement.decide", explode)
     enforcement, downstream, reports = layer(bundle(DENIES_EVERYTHING))
 
     with caplog.at_level(logging.ERROR, logger="gateway"):
@@ -991,6 +994,7 @@ async def test_a_walk_that_raises_forwards_rather_than_refusing(caplog, monkeypa
     assert downstream.calls == 1
     assert reports.bodies == []
     assert "a defect in the walk" in caplog.text
+    assert exploded
 
 
 # --------------------------------------------------------------------------
@@ -1571,7 +1575,7 @@ async def test_the_abandoned_path_is_rendered_before_it_reaches_the_log(caplog):
     """The path in that line is the caller's. uvicorn sets `scope["path"]` from
     the unquoted raw path, and an abort needs neither a ticket nor a body byte —
     so a `POST /mcp%0a…%1b%5b31m` arrives here carrying a newline, a line in the
-    exact format `_judge` writes a real denial in, and a live ANSI escape aimed
+    exact format `judge` writes a real denial in, and a live ANSI escape aimed
     at whatever renders the log. Unrendered, the one signal an operator has that
     a call was abandoned is also the one place an unauthenticated caller can
     forge the denial they would go looking for. Refused whole rather than
@@ -1624,7 +1628,7 @@ async def test_a_request_that_is_not_a_post_is_not_judged():
 @pytest.mark.parametrize("depth", [MAX_BODY_NESTING_DEPTH + 1, 1000, 10000])
 async def test_a_body_too_deep_to_read_is_refused_rather_than_raising(depth):
     """`json.loads` raises `RecursionError` past a depth the runtime picks, and
-    `_judge` resolves the body on its first line — above the `try` whose
+    `judge` resolves the body on its first line — above the `try` whose
     `except Exception` exists so a defect in the walk cannot take the forward
     path down. Left unguarded, a caller-chosen kilobyte of brackets raises
     straight out of the ASGI layer and the caller gets neither the refusal nor

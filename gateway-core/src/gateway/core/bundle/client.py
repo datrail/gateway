@@ -307,7 +307,7 @@ class BundleHolder:
 
         Two callers read it, and neither refuses on None. Readiness reports it
         on `/ready`, where holding nothing is the whole of what makes a gateway
-        not ready. `_judge` forwards the request unjudged and logs that it did,
+        not ready. `judge` forwards the request unjudged and logs that it did,
         because the posture arrives *in* the bundle and a gateway holding none
         has been told nothing rather than told to enforce.
 
@@ -622,7 +622,7 @@ class BundleHolder:
         # The holder is constructed without a mode, so it cannot know: under
         # `enforce` a gateway holding no bundle refuses every request, under
         # `observe` it forwards every request unjudged, and those are as far
-        # apart as an operator's log can put them. `_judge` writes that
+        # apart as an operator's log can put them. `judge` writes that
         # sentence per request, where the mode is in hand. A claim made here
         # would be wrong for half the deployments that read it, and `enforce`
         # is the default half.

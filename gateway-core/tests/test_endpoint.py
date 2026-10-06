@@ -209,7 +209,7 @@ def test_the_body_bound_is_not_the_ticket_headers():
 @pytest.mark.parametrize("depth", [1000, 2000, 10000, 100000])
 def test_a_body_deep_enough_to_exhaust_the_stack_answers_rather_than_raising(depth):
     """`json.loads` recurses per nesting level and raises `RecursionError`,
-    which is neither `ValueError` nor `UnicodeDecodeError` — and `_judge` calls
+    which is neither `ValueError` nor `UnicodeDecodeError` — and `judge` calls
     this on its first line, above the `try` that keeps a defect in the walk off
     the forward path. A raise here leaves the caller with neither a refusal nor
     a forward.

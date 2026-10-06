@@ -299,7 +299,7 @@ async def test_an_unusable_first_bundle_claims_no_refusal_in_the_log(
     does to traffic: the holder has no mode, and the answer is opposite in the
     two it could be running under — every request refused under `enforce`,
     every request forwarded unjudged under `observe`. The line an operator
-    reaches for to tell those apart is `_judge`'s, not this one.
+    reaches for to tell those apart is `judge`'s, not this one.
     """
     h = holder(httpx.Response(200, json=bundle("v1", policies="not a list")))
     with caplog.at_level(logging.WARNING, logger="gateway"):
