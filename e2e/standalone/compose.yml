@@ -1,0 +1,99 @@
+# The standalone gateway's e2e stack; e2e/README.md says what each service is for.
+#
+#   make e2e-standalone   # the result is the driver's exit code
+#   make e2e-down
+
+name: datrail-gateway-e2e-standalone
+
+x-gateway: &gateway
+  build:
+    context: ../..
+    dockerfile: gateway-standalone/Dockerfile
+  volumes:
+    - ./routes.yaml:/etc/rail/routes.yaml:ro
+  healthcheck:
+    # Liveness: waiting on `/ready` would tie startup to the control plane.
+    test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/health').read()"]
+    interval: 2s
+    timeout: 3s
+    retries: 15
+
+# The three enrolled gateways differ only in the credential they present, which
+# selects the bundle, and so the posture, the stub serves them.
+x-enrolled: &enrolled
+  RAIL_GATEWAY_ROUTES_FILE: /etc/rail/routes.yaml
+  RAIL_CENTER_URL: http://rail-center:8080
+  RAIL_GATEWAY_SLUG: edge
+  RAIL_PLUGIN_ENABLED: "true"
+  RAIL_AUTH_MODE: bearer
+  # No refresh during a run, so the startup fetch count can't race one.
+  RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS: "3600"
+
+x-enrolled-depends: &enrolled-depends
+  rail-center: {condition: service_healthy}
+  upstream: {condition: service_healthy}
+
+services:
+  rail-center:
+    extends: {file: ../shared/services.yml, service: rail-center}
+
+  upstream:
+    extends: {file: ../shared/services.yml, service: upstream}
+
+  gateway-enforce:
+    <<: *gateway
+    environment:
+      <<: *enrolled
+      RAIL_AUTH_TOKEN: e2e-enforce
+    depends_on: *enrolled-depends
+
+  gateway-observe:
+    <<: *gateway
+    environment:
+      <<: *enrolled
+      RAIL_AUTH_TOKEN: e2e-observe
+    depends_on: *enrolled-depends
+
+  gateway-fallback:
+    <<: *gateway
+    environment:
+      <<: *enrolled
+      RAIL_AUTH_TOKEN: e2e-fallback
+    depends_on: *enrolled-depends
+
+  # No control plane at all: Rail Center settings here would be refused.
+  gateway-passthrough:
+    <<: *gateway
+    environment:
+      RAIL_GATEWAY_ROUTES_FILE: /etc/rail/routes.yaml
+      RAIL_PLUGIN_ENABLED: "false"
+    depends_on:
+      upstream: {condition: service_healthy}
+
+  # The healthcheck asserts the image's uid; the driver waits on it. It sleeps
+  # because an exiting container would trip --abort-on-container-exit.
+  image-user:
+    <<: *gateway
+    command: ["sleep", "infinity"]
+    # `sleep` ignores SIGTERM.
+    stop_grace_period: 0s
+    healthcheck:
+      test: ["CMD", "sh", "-c", "test \"$(id -u)\" = 10001"]
+      interval: 1s
+      timeout: 2s
+      retries: 3
+
+  driver:
+    image: python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
+    env_file: ../shared/tickets.env
+    volumes:
+      - ./driver.py:/e2e/driver.py:ro
+      - ../shared/lib.py:/e2e/lib.py:ro
+    # Unbuffered, so each line shows as it is reached.
+    command: ["python", "-u", "/e2e/driver.py"]
+    depends_on:
+      gateway-enforce: {condition: service_healthy}
+      gateway-observe: {condition: service_healthy}
+      gateway-fallback: {condition: service_healthy}
+      gateway-passthrough: {condition: service_healthy}
+      image-user: {condition: service_healthy}

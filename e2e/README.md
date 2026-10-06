@@ -1,46 +1,81 @@
-# The e2e stack
+# The end-to-end stacks
+
+One stack per interface: its image against a stubbed Rail Center and a stubbed
+MCP upstream, with a driver that asserts what crossed the wire. Nothing outside
+this directory is needed, so it is also the quickstart.
 
 ```bash
-docker compose -f e2e/compose.yml up --build --force-recreate --abort-on-container-exit --exit-code-from driver
-docker compose -f e2e/compose.yml down -v --remove-orphans
+make e2e              # every stack in turn
+make e2e-standalone   # one stack
+make e2e-down         # remove every stack's containers and volumes
 ```
 
-The exit code of the first is the result. It is both the test and the quickstart: the only path where someone with neither a Rail Center nor an agent sees a policy fetched, a call refused and a denial reported.
+The result is the `driver` container's exit code. A stack's target leaves its
+containers up so a failed run's logs can be read; `make e2e-down` removes them.
 
-Four gateways run against one stubbed control plane and one stubbed MCP server. The stubs are WireMock, and **the assertions are its request journals rather than the gateway's log output** — a log line says the gateway believes it did something, a journal says it happened.
+```
+e2e/
+  shared/       the stubs, the base services, the driver's helpers
+  standalone/   the standalone gateway's stack
+```
 
-**Three of the four are configured identically**, and that is an assertion rather than a tidy-up. A posture is no longer a deployment's to declare: `RAIL_PLUGIN_ENABLED` says only whether RailXia is installed, and `enforce`, `observe` and the two fallbacks arrive in the bundle. What selects which bundle a gateway is served is the credential it presents — which is how Rail Center resolves a gateway in production — so the stub matches on `Authorization` and serves three postures from one route. The fourth gateway sets `RAIL_PLUGIN_ENABLED=false` and is a deployment with no control plane at all, which is not the same state as a bundle saying `mode: none`: that one still polls, and can be told something else.
+## What it proves that the unit suite cannot
 
-## What each block establishes
+- the **image** runs: entrypoint, non-root user, mounted routes file;
+- a **real socket**, DNS name and TCP connection;
+- a **policy fetched** from a control plane, and a **denial reaching it**;
+- a **stateful MCP handshake** through the gateway;
+- the postures side by side, served from **one control plane**.
 
-| | why it is here |
-|---|---|
-| exactly three gateways fetch a bundle at startup | The only place a pass-through's silence can be *counted* rather than assumed. See below. |
-| no ticket → session opens, first call refused, denial names P0 | The whole path, end to end: the session messages forwarded unjudged, the call evaluated, refused above the MCP layer, reported. |
-| low posture → session opens, call refused, denial names **P1** | The denial names the rule that *matched*, not the first in the chain. Nothing downstream re-derives this, so a wrong id would be wrong forever. |
-| good ticket → session opens, call forwarded, no denial | The transparent case. A gateway that refuses everything would pass every assertion above it. |
-| good ticket → handshake succeeds, `forbidden_tool` refused, denial names P2 | **The keyless narrowing, over the wire.** P2 keys on `endpoint_key` and P3 on `skill_match`, so both are dropped from `initialize`'s chain and both apply to the call. P3 is the one that makes the drop observable — `skill_match missing` *holds* against an absent key, so a chain that kept it would refuse the handshake, while `endpoint_key` admits no operator that holds either way. One ticket, two outcomes, decided by what the message names. |
-| good ticket → a tool name that composes no key is refused, denial names **P3** | What makes the row above able to fail. That row rests on P3 being a rule whose condition *holds against an absent key*, and its own assertions pin only P3's id: a P3 retargeted to an `endpoint_key` rule keeps that id, denies the same calls, and is dropped from `initialize`'s chain exactly as P2 is — leaving the narrowing unobservable again. An `unrecognised` `tools/call` — here a tool name carrying a control character — is the one request whose key is absent and whose chain is *not* narrowed, so only a rule that holds against an absence can refuse it. |
-| good ticket → a tool it declares no skill for is refused, denial names **P3** | Skill mismatch, the third refusal shape, and the only place the ticket's `skills` decide anything — `forbidden_tool` matches P2 at the lower priority, and `track_package` is declared. It pins P3's presence and its `block` action for a key that is fully present; the row above pins the condition P3 is written against. |
-| `enforce` + `fallback: block` → the bound endpoint is forwarded, an unbound one is refused, and the refusal is reported **naming no policy** | The other half of `enforcement`, and the only place a caller's answer turns on something other than a policy. Both calls carry the same good ticket, and the two status codes are not what establishes it: `gateway-enforce`, whose bundle differs only in its fallback, answers the same pair identically — it refuses the unbound call by P3, the skill rule, rather than by a fallback. What separates the fallback from the chain is what the report omits: `block` refuses a call no binding matched without consulting the chain at all, so there is no rule to name and the report carries no `policy_id`. Reporting it is what keeps the endpoints nobody bound from being the only ones whose refusals never reach an operator. |
-| `observe` → not refused, nothing reported | The same walk and the same verdict in the log, acted on in no way. |
-| `none` → not refused, nothing reported | A pass-through that asks the control plane nothing. |
-| no unmatched request at either stub | A stub that silently stopped matching is invisible to every count above, which only ever counts requests a stub *answered*. |
+## Shared
 
-## Two things that are easy to get wrong here
+The stubs are WireMock (`services.yml`), and the assertions read their request
+journals, not logs: a log says the gateway believes it did something, a journal
+says it happened.
 
-**A bundle fetch is a startup and refresh event, never a per-request one.** The holder serves a cached copy so that evaluating a call never waits on the control plane. So after a journal reset nothing fetches, and "no bundle was fetched" passes for the pass-through whether or not it ever asked — an assertion that cannot fail. Counting the startup fetches before any reset is what replaces it: four gateways start and exactly three of them ask. Three rather than two is the RC-312 rule and not an arithmetic detail — a gateway *polls* because it is enrolled, not because of its posture, so one told `mode: none` in its bundle would still be among the three. A gateway that stopped polling at `none` could never be told it had been moved off it. The refresh interval is pinned to an hour in `compose.yml` so a refresh landing mid-count cannot turn that into a race. **It is also the one assertion no reset may precede, so it cannot defend itself against a journal that outlived the run before it**: a stub container left behind by an aborted run, or by `up -d`, carries its fetches forward and the count reads 6 rather than 3 — naming a gateway for a stub's state. `--force-recreate` on the way in is what closes that, and the `down` on the way out is what keeps a failed run from leaving one behind.
+- `rc-mappings/` serves the policy bundle and accepts denials. The three bundles
+  differ only in the `Authorization` they match and the `enforcement` they carry.
+- `mcp-mappings/` answers as an MCP server.
+- `tickets.env` holds two `x-rail` tickets: unsigned base64url JSON.
+- `lib.py` holds the driver's helpers, standard library only.
 
-**A denial is reported fire-and-forget**, so every assertion about one waits for it rather than reading a count once. The caller is answered the moment the verdict is reached and the report goes out behind it, by design, so that Rail Center's availability is not a term in how long a refused request takes. An e2e that reads the journal immediately after the `403` is racing that — and it is a race it usually *wins*, which is worse than one it usually loses: it passes until the day it does not, and then reads as a gateway defect.
+A stub whose body uses handlebars must declare
+`"transformers": ["response-template"]`. Without it WireMock serves the template
+literally with a `200`, and the client fails later with a JSON parse error.
 
-## The stubs
+## Standalone
 
-`mcp-mappings/` answers as an MCP server; `rc-mappings/` serves the policy bundle and accepts denials. Both are static JSON, with one trap worth naming: **a stub whose body contains handlebars must declare `"transformers": ["response-template"]`**, or WireMock serves the `{{jsonPath …}}` literally. That failure does not look like a templating failure — the body is served with a `200`, and the client reports a JSON parse error somewhere else entirely.
+| Service | Configuration | Posture |
+|---|---|---|
+| `gateway-enforce` | enrolled, credential `e2e-enforce` | `enforce`, `fallback: pass` |
+| `gateway-observe` | enrolled, credential `e2e-observe` | `observe` |
+| `gateway-fallback` | enrolled, credential `e2e-fallback` | `enforce`, `fallback: block`, one binding |
+| `gateway-passthrough` | `RAIL_PLUGIN_ENABLED=false`, no control plane | none |
+| `image-user` | the same image, sleeping | its healthcheck asserts uid 10001 |
 
-The three bundle mappings differ only in the `Authorization` they match and the `enforcement` they carry; a request presenting any other credential matches none of them, which the final unmatched-journal sweep catches. The `e2e-*` credentials are stub values a WireMock matches on and authenticates nothing with.
+The three enrolled gateways are configured identically: the credential selects
+the bundle, as in production, so no deployment variable sets a posture. The
+pass-through is not the same as a bundle saying `mode: none`, which still polls.
 
-`tickets.env` holds two pre-minted `x-rail` tickets. They are base64url JSON and **not signed** — the ticket contract has no signature, which is why the gateway treats everything in one as a claim.
+What the driver asserts:
+- exactly three gateways fetch a bundle at startup;
+- without a ticket, and with a low-posture one, the handshake passes, the call
+  is refused, and the denial names the rule that matched (P0, P1);
+- a good ticket's call is forwarded, with no denial;
+- an endpoint rule (P2) refuses the call but not the handshake; a tool name that
+  composes no key is refused by P3, the rule that holds against an absent key;
+- an undeclared skill is refused by P3;
+- `observe` and the pass-through refuse and report nothing;
+- `fallback: block` forwards the bound call and refuses an unbound one, reporting
+  a denial with no `policy_id`;
+- every request found a stub.
 
-## The three services that are not gateways
+### Easy to get wrong
 
-`rail-center` and `upstream` are the stubs. `image-user` is the same image the four gateways run, doing nothing, whose healthcheck asserts the container's uid — that cannot be an assertion in `driver.sh`, since a uid is not visible across containers and reporting it from `/health` would be a production change made for a test. A wrong uid never reports healthy, the run stops at "dependency failed to start", and the driver never executes.
+**Bundles are fetched at startup, not per request.** So the fetch count is read
+before any journal reset, and a stub left over from an earlier run inflates it.
+`--force-recreate` prevents that.
+
+**Denials are reported fire-and-forget**, after the caller is answered, so the
+driver waits for them. Reading the journal right after the `403` passes most of
+the time, then fails as if the gateway were at fault.

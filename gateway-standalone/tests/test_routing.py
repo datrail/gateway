@@ -169,8 +169,9 @@ async def test_every_upstream_answers_with_the_plugin_off_too(two_upstreams):
 
     A separate line starts the sub-apps there, because that arm serves them bare
     rather than wrapped, so the one above pins nothing about it — and this is the
-    shape `e2e/compose.yml` deploys as `gateway-passthrough`, where every route
-    after the first answering 500 is the whole gateway for anyone running it.
+    shape `e2e/standalone/compose.yml` deploys as `gateway-passthrough`, where
+    every route after the first answering 500 is the whole gateway for anyone
+    running it.
     """
     (delivery_url, _), (finretail_url, _) = two_upstreams
     routes = [

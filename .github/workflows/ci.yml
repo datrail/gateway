@@ -107,7 +107,7 @@ jobs:
             -e RAIL_CENTER_URL=http://rail-center.invalid \
             -e RAIL_GATEWAY_SLUG=edge \
             -e RAIL_GATEWAY_ROUTES_FILE=/etc/rail/routes.yaml \
-            -v "$PWD/e2e/routes.yaml:/etc/rail/routes.yaml:ro" gateway:ci
+            -v "$PWD/e2e/standalone/routes.yaml:/etc/rail/routes.yaml:ro" gateway:ci
 
           # Startup waits up to 5s for a first bundle fetch; 40 tries is margin.
           curl -fsS -o /dev/null --retry 40 --retry-delay 1 --retry-all-errors \
@@ -140,10 +140,10 @@ jobs:
       # the driver's assertions the result.
       - name: A policy refuses a real call, and the denial is reported
         run: |
-          docker compose -f e2e/compose.yml up --build --force-recreate \
+          docker compose -f e2e/standalone/compose.yml up --build --force-recreate \
             --abort-on-container-exit --exit-code-from driver
 
       # The driver says which assertion failed; the logs say why.
       - name: Logs, on failure
         if: failure()
-        run: docker compose -f e2e/compose.yml logs --no-color
+        run: docker compose -f e2e/standalone/compose.yml logs --no-color

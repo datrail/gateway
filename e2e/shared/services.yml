@@ -1,0 +1,23 @@
+# Every stack pulls these in with `extends`; paths resolve against this directory.
+
+services:
+  wiremock:
+    # Pinned by digest: a tag is mutable, and this gates releases.
+    image: wiremock/wiremock:3.9.1@sha256:8fe02bc3f9b63deb1454d41750dbaf081adf4b3e8c74fd8e31f790bee5647b88
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/__admin/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # Stands in for Rail Center: serves the policy bundle and accepts denials.
+  rail-center:
+    extends: {service: wiremock}
+    volumes:
+      - ./rc-mappings:/home/wiremock/mappings:ro
+
+  # Stands in for an MCP server.
+  upstream:
+    extends: {service: wiremock}
+    volumes:
+      - ./mcp-mappings:/home/wiremock/mappings:ro
