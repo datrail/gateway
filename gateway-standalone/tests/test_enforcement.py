@@ -25,8 +25,6 @@ gateway that has stopped enforcing while its suite stays green:
   * **200** — forwarded, whatever the walk had to say about it under `observe`.
 """
 
-from __future__ import annotations
-
 import asyncio
 import base64
 import json
@@ -335,7 +333,7 @@ def reported(caplog) -> list[str]:
     the same path — so an assertion meant for the reporter can be satisfied by
     the layer's line instead, in both directions.
     """
-    return [r.message for r in caplog.records if r.name == "gateway.denial"]
+    return [r.message for r in caplog.records if r.name == "gateway.core.denial"]
 
 
 async def settled(recorder: _Reports, *, expecting: int) -> None:
@@ -862,7 +860,7 @@ async def test_a_report_rail_center_refuses_is_named_in_the_log(caplog):
     reports = _Reports(status=422)
     enforcement, _, _ = layer(bundle(DENIES_EVERYTHING), reports=reports)
 
-    with caplog.at_level(logging.WARNING, logger="gateway.denial"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         await drive(enforcement, call())
         await settled(reports, expecting=1)
 
@@ -894,7 +892,7 @@ async def test_a_report_that_never_left_names_the_denial_it_describes(caplog):
         transport=httpx.MockTransport(unreachable),
     )
 
-    with caplog.at_level(logging.WARNING, logger="gateway.denial"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         assert (await drive(enforcement, call())).status == 403
         for _ in range(200):
             await asyncio.sleep(0)
@@ -911,7 +909,7 @@ async def test_an_accepted_report_says_nothing(caplog):
     reports = _Reports(status=202)
     enforcement, _, _ = layer(bundle(DENIES_EVERYTHING), reports=reports)
 
-    with caplog.at_level(logging.WARNING, logger="gateway.denial"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         await drive(enforcement, call())
         await settled(reports, expecting=1)
 

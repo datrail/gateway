@@ -11,8 +11,6 @@ Two copies of a constant are two chances to change one and not the other, and
 the rationale is longer than the value.
 """
 
-from __future__ import annotations
-
 #: The largest N for which every integer in ``[-N, N]`` survives a round trip
 #: through an IEEE-754 double — ``Number.MAX_SAFE_INTEGER``. Past it the
 #: representable values thin out, so two implementations read different numbers

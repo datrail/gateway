@@ -110,8 +110,6 @@ nothing would report:
     notice and republish it.
 """
 
-from __future__ import annotations
-
 import asyncio
 import base64
 import json
@@ -149,7 +147,7 @@ from gateway.core.mode import (
 from gateway.core.ticket import parse_rail_header
 from gateway.standalone.routes import Route, load_routes
 
-log = logging.getLogger("gateway")
+log = logging.getLogger(__name__)
 
 DEFAULT_PORT = 8080
 
@@ -1378,8 +1376,10 @@ def _configure_logging() -> None:
             f"RAIL_GATEWAY_LOG_LEVEL must be one of "
             f"{', '.join(sorted(LOG_LEVELS))}, got: {raw}"
         )
-    log.setLevel(level)
-    if log.handlers:
+    # On `gateway`, the parent of every module's logger, core's included.
+    component = logging.getLogger("gateway")
+    component.setLevel(level)
+    if component.handlers:
         # Called twice — by `main()` and by a test — this would otherwise add a
         # second handler and print every line twice.
         return
@@ -1387,7 +1387,7 @@ def _configure_logging() -> None:
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     )
-    log.addHandler(handler)
+    component.addHandler(handler)
 
 
 def main() -> None:
@@ -1411,7 +1411,3 @@ def main() -> None:
     # Draining this properly needs the ASGI app to hold the shutdown until its
     # streams finish, which this change does not build.
     uvicorn.run(build_app(), host="0.0.0.0", port=port())
-
-
-if __name__ == "__main__":
-    main()

@@ -15,8 +15,6 @@ Wiring a refusal in later is then a change that fails these tests rather than
 one that passes quietly.
 """
 
-from __future__ import annotations
-
 import base64
 import json
 import logging

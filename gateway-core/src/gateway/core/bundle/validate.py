@@ -20,8 +20,6 @@ paged: switch the offending policy off. That remedy only works if disabling
 happens before interpreting.
 """
 
-from __future__ import annotations
-
 import logging
 import re
 from collections.abc import Mapping
@@ -76,7 +74,7 @@ _SCHEMA_VERSION = re.compile(r"\A[0-9]+\.[0-9]+\Z")
 #: The holder's logger, shared so that everything an operator reads about one
 #: bundle — the fetch, the refusal, the posture, and the warnings below —
 #: arrives under one name.
-logger = logging.getLogger("gateway.bundle")
+logger = logging.getLogger(__name__)
 
 
 def _q(value: object) -> str:

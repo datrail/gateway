@@ -124,5 +124,5 @@ Or run it with uv:
 ```bash
 make init
 cp e2e/standalone/routes.yaml routes.yaml   # then edit it
-RAIL_GATEWAY_ROUTES_FILE=routes.yaml uv run python -m gateway.standalone.server
+RAIL_GATEWAY_ROUTES_FILE=routes.yaml uv run python -m gateway.standalone
 ```

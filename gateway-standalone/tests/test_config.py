@@ -1,7 +1,5 @@
 """Configuration errors belong at startup, not in the first request's log line."""
 
-from __future__ import annotations
-
 import base64
 import logging
 

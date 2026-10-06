@@ -14,9 +14,6 @@ dependencies = [
     "pyyaml==6.0.1",
 ]
 
-[project.scripts]
-gateway-standalone = "gateway.standalone.server:main"
-
 [tool.uv.sources]
 gateway-core = { workspace = true }
 

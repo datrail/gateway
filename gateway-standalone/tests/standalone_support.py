@@ -7,8 +7,6 @@ asking for them as fixtures. The root `pyproject.toml` puts this folder on
 never shadow it.
 """
 
-from __future__ import annotations
-
 import asyncio
 import socket
 import threading

@@ -62,8 +62,6 @@ the component rather than unenrolling it, while the harmless case — nothing to
 point at, nothing configured — boots as the plain gateway it is.
 """
 
-from __future__ import annotations
-
 import os
 from typing import Final, Literal
 

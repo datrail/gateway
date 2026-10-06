@@ -11,8 +11,6 @@ The upstreams are real MCP servers on ephemeral ports, for the reason
 an in-process transport would exercise a shape only the suite has.
 """
 
-from __future__ import annotations
-
 from contextlib import asynccontextmanager
 
 import httpx

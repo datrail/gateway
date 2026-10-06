@@ -11,8 +11,6 @@ reads, the degradation shows up only as a bundle that never arrives, long after
 the deployment that caused it and with nothing naming the cause.
 """
 
-from __future__ import annotations
-
 import os
 import re
 

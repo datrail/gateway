@@ -21,8 +21,6 @@ everything else is a pure function of what arrived, which is the only shape two
 implementations can be compared on.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -40,7 +38,7 @@ from gateway.core.bundle.validate import UnusableBundle, UsableBundle, validate_
 from gateway.core.key_safety import safe_for_log
 from gateway.core.mode import describe_enforcement
 
-logger = logging.getLogger("gateway.bundle")
+logger = logging.getLogger(__name__)
 
 
 def _posture_line(bundle: UsableBundle) -> str:

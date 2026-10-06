@@ -36,8 +36,6 @@ request header, so a caller's claimed status goes in beside it under a name that
 says `claimed` and never into the field an operator reads as the decision.
 """
 
-from __future__ import annotations
-
 import logging
 import math
 import re
@@ -48,7 +46,7 @@ import httpx
 
 from gateway.core.key_safety import safe_for_log
 
-logger = logging.getLogger("gateway.denial")
+logger = logging.getLogger(__name__)
 
 #: The route is the OpenAPI specification's, as `/v1/policy-bundle` is.
 DENIALS_PATH = "/v1/denials"

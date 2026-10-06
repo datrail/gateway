@@ -1,7 +1,5 @@
 """What this component does today: receive a call and forward it, unchanged."""
 
-from __future__ import annotations
-
 import httpx
 import pytest
 from fastmcp import Client

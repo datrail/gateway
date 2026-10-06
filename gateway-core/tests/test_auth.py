@@ -5,8 +5,6 @@ it, because that is the whole of what this module does. The one thing asserted
 about every refusal is that the token is not in it.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from gateway.core.auth import AUTH_MODES, AuthConfigurationError, auth_headers

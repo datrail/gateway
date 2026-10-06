@@ -6,8 +6,6 @@ consumer inherits the mistake. Three properties are worth holding, and all
 three are cheap.
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any

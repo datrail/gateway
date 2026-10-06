@@ -14,8 +14,6 @@ and it is exactly what an operator needs, because drift and garbage must never
 masquerade as *this endpoint simply has no rule*.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from gateway.core.endpoint import (

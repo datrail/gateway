@@ -1,7 +1,5 @@
 """The startup line, and what it must not carry."""
 
-from __future__ import annotations
-
 import logging
 
 import pytest
@@ -10,12 +8,16 @@ from gateway.core.bundle.client import logger as bundle_client_logger
 from gateway.core.bundle.validate import logger as bundle_validation_logger
 from gateway.core.denial import logger as denial_logger
 from gateway.standalone.routes import Route
+from gateway.standalone.routes import log as routes_logger
 from gateway.standalone.server import (
     _configure_logging,
     _safe_to_log,
     build_gateway,
-    log,
 )
+from gateway.standalone.server import log as server_logger
+
+# Where `_configure_logging` installs the handler and level.
+COMPONENT = logging.getLogger("gateway")
 
 
 @pytest.mark.parametrize(
@@ -76,29 +78,38 @@ def test_the_startup_line_itself_is_safe(caplog):
 def test_a_blank_or_valid_level_is_applied(monkeypatch, raw, expected):
     monkeypatch.setenv("RAIL_GATEWAY_LOG_LEVEL", raw)
     _configure_logging()
-    assert log.level == expected
+    assert COMPONENT.level == expected
 
 
 def test_configuring_twice_does_not_double_every_line(monkeypatch):
     """`main()` calls this once, but a test calling it again would otherwise
-    leave the module logger printing everything twice for the rest of the run."""
+    leave the component logger printing everything twice for the rest of the
+    run."""
     monkeypatch.setenv("RAIL_GATEWAY_LOG_LEVEL", "INFO")
     _configure_logging()
-    before = len(log.handlers)
+    before = len(COMPONENT.handlers)
     _configure_logging()
-    assert len(log.handlers) == before
+    assert len(COMPONENT.handlers) == before
 
 
 def test_core_logs_remain_children_of_the_configured_component_logger():
-    """Moving code into ``core`` must not move its operational log hierarchy.
+    """Every module logger is a child of ``gateway``, core's included.
 
     The process installs its handler and selected level on ``gateway``. A
-    ``core.*`` logger would bypass that handler, dropping bundle INFO events and
+    logger outside it would bypass that handler, dropping INFO events and
     leaving warnings to Python's unformatted last-resort handler.
     """
-    assert bundle_client_logger.name == "gateway.bundle"
-    assert bundle_validation_logger.name == "gateway.bundle"
-    assert denial_logger.name == "gateway.denial"
+    for logger in (
+        bundle_client_logger,
+        bundle_validation_logger,
+        denial_logger,
+        routes_logger,
+        server_logger,
+    ):
+        ancestor = logger.parent
+        while ancestor is not None and ancestor is not COMPONENT:
+            ancestor = ancestor.parent
+        assert ancestor is COMPONENT, logger.name
 
 
 @pytest.mark.parametrize("raw", ["verbose", "20", "TRACE"])

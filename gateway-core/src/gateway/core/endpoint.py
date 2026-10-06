@@ -57,8 +57,6 @@ the next reader to look for a hazard that no longer exists. Restore it only if
 the protocol restores batching.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass
 from typing import Any, Literal

@@ -19,8 +19,6 @@ this suite already runs in: `conftest.gateway_url` never reaches its control
 plane on purpose.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 
