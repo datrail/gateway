@@ -1,28 +1,20 @@
-# Lint, test, and check the image on every change. container-release.yml calls
-# this workflow as its gate too: a tag can sit on a commit no pull request ran.
-
 name: CI
 
 on:
   pull_request:
   push:
     branches: [master]
+  # Callable so container-release.yml can gate on it: a tag can sit on a commit
+  # no pull request ran.
   workflow_call:
     inputs:
       ref:
-        description: >-
-          Commit to check out. The release passes its tag: a called workflow's
-          own ref is the caller's, not the tag. Empty means the triggering commit.
-        type: string
+        description: "Commit or tag to check. Defaults to the triggering ref."
         required: false
-        default: ""
+        type: string
 
 permissions:
   contents: read
-
-# Python packages and uv are pinned exactly: they are what the image ships.
-# Actions float on a major tag, so runner fixes arrive without a commit, except
-# setup-uv, which since v8 publishes only exact tags.
 
 # Every uv command fails if uv.lock does not match the pyproject.toml files.
 env:
@@ -30,6 +22,8 @@ env:
 
 jobs:
   lint:
+    # Named, not ubuntu-latest: that label moves to 26.04 from 2026-10-19 to
+    # 11-19, run by run (actions/runner-images#14748). Move on purpose (DR-133).
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
@@ -37,8 +31,8 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      # The uv the Dockerfile uses. It installs Python from `.python-version`,
-      # and caches its downloads and that Python between runs.
+      # The uv the Dockerfile uses; exact tag, since setup-uv publishes no major
+      # tags from v8. It installs Python from `.python-version` and caches it.
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.21"
@@ -70,65 +64,16 @@ jobs:
           PYTHONUNBUFFERED: "1"
           PYTEST_ADDOPTS: "-vv"
 
-  # amd64 only: the release builds arm64 as well, and emulating it here would
-  # answer "does it build" no differently.
-  image:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
-
-      - uses: docker/setup-buildx-action@v4
-
-      # Context is the repo root, for uv.lock; Dockerfile.dockerignore limits
-      # what is sent. The cache scope is shared with container-release.yml, so a
-      # release reuses these layers: keep the two names in step.
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: gateway-standalone/Dockerfile
-          push: false
-          load: true
-          tags: gateway:ci
-          cache-from: type=gha,scope=image-standalone
-          cache-to: type=gha,mode=max,scope=image-standalone
-
-      # A build can succeed and the image still fail to start. Run it with every
-      # variable `.env.example` requires, on a non-default port (to catch
-      # RAIL_GATEWAY_PORT being ignored), and with a control plane it cannot
-      # reach: it must still come up live and report itself unready.
-      - name: The image starts, serves liveness, and reports itself unready
-        run: |
-          docker run -d --name gw -p 9100:9100 \
-            -e RAIL_GATEWAY_PORT=9100 \
-            -e RAIL_PLUGIN_ENABLED=true \
-            -e RAIL_CENTER_URL=http://rail-center.invalid \
-            -e RAIL_GATEWAY_SLUG=edge \
-            -e RAIL_GATEWAY_ROUTES_FILE=/etc/rail/routes.yaml \
-            -v "$PWD/e2e/standalone/routes.yaml:/etc/rail/routes.yaml:ro" gateway:ci
-
-          # Startup waits up to 5s for a first bundle fetch; 40 tries is margin.
-          curl -fsS -o /dev/null --retry 40 --retry-delay 1 --retry-all-errors \
-            http://127.0.0.1:9100/health \
-            || { echo "::error::the image did not serve /health"; exit 1; }
-
-          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9100/ready)
-          if [ "$code" != 503 ]; then
-            echo "::error::/ready answered $code holding no bundle, expected 503"
-            exit 1
-          fi
-
-      - name: Logs, on failure
-        if: failure()
-        run: docker logs gw
-
-  # The only check of a decision over the wire: a policy fetched from a control
-  # plane refusing a real MCP call, and the denial reaching it.
+  # Builds each image and runs it against stubs, which the unit suite, running
+  # in-process, can't: a policy fetched, a real MCP call refused, the denial
+  # reported. amd64 only: emulating the release's arm64 would add nothing here.
   e2e:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [standalone]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -136,14 +81,34 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      # The exact command the READMEs document. `--exit-code-from driver` makes
-      # the driver's assertions the result.
-      - name: A policy refuses a real call, and the denial is reported
-        run: |
-          docker compose -f e2e/standalone/compose.yml up --build --force-recreate \
-            --abort-on-container-exit --exit-code-from driver
+      # Compose can't reach the GHA cache, so build here first; compose's own
+      # build then finds every layer in this builder. The scope is shared with
+      # container-release.yml: keep the names in step.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: gateway-${{ matrix.stack }}/Dockerfile
+          push: false
+          load: true
+          tags: gateway-${{ matrix.stack }}:ci
+          cache-from: type=gha,scope=image-${{ matrix.stack }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.stack }}
 
-      # The driver says which assertion failed; the logs say why.
-      - name: Logs, on failure
-        if: failure()
-        run: docker compose -f e2e/standalone/compose.yml logs --no-color
+      - run: sh .github/smoke/${{ matrix.stack }}.sh gateway-${{ matrix.stack }}:ci
+
+      - run: make e2e-${{ matrix.stack }}
+
+      - if: failure()
+        run: |
+          docker logs smoke || true
+          docker compose -f e2e/${{ matrix.stack }}/compose.yml logs --no-color
+
+  # The check the ruleset requires, in place of one per stack. always(): a
+  # failed stack would otherwise skip it, and a skipped check counts as passing.
+  e2e-passed:
+    needs: e2e
+    if: always()
+    runs-on: ubuntu-slim
+    steps:
+      - if: needs.e2e.result != 'success'
+        run: exit 1
