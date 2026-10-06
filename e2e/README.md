@@ -1,8 +1,8 @@
 # The end-to-end stacks
 
 One stack per interface: its image against a stubbed Rail Center and a stubbed
-MCP upstream, with a driver that asserts what crossed the wire. Nothing outside
-this directory is needed, so it is also the quickstart.
+MCP upstream, with a driver that asserts what crossed the wire. It needs neither
+a Rail Center nor an agent, so it is also the quickstart.
 
 ```bash
 make e2e              # every stack in turn
@@ -34,8 +34,8 @@ The stubs are WireMock (`services.yml`), and the assertions read their request
 journals, not logs: a log says the gateway believes it did something, a journal
 says it happened.
 
-- `rc-mappings/` serves the policy bundle and accepts denials. The three bundles
-  differ only in the `Authorization` they match and the `enforcement` they carry.
+- `rc-mappings/` serves the policy bundle and accepts denials. Each bundle
+  matches one credential's `Authorization`; the table below gives its posture.
 - `mcp-mappings/` answers as an MCP server.
 - `tickets.env` holds two `x-rail` tickets: unsigned base64url JSON.
 - `lib.py` holds the driver's helpers, standard library only.
