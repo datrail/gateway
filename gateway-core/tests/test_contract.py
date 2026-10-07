@@ -9,7 +9,7 @@ from core_support import REASONS, Holder, get_enforcement_params
 from gateway.core.enforcement import DenialReporter, judge
 
 
-async def collect_reports(verdict) -> list[dict]:
+async def _collect_reports(verdict) -> list[dict]:
     """The report bodies the verdict sends, as Rail Center receives them."""
     bodies: list[dict] = []
 
@@ -40,7 +40,7 @@ async def test_the_verdict_matches_every_row_of_the_contract(case):
 
     assert verdict.status == case.status
     assert verdict.reason == (REASONS[case.status] if case.status else "")
-    sent = await collect_reports(verdict)
+    sent = await _collect_reports(verdict)
     if case.report is None:
         assert sent == []
     else:
