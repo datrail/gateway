@@ -1,0 +1,5 @@
+# Loaded automatically by terraform plan/apply. Keep project_id, region and
+# prefix in sync with ../../scripts/config.env, which the scripts read.
+project_id = "your-project"
+region     = "us-central1"
+prefix     = "g2p"
