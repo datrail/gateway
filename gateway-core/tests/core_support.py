@@ -1,8 +1,5 @@
-"""Helpers for the gateway-core suite, and for the members built on gateway-core.
-
-The root `pyproject.toml` puts this folder on `sys.path`, as it does each
-member's own support module.
-"""
+"""Helpers for the gateway-core suite and the members built on it, including
+the enforcement contract table every interface runs."""
 
 import base64
 import json
@@ -46,21 +43,10 @@ def build_bundle(
     enforcement: str = "enforce",
     fallback: str = "pass",
 ):
-    """A validated bundle, at `enforce`/`pass` unless a case asks otherwise.
+    """A validated bundle, at `enforce` and fallback `pass` unless asked otherwise.
 
-    The posture is part of the bundle after RC-312 rather than a flag on the
-    layer that reads it, which is why it is a parameter here: a case that wants
-    a verdict logged and not acted on asks for an `observe` bundle, the same way
-    an operator would.
-
-    **The fallback default is `pass` and Rail Center's is `block`**, which is a
-    deliberate disagreement rather than an oversight. Almost every case here is
-    about the walk — which policy denied, what the report names, what the caller
-    is told — and every one of them calls an endpoint with no binding entry,
-    because a binding is not what any of them is testing. Under `block` the
-    fallback would refuse each of those before the chain was reached, and the
-    file would pass while asserting nothing about the walk at all. The cases
-    that *are* about the fallback name it.
+    The fallback defaults to `pass`, unlike Rail Center's `block`: most cases
+    call an unbound endpoint, and `block` would refuse them before the chain.
     """
     return validate_bundle(
         {
@@ -74,54 +60,38 @@ def build_bundle(
     )
 
 
-# The seeded "deny unknown agents": it holds on any request arriving without a
-# ticket, which is every request below that does not deliberately carry one.
-# One rule in the chain, so the policy a report names is never ambiguous.
+# The seeded "deny unknown agents": denies any request without a usable ticket.
 DENIES_EVERYTHING = build_policy(
     DENY_ID, {"field": "x_rail_header", "operator": "missing"}
 )
 
-# Denies a request that *does* carry a ticket, for the handful of cases whose
-# subject is what the claims on one become in a report. It keys on the presence
-# of `agent_id` rather than on the claim's value, so a test can send a malformed
-# claim and still reach the denial the malformed claim is about.
+# Denies any valid ticket, whatever its claims, so a malformed claim still
+# reaches a report.
 DENIES_ANY_TICKET = build_policy(DENY_ID, {"field": "agent_id", "operator": "present"})
 
-# Keyed on the endpoint, so it leaves the chain for a message that names no
-# tool by design and stays in it for one this gateway could not resolve.
+# Keyed on the endpoint: dropped for a keyless message, kept for an
+# unrecognised call.
 DENIES_UNMATCHED_SKILL = build_policy(
     SKILL_ID, {"field": "skill_match", "operator": "missing"}
 )
 
-# Outside the grammar. Two of these at different priorities is what asks
-# whether a refusal names the rule an operator has to disable.
+# Outside the grammar, so the bundle can't be applied.
 UNREADABLE = {"field": "invented_field", "operator": "eq", "value": 1}
 
-# An alert on any ticket. It is in the chain so that a case can bind an
-# endpoint to something without that something denying — what is being asserted
-# is that the walk happened, not what it concluded.
+# Alerts on any ticket and never denies, so a binding can name a policy.
 NOTES_ANY_TICKET = build_policy(
     SKILL_ID, {"field": "agent_id", "operator": "present"}, action="alert"
 )
 
-# `delivery#/mcp#tools/call#track_package`, gated to the one policy above. A
-# binding *entry* is what the fallback looks for; which policies it names is the
-# chain's business. A binding as the bundle carries it — the **full** key, with
-# the data source slug Rail Center composed it from. The gateway strips that
-# first segment and matches the rest against what it composed from the request,
-# so a fixture carrying the comparable form would pass while testing nothing
-# about the strip.
+# The full key, slug included, as Rail Center publishes it: the gateway strips
+# the slug before matching.
 FULL_KEY = f"{SLUG}#{KEY}"
 BOUND = {"endpoint_key": FULL_KEY, "mode": "gated", "policy_ids": [SKILL_ID]}
 
 
 class Holder:
-    """A bundle holder that holds what the test said, and nothing else.
-
-    `judge` asks it one question — `current()` — so standing up a real
-    `BundleHolder` and a control plane for it would be a fetch, a refresh loop
-    and a transport in service of a single return value.
-    """
+    """A bundle holder that holds what the test says: `judge` only calls
+    `current()`."""
 
     def __init__(self, held=None):
         self.held = held
@@ -150,7 +120,7 @@ DISCOVERY = tuple(
 
 
 def build_deep_call(depth: int) -> bytes:
-    """A `tools/call` nesting `depth` levels — a kilobyte of brackets, no more."""
+    """A `tools/call` nesting `depth` levels."""
     inner = "[" * (depth - 3) + "]" * (depth - 3)
     return (
         '{"method": "tools/call", "params": {"name": "track_package", '
@@ -158,8 +128,7 @@ def build_deep_call(depth: int) -> bytes:
     ).encode()
 
 
-# What each refusal tells the caller, spelled out rather than imported: the
-# body is the wire format.
+# The refusal bodies, as literals: they are the wire format.
 REASONS = {403: "denied by policy", 503: "policy ruleset cannot be applied"}
 
 
@@ -172,10 +141,7 @@ def build_report(
     claimed: str | None = None,
     **claims: Any,
 ) -> dict[str, Any]:
-    """A denial report as Rail Center receives it, less `denied_at`.
-
-    The keys are literals for the same reason as `REASONS`.
-    """
+    """A denial report as Rail Center receives it, less `denied_at`."""
     metadata = {"endpoint_resolution": resolution, "x-rail-status": ticket_state}
     if claimed is not None:
         metadata["claimed-x-rail-status"] = claimed
@@ -189,13 +155,9 @@ def build_report(
 
 @dataclass(frozen=True)
 class EnforcementCase:
-    """One row of the enforcement contract: a held bundle, one request, and
-    what the caller and Rail Center get.
-
-    Standalone's behaviour is the definition. An interface a row does not apply
-    to names it in `not_for` with the reason, which `get_enforcement_params` turns
-    into a visible skip.
-    """
+    """One row of the contract: a held bundle, one request, and what the caller
+    and Rail Center get. Standalone's behaviour is the definition; `not_for`
+    names the interfaces a row is skipped for, and why."""
 
     name: str
     policies: tuple[dict[str, Any], ...] = ()
@@ -210,7 +172,7 @@ class EnforcementCase:
     x_rail_status: tuple[str, ...] = ()
     # The refusal's status; None where the call is forwarded.
     status: int | None = None
-    # The denial report, as `build_report()` builds it; None where none is sent.
+    # The denial report less `denied_at`; None where none is sent.
     report: Mapping[str, Any] | None = None
     not_for: Mapping[str, str] = field(default_factory=dict)
 
@@ -230,8 +192,8 @@ UNDASHED_AGENT = "5c8f1e4200004000800000000000a9e7"
 
 
 def _encode_raw_ticket(posture_literal: str) -> str:
-    """A ticket whose `posture_score` is `posture_literal` as written: `json.dumps`
-    would emit `Infinity` for an overflow, which is not JSON."""
+    """A ticket with `posture_literal` as written: `json.dumps` turns an
+    overflow into `Infinity`, which isn't JSON."""
     raw = (
         f'{{"agent_id": "{AGENT}", "exp": 4102444800, '
         f'"posture_score": {posture_literal}}}'
@@ -264,8 +226,7 @@ ENFORCEMENT_CASES = [
     ),
     EnforcementCase("no bundle", enforcement=None),
     # --- each fallback ---
-    # Refused as a policy denial is, so a caller can't map the bindings, and
-    # reported naming no policy. Acted on at `enforce` only.
+    # Refused like a policy denial, reported with no policy, at `enforce` only.
     EnforcementCase(
         "unbound, block",
         fallback="block",
@@ -346,8 +307,7 @@ ENFORCEMENT_CASES = [
         report=build_report(ticket_state="valid", agent_id=AGENT),
     ),
     # --- keyless and unrecognised keys ---
-    # Naming no tool by design leaves the endpoint rules; a `tools/call` with no
-    # key faces the whole chain.
+    # Keyless skips the endpoint rules; an unrecognised call faces the whole chain.
     EnforcementCase(
         "keyless",
         (DENIES_EVERYTHING,),
@@ -465,8 +425,7 @@ ENFORCEMENT_CASES = [
         report=build_report(claimed="n" * MAX_LOGGED_LENGTH + "…<truncated>"),
     ),
     # --- the claims a report carries ---
-    # A claim Rail Center's schema would refuse is dropped, not sent: a 422
-    # loses the whole row.
+    # A claim Rail Center would refuse is dropped: a 422 loses the whole report.
     EnforcementCase(
         "claims of the wrong shape",
         (DENIES_ANY_TICKET,),
@@ -551,8 +510,8 @@ ENFORCEMENT_CASES = [
 
 
 def get_enforcement_params(interface: str) -> list:
-    """`ENFORCEMENT_CASES` as pytest params for `interface`, ids by row name. A
-    row that does not apply is skipped with the table's own reason."""
+    """`ENFORCEMENT_CASES` as pytest params for `interface`, skipping the rows
+    `not_for` it."""
     return [
         pytest.param(
             case,
