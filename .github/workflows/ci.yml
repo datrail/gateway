@@ -82,6 +82,17 @@ jobs:
       - run: make init
       - run: make proto-check
 
+      # The committed code must be what `make proto` writes from the proto.
+      - run: make proto
+      - name: Check the generated code is committed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            git diff
+            echo "::error::The generated code is out of date: run make proto and commit it."
+            exit 1
+          fi
+
   # Builds each image and runs it against stubs, which the unit suite, running
   # in-process, can't: a policy fetched, a real MCP call refused, the denial
   # reported. amd64 only: emulating the release's arm64 would add nothing here.
