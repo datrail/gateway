@@ -12,10 +12,12 @@ import pytest
 from core_support import (
     DENIES_ANY_TICKET,
     DENIES_EVERYTHING,
+    REASONS,
     Holder,
     build_bundle,
     build_call,
     encode_ticket,
+    get_enforcement_params,
 )
 from gateway.apigee_grpc import servicer as servicer_module
 from gateway.apigee_grpc._proto.external_callout_pb2 import (
@@ -28,8 +30,8 @@ from gateway.apigee_grpc._proto.external_callout_pb2_grpc import (
     ExternalCalloutServiceStub,
     add_ExternalCalloutServiceServicer_to_server,
 )
-from gateway.apigee_grpc.servicer import DECISION, RailCallout
-from gateway.core.enforcement import DenialReporter
+from gateway.apigee_grpc.servicer import BODY, DECISION, STATUS, RailCallout
+from gateway.core.enforcement import DenialReporter, refusal_body
 
 
 class _Reports:
@@ -100,6 +102,42 @@ async def _call_once(held, context: MessageContext):
         answer = await ExternalCalloutServiceStub(channel).ProcessMessage(context)
     await _settle(reporter)
     return answer, reports.bodies
+
+
+# --- the contract table ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", get_enforcement_params("apigee-grpc"))
+async def test_the_answer_and_the_report_match_every_row_of_the_contract(case):
+    headers = {}
+    if case.x_rail:
+        headers["x-rail"] = list(case.x_rail)
+    if case.x_rail_status:
+        headers["x-rail-status"] = list(case.x_rail_status)
+    context = _build_context(
+        verb=case.method, uri=case.path, content=case.body, headers=headers
+    )
+
+    answer, sent = await _call_once(case.get_bundle(), context)
+
+    flow = _read_flow(answer)
+    if case.status is None:
+        assert flow == {DECISION: "allow"}
+    else:
+        # The bundle's RaiseFault fails on an unset variable, so both are
+        # always set on a refusal.
+        assert flow == {
+            DECISION: "refuse",
+            STATUS: str(case.status),
+            BODY: refusal_body(REASONS[case.status]).decode(),
+        }
+    if case.report is None:
+        assert sent == []
+    else:
+        (body,) = sent
+        body.pop("denied_at")
+        assert body == case.report
 
 
 # --- reading ---
