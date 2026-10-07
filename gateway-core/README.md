@@ -135,3 +135,8 @@ refused, naming `RAIL_PLUGIN_ENABLED` and the bundle.
 `tests/vectors/` holds the conformance vectors: ticket reading, bundle
 validation and the evaluation walk, written as data so a reimplementation in
 another language is answerable to the same cases.
+
+`tests/core_support.py` holds `ENFORCEMENT_CASES`, the enforcement contract
+every interface runs: a held bundle and one request per row, and the answer and
+denial report they must give. `make dump-enforcement-cases` writes the table to
+`enforcement-cases.json` for review.
