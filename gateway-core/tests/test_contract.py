@@ -31,7 +31,7 @@ async def collect_reports(verdict) -> list[dict]:
 @pytest.mark.parametrize("case", get_enforcement_params("core"))
 async def test_the_verdict_matches_every_row_of_the_contract(case):
     verdict = judge(
-        Holder(case.build_bundle()),
+        Holder(case.get_bundle()),
         case.path,
         case.body,
         list(case.x_rail) or None,

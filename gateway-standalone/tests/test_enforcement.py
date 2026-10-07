@@ -52,11 +52,11 @@ from core_support import (
     SKILL_ID,
     UNREADABLE,
     Holder,
-    bundle,
-    call,
+    build_bundle,
+    build_call,
+    build_policy,
+    encode_ticket,
     get_enforcement_params,
-    policy,
-    ticket,
 )
 from gateway.core.enforcement import (
     MAX_FALLBACK_REPORTS_IN_FLIGHT,
@@ -261,7 +261,7 @@ async def settled(recorder: _Reports, *, expecting: int) -> None:
 async def test_the_answer_and_the_report_match_every_row_of_the_contract(case):
     """Each row through the layer: a refusal is answered here and never
     reaches the app below, and a forwarded call reaches it as sent."""
-    enforcement, downstream, reports = layer(case.build_bundle())
+    enforcement, downstream, reports = layer(case.get_bundle())
     headers = [(b"x-rail", v.encode("latin-1")) for v in case.x_rail] + [
         (b"x-rail-status", v.encode("latin-1")) for v in case.x_rail_status
     ]
@@ -300,14 +300,14 @@ async def test_an_unreadable_condition_is_logged_against_the_policy_carrying_it(
     operator holding two rules with the same unreadable condition cannot do from
     the field name alone. The one named is the one the walk reached — priority
     1 — because that is the rule whose removal changes the answer."""
-    held = bundle(
-        policy(BAD_ID, UNREADABLE, priority=1),
-        policy(SKILL_ID, UNREADABLE, priority=2),
+    held = build_bundle(
+        build_policy(BAD_ID, UNREADABLE, priority=1),
+        build_policy(SKILL_ID, UNREADABLE, priority=2),
     )
     enforcement, _, _ = layer(held)
 
     with caplog.at_level(logging.ERROR, logger="gateway"):
-        assert (await drive(enforcement, call())).status == 503
+        assert (await drive(enforcement, build_call())).status == 503
 
     written = "\n".join(caplog.messages)
     assert BAD_ID in written
@@ -321,9 +321,9 @@ async def test_an_unreadable_condition_is_logged_against_the_policy_carrying_it(
 
 @pytest.mark.asyncio
 async def test_a_denial_under_enforce_is_reported():
-    enforcement, _, reports = layer(bundle(DENIES_EVERYTHING))
+    enforcement, _, reports = layer(build_bundle(DENIES_EVERYTHING))
 
-    await drive(enforcement, call())
+    await drive(enforcement, build_call())
     await settled(reports, expecting=1)
 
     assert len(reports.bodies) == 1
@@ -341,9 +341,9 @@ async def test_a_denial_under_enforce_is_reported():
 async def test_denied_at_is_an_absolute_instant():
     """A naive local time shifts every denial by the host's UTC offset, and a
     denial's time is what an operator correlates everything else against."""
-    enforcement, _, reports = layer(bundle(DENIES_EVERYTHING))
+    enforcement, _, reports = layer(build_bundle(DENIES_EVERYTHING))
 
-    await drive(enforcement, call())
+    await drive(enforcement, build_call())
     await settled(reports, expecting=1)
 
     denied_at = datetime.fromisoformat(reports.only()["denied_at"])
@@ -362,10 +362,10 @@ async def test_a_report_rail_center_refuses_is_named_in_the_log(caplog):
     shape of a denial. A 422 swallowed as success is a missing row and a silent
     schema drift, which is the failure this whole path exists to make visible."""
     reports = _Reports(status=422)
-    enforcement, _, _ = layer(bundle(DENIES_EVERYTHING), reports=reports)
+    enforcement, _, _ = layer(build_bundle(DENIES_EVERYTHING), reports=reports)
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
-        await drive(enforcement, call())
+        await drive(enforcement, build_call())
         await settled(reports, expecting=1)
 
     # The reporter's own lines. `caplog` captures every logger, and the
@@ -390,14 +390,14 @@ async def test_a_report_that_never_left_names_the_denial_it_describes(caplog):
 
     enforcement = _Enforcement(
         _Downstream(),
-        Holder(bundle(fallback="block")),
+        Holder(build_bundle(fallback="block")),
         rail_center_url=RAIL_CENTER_URL,
         auth={"Authorization": "Bearer t"},
         transport=httpx.MockTransport(unreachable),
     )
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
-        assert (await drive(enforcement, call())).status == 403
+        assert (await drive(enforcement, build_call())).status == 403
         for _ in range(200):
             await asyncio.sleep(0)
 
@@ -411,10 +411,10 @@ async def test_an_accepted_report_says_nothing(caplog):
     """The counterpart, so the test above is about the status and not about the
     path always logging."""
     reports = _Reports(status=202)
-    enforcement, _, _ = layer(bundle(DENIES_EVERYTHING), reports=reports)
+    enforcement, _, _ = layer(build_bundle(DENIES_EVERYTHING), reports=reports)
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
-        await drive(enforcement, call())
+        await drive(enforcement, build_call())
         await settled(reports, expecting=1)
 
     assert reported(caplog) == []
@@ -437,9 +437,9 @@ async def test_a_report_is_bounded_in_time(monkeypatch):
         return real(*args, **kwargs)
 
     monkeypatch.setattr(httpx, "AsyncClient", recording)
-    enforcement, _, reports = layer(bundle(DENIES_EVERYTHING))
+    enforcement, _, reports = layer(build_bundle(DENIES_EVERYTHING))
 
-    await drive(enforcement, call())
+    await drive(enforcement, build_call())
     await settled(reports, expecting=1)
 
     assert seen, "the reporter built no client"
@@ -458,9 +458,9 @@ async def test_a_report_in_flight_is_held_by_a_strong_reference():
     denial for the life of the process."""
     hold = asyncio.Event()
     reports = _Reports(hold=hold)
-    enforcement, _, _ = layer(bundle(DENIES_EVERYTHING), reports=reports)
+    enforcement, _, _ = layer(build_bundle(DENIES_EVERYTHING), reports=reports)
 
-    await drive(enforcement, call())
+    await drive(enforcement, build_call())
     for _ in range(50):
         await asyncio.sleep(0)
 
@@ -488,10 +488,10 @@ async def test_a_walk_that_raises_forwards_rather_than_refusing(caplog, monkeypa
         raise RuntimeError("a defect in the walk")
 
     monkeypatch.setattr("gateway.core.enforcement.decide", explode)
-    enforcement, downstream, reports = layer(bundle(DENIES_EVERYTHING))
+    enforcement, downstream, reports = layer(build_bundle(DENIES_EVERYTHING))
 
     with caplog.at_level(logging.ERROR, logger="gateway"):
-        answer = await drive(enforcement, call())
+        answer = await drive(enforcement, build_call())
     await settled(reports, expecting=0)
 
     assert answer.status == 200
@@ -527,11 +527,11 @@ async def test_an_enforcing_gateway_refuses_without_previewing_the_same_call(cap
     above the line recording that it was refused, which is a false statement
     about the request beside a true one.
     """
-    enforcement, downstream, _ = layer(bundle(fallback="block"))
+    enforcement, downstream, _ = layer(build_bundle(fallback="block"))
 
     with caplog.at_level(logging.INFO, logger="gateway"):
         answer = await drive(
-            enforcement, call(), headers=[(b"x-rail", ticket().encode())]
+            enforcement, build_call(), headers=[(b"x-rail", encode_ticket().encode())]
         )
 
     assert answer.status == 403
@@ -557,7 +557,7 @@ async def test_reports_past_the_fallback_cap_are_shed_rather_than_queued(caplog)
     """
     held = asyncio.Event()
     reports = _Reports(hold=held)
-    enforcement, downstream, _ = layer(bundle(fallback="block"), reports=reports)
+    enforcement, downstream, _ = layer(build_bundle(fallback="block"), reports=reports)
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
         for n in range(MAX_REPORTS_IN_FLIGHT + 10):
@@ -597,7 +597,7 @@ async def test_a_rule_decided_denial_is_reported_with_the_unruled_class_full():
     held = asyncio.Event()
     reports = _Reports(hold=held)
     enforcement, downstream, _ = layer(
-        bundle(
+        build_bundle(
             DENIES_EVERYTHING,
             bindings=[bound_to_the_denying_rule],
             fallback="block",
@@ -612,7 +612,7 @@ async def test_a_rule_decided_denial_is_reported_with_the_unruled_class_full():
     assert len(reports.bodies) == MAX_FALLBACK_REPORTS_IN_FLIGHT
     assert all("policy_id" not in body for body in reports.bodies)
 
-    assert (await drive(enforcement, call())).status == 403
+    assert (await drive(enforcement, build_call())).status == 403
 
     await settled(reports, expecting=MAX_FALLBACK_REPORTS_IN_FLIGHT + 1)
     assert len(reports.bodies) == MAX_FALLBACK_REPORTS_IN_FLIGHT + 1
@@ -635,10 +635,10 @@ async def test_reports_past_the_total_cap_are_shed_whatever_decided_them():
     """
     held = asyncio.Event()
     reports = _Reports(hold=held)
-    enforcement, downstream, _ = layer(bundle(DENIES_EVERYTHING), reports=reports)
+    enforcement, downstream, _ = layer(build_bundle(DENIES_EVERYTHING), reports=reports)
 
     for n in range(MAX_REPORTS_IN_FLIGHT + 10):
-        assert (await drive(enforcement, call())).status == 403, n
+        assert (await drive(enforcement, build_call())).status == 403, n
     for _ in range(500):
         await asyncio.sleep(0)
 
@@ -669,7 +669,7 @@ async def test_the_policy_less_class_frees_its_budget_as_each_report_lands():
     a drained set rather than a full one.
     """
     reports = _Reports()
-    enforcement, downstream, _ = layer(bundle(fallback="block"), reports=reports)
+    enforcement, downstream, _ = layer(build_bundle(fallback="block"), reports=reports)
 
     for n in range(MAX_FALLBACK_REPORTS_IN_FLIGHT):
         assert (await drive(enforcement, b"not json at all %d" % n)).status == 403, n
@@ -692,10 +692,10 @@ async def test_the_fallback_refusal_says_in_the_log_what_the_caller_is_not_told(
     """The operator's half of the same trade: the log distinguishes what the
     403 deliberately does not, and says that nothing was reported, so a denial
     absent from Rail Center is not read as a request that was never refused."""
-    enforcement, _, _ = layer(bundle(fallback="block"))
+    enforcement, _, _ = layer(build_bundle(fallback="block"))
 
     with caplog.at_level(logging.WARNING, logger="gateway"):
-        await drive(enforcement, call())
+        await drive(enforcement, build_call())
 
     written = "\n".join(caplog.messages)
     assert KEY in written
@@ -712,8 +712,8 @@ async def test_the_fallback_refusal_says_in_the_log_what_the_caller_is_not_told(
 
 @pytest.mark.asyncio
 async def test_a_body_arriving_in_chunks_reaches_the_app_below_intact():
-    enforcement, downstream, _ = layer(bundle(DENIES_EVERYTHING), blocking=False)
-    whole = call()
+    enforcement, downstream, _ = layer(build_bundle(DENIES_EVERYTHING), blocking=False)
+    whole = build_call()
     chunks = [whole[:10], whole[10:25], whole[25:]]
 
     answer = await drive(
@@ -734,8 +734,8 @@ async def test_a_disconnect_is_not_the_end_of_a_body():
     the last chunk ends the drain on a body that never finished arriving — and
     then hands that fragment downstream as a complete request while swallowing
     the one message telling the app below the caller is gone."""
-    enforcement, downstream, _ = layer(bundle(DENIES_EVERYTHING), blocking=False)
-    whole = call()
+    enforcement, downstream, _ = layer(build_bundle(DENIES_EVERYTHING), blocking=False)
+    whole = build_call()
 
     await drive(
         enforcement,
@@ -774,9 +774,9 @@ async def test_a_call_aborted_mid_body_is_not_judged_and_reports_no_denial(caplo
     a body ends short only when the caller has already gone, and uvicorn drops
     whatever the layer composes after that: the forged row is the whole of the
     damage, and the log line is the whole of the operator's signal."""
-    held = bundle(DENIES_UNMATCHED_SKILL, bindings=EXEMPT)
-    whole = call()
-    carrying = [(b"x-rail", ticket(posture_score=90).encode())]
+    held = build_bundle(DENIES_UNMATCHED_SKILL, bindings=EXEMPT)
+    whole = build_call()
+    carrying = [(b"x-rail", encode_ticket(posture_score=90).encode())]
 
     enforcement, _, reports = layer(held)
     complete = await drive(enforcement, whole, headers=carrying)
@@ -811,11 +811,11 @@ async def test_an_abort_before_a_single_body_byte_reports_nothing_either():
     """No body byte is needed to produce a forged row: headers and a
     `content-length` are enough, and the empty fragment resolves `unrecognised`
     exactly as a partial one does."""
-    enforcement, downstream, reports = layer(bundle(DENIES_UNMATCHED_SKILL))
+    enforcement, downstream, reports = layer(build_bundle(DENIES_UNMATCHED_SKILL))
 
     answer = await drive(
         enforcement,
-        headers=[(b"x-rail", ticket().encode()), (b"content-length", b"900")],
+        headers=[(b"x-rail", encode_ticket().encode()), (b"content-length", b"900")],
         messages=[{"type": "http.disconnect"}],
     )
     await settled(reports, expecting=0)
@@ -844,7 +844,7 @@ async def test_the_abandoned_path_is_rendered_before_it_reaches_the_log(caplog):
 
     with caplog.at_level(logging.INFO, logger="gateway"):
         for path in (forged, overlong):
-            enforcement, _, reports = layer(bundle(DENIES_EVERYTHING))
+            enforcement, _, reports = layer(build_bundle(DENIES_EVERYTHING))
             answer = await drive(
                 enforcement,
                 path=path,
@@ -875,14 +875,14 @@ async def test_observe_says_what_block_would_refuse_and_still_walks(caplog) -> N
     walk still runs and the verdict is still logged beside the warning.
     """
     enforcement, _, reports = layer(
-        bundle(DENIES_EVERYTHING, fallback="block"), blocking=False
+        build_bundle(DENIES_EVERYTHING, fallback="block"), blocking=False
     )
 
     # Captured at WARNING, which `RAIL_GATEWAY_LOG_LEVEL` accepts: the preview
     # an operator reads before turning `block` on has to survive the level they
     # are most likely to run, and the policy preview beside it already does.
     with caplog.at_level(logging.WARNING, logger="gateway"):
-        answer = await drive(enforcement, call())
+        answer = await drive(enforcement, build_call())
 
     assert answer.status == 200, "observe acts on nothing, the fallback included"
     written = "\n".join(caplog.messages)

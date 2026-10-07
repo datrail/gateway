@@ -27,7 +27,9 @@ BAD_ID = "5c8f1e42-0000-4000-8000-0000000000e1"
 AGENT = "5c8f1e42-0000-4000-8000-00000000a9e7"
 
 
-def policy(pid: str, condition: dict[str, Any], *, priority: int = 1, action="block"):
+def build_policy(
+    pid: str, condition: dict[str, Any], *, priority: int = 1, action="block"
+):
     return {
         "id": pid,
         "name": f"policy {pid[-2:]}",
@@ -38,7 +40,7 @@ def policy(pid: str, condition: dict[str, Any], *, priority: int = 1, action="bl
     }
 
 
-def bundle(
+def build_bundle(
     *policies: dict[str, Any],
     bindings: list[dict[str, Any]] | None = None,
     enforcement: str = "enforce",
@@ -72,41 +74,43 @@ def bundle(
     )
 
 
-#: The seeded "deny unknown agents": it holds on any request arriving without a
-#: ticket, which is every request below that does not deliberately carry one.
-#: One rule in the chain, so the policy a report names is never ambiguous.
-DENIES_EVERYTHING = policy(DENY_ID, {"field": "x_rail_header", "operator": "missing"})
+# The seeded "deny unknown agents": it holds on any request arriving without a
+# ticket, which is every request below that does not deliberately carry one.
+# One rule in the chain, so the policy a report names is never ambiguous.
+DENIES_EVERYTHING = build_policy(
+    DENY_ID, {"field": "x_rail_header", "operator": "missing"}
+)
 
-#: Denies a request that *does* carry a ticket, for the handful of cases whose
-#: subject is what the claims on one become in a report. It keys on the presence
-#: of `agent_id` rather than on the claim's value, so a test can send a malformed
-#: claim and still reach the denial the malformed claim is about.
-DENIES_ANY_TICKET = policy(DENY_ID, {"field": "agent_id", "operator": "present"})
+# Denies a request that *does* carry a ticket, for the handful of cases whose
+# subject is what the claims on one become in a report. It keys on the presence
+# of `agent_id` rather than on the claim's value, so a test can send a malformed
+# claim and still reach the denial the malformed claim is about.
+DENIES_ANY_TICKET = build_policy(DENY_ID, {"field": "agent_id", "operator": "present"})
 
-#: Keyed on the endpoint, so it leaves the chain for a message that names no
-#: tool by design and stays in it for one this gateway could not resolve.
-DENIES_UNMATCHED_SKILL = policy(
+# Keyed on the endpoint, so it leaves the chain for a message that names no
+# tool by design and stays in it for one this gateway could not resolve.
+DENIES_UNMATCHED_SKILL = build_policy(
     SKILL_ID, {"field": "skill_match", "operator": "missing"}
 )
 
-#: Outside the grammar. Two of these at different priorities is what asks
-#: whether a refusal names the rule an operator has to disable.
+# Outside the grammar. Two of these at different priorities is what asks
+# whether a refusal names the rule an operator has to disable.
 UNREADABLE = {"field": "invented_field", "operator": "eq", "value": 1}
 
-#: An alert on any ticket. It is in the chain so that a case can bind an
-#: endpoint to something without that something denying — what is being asserted
-#: is that the walk happened, not what it concluded.
-NOTES_ANY_TICKET = policy(
+# An alert on any ticket. It is in the chain so that a case can bind an
+# endpoint to something without that something denying — what is being asserted
+# is that the walk happened, not what it concluded.
+NOTES_ANY_TICKET = build_policy(
     SKILL_ID, {"field": "agent_id", "operator": "present"}, action="alert"
 )
 
-#: `delivery#/mcp#tools/call#track_package`, gated to the one policy above. A
-#: binding *entry* is what the fallback looks for; which policies it names is the
-#: chain's business. A binding as the bundle carries it — the **full** key, with
-#: the data source slug Rail Center composed it from. The gateway strips that
-#: first segment and matches the rest against what it composed from the request,
-#: so a fixture carrying the comparable form would pass while testing nothing
-#: about the strip.
+# `delivery#/mcp#tools/call#track_package`, gated to the one policy above. A
+# binding *entry* is what the fallback looks for; which policies it names is the
+# chain's business. A binding as the bundle carries it — the **full** key, with
+# the data source slug Rail Center composed it from. The gateway strips that
+# first segment and matches the rest against what it composed from the request,
+# so a fixture carrying the comparable form would pass while testing nothing
+# about the strip.
 FULL_KEY = f"{SLUG}#{KEY}"
 BOUND = {"endpoint_key": FULL_KEY, "mode": "gated", "policy_ids": [SKILL_ID]}
 
@@ -126,7 +130,7 @@ class Holder:
         return self.held
 
 
-def ticket(**claims: Any) -> str:
+def encode_ticket(**claims: Any) -> str:
     """An `x-rail` header carrying `claims`, unpadded as the mint emits it."""
     claims.setdefault("agent_id", AGENT)
     claims.setdefault("exp", 4102444800)  # 2100-01-01, comfortably unexpired
@@ -134,7 +138,7 @@ def ticket(**claims: Any) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-def call(tool: str = "track_package") -> bytes:
+def build_call(tool: str = "track_package") -> bytes:
     return json.dumps({"method": "tools/call", "params": {"name": tool}}).encode()
 
 
@@ -145,7 +149,7 @@ DISCOVERY = tuple(
 )
 
 
-def deep_call(depth: int) -> bytes:
+def build_deep_call(depth: int) -> bytes:
     """A `tools/call` nesting `depth` levels — a kilobyte of brackets, no more."""
     inner = "[" * (depth - 3) + "]" * (depth - 3)
     return (
@@ -201,7 +205,7 @@ class EnforcementCase:
     fallback: str = "pass"
     method: str = "POST"
     path: str = "/mcp"
-    body: bytes = call()
+    body: bytes = build_call()
     x_rail: tuple[str, ...] = ()
     x_rail_status: tuple[str, ...] = ()
     # The refusal's status; None where the call is forwarded.
@@ -210,10 +214,10 @@ class EnforcementCase:
     report: Mapping[str, Any] | None = None
     not_for: Mapping[str, str] = field(default_factory=dict)
 
-    def build_bundle(self) -> UsableBundle | None:
+    def get_bundle(self) -> UsableBundle | None:
         if self.enforcement is None:
             return None
-        return bundle(
+        return build_bundle(
             *self.policies,
             bindings=list(self.bindings),
             enforcement=self.enforcement,
@@ -248,12 +252,14 @@ ENFORCEMENT_CASES = [
     EnforcementCase(
         "allowed",
         (DENIES_EVERYTHING,),
-        x_rail=(ticket(posture_score=90),),
+        x_rail=(encode_ticket(posture_score=90),),
     ),
-    EnforcementCase("unreadable condition", (policy(BAD_ID, UNREADABLE),), status=503),
+    EnforcementCase(
+        "unreadable condition", (build_policy(BAD_ID, UNREADABLE),), status=503
+    ),
     EnforcementCase(
         "unreadable condition, observe",
-        (policy(BAD_ID, UNREADABLE),),
+        (build_policy(BAD_ID, UNREADABLE),),
         enforcement="observe",
     ),
     EnforcementCase("no bundle", enforcement=None),
@@ -269,7 +275,7 @@ ENFORCEMENT_CASES = [
     EnforcementCase(
         "unbound, block, with a ticket",
         fallback="block",
-        x_rail=(ticket(),),
+        x_rail=(encode_ticket(),),
         status=403,
         report=build_report(policy_id=None, ticket_state="valid", agent_id=AGENT),
     ),
@@ -277,22 +283,22 @@ ENFORCEMENT_CASES = [
         "unbound, block, observe",
         enforcement="observe",
         fallback="block",
-        x_rail=(ticket(),),
+        x_rail=(encode_ticket(),),
     ),
     EnforcementCase(
         "unbound, block, none",
         enforcement="none",
         fallback="block",
-        x_rail=(ticket(),),
+        x_rail=(encode_ticket(),),
     ),
     EnforcementCase(
         "bound, block",
         (NOTES_ANY_TICKET,),
         (BOUND,),
         fallback="block",
-        x_rail=(ticket(),),
+        x_rail=(encode_ticket(),),
     ),
-    EnforcementCase("unbound, pass", x_rail=(ticket(),)),
+    EnforcementCase("unbound, pass", x_rail=(encode_ticket(),)),
     EnforcementCase(
         "bound to the denying rule",
         (DENIES_EVERYTHING,),
@@ -329,13 +335,13 @@ ENFORCEMENT_CASES = [
         (DENIES_ANY_TICKET,),
         ({"endpoint_key": KEY, "mode": "gated", "policy_ids": [DENY_ID]},),
         body=DISCOVERY[0],
-        x_rail=(ticket(),),
+        x_rail=(encode_ticket(),),
     ),
     EnforcementCase(
         "call, rule bound to one endpoint",
         (DENIES_ANY_TICKET,),
         ({"endpoint_key": KEY, "mode": "gated", "policy_ids": [DENY_ID]},),
-        x_rail=(ticket(),),
+        x_rail=(encode_ticket(),),
         status=403,
         report=build_report(ticket_state="valid", agent_id=AGENT),
     ),
@@ -350,19 +356,19 @@ ENFORCEMENT_CASES = [
         report=build_report(key=None, resolution="keyless"),
     ),
     EnforcementCase(
-        "keyless, block", fallback="block", body=KEYLESS, x_rail=(ticket(),)
+        "keyless, block", fallback="block", body=KEYLESS, x_rail=(encode_ticket(),)
     ),
     EnforcementCase(
         "keyless, endpoint rule",
         (DENIES_UNMATCHED_SKILL,),
         body=KEYLESS,
-        x_rail=(ticket(),),
+        x_rail=(encode_ticket(),),
     ),
     EnforcementCase(
         "unrecognised, block",
         fallback="block",
-        body=call("track_package\n"),
-        x_rail=(ticket(),),
+        body=build_call("track_package\n"),
+        x_rail=(encode_ticket(),),
         status=403,
         report=build_report(
             policy_id=None,
@@ -377,7 +383,7 @@ ENFORCEMENT_CASES = [
             f"unrecognised {name}, endpoint rule",
             (DENIES_UNMATCHED_SKILL,),
             body=body,
-            x_rail=(ticket(),),
+            x_rail=(encode_ticket(),),
             status=403,
             report=build_report(
                 policy_id=SKILL_ID,
@@ -388,7 +394,7 @@ ENFORCEMENT_CASES = [
             ),
         )
         for name, body in (
-            ("tool name", call("track_package\n")),
+            ("tool name", build_call("track_package\n")),
             (
                 "no tool name",
                 json.dumps({"method": "tools/call", "params": {}}).encode(),
@@ -401,7 +407,10 @@ ENFORCEMENT_CASES = [
     EnforcementCase(
         "x-rail repeated",
         (DENIES_EVERYTHING,),
-        x_rail=(ticket(), ticket(agent_id="5c8f1e42-0000-4000-8000-00000000a9e8")),
+        x_rail=(
+            encode_ticket(),
+            encode_ticket(agent_id="5c8f1e42-0000-4000-8000-00000000a9e8"),
+        ),
         status=403,
         report=build_report(ticket_state="undecodable"),
     ),
@@ -418,7 +427,7 @@ ENFORCEMENT_CASES = [
         EnforcementCase(
             f"{depth} deep",
             (DENIES_EVERYTHING,),
-            body=deep_call(depth),
+            body=build_deep_call(depth),
             status=403,
             report=build_report(key=None, resolution="unrecognised"),
         )
@@ -429,7 +438,7 @@ ENFORCEMENT_CASES = [
             f"{depth} deep, observe",
             (DENIES_EVERYTHING,),
             enforcement="observe",
-            body=deep_call(depth),
+            body=build_deep_call(depth),
         )
         for depth in (MAX_BODY_NESTING_DEPTH + 1, 1000, 10000)
     ],
@@ -461,7 +470,7 @@ ENFORCEMENT_CASES = [
     EnforcementCase(
         "claims of the wrong shape",
         (DENIES_ANY_TICKET,),
-        x_rail=(ticket(agent_id="agent-42", posture_score="very-low"),),
+        x_rail=(encode_ticket(agent_id="agent-42", posture_score="very-low"),),
         status=403,
         report=build_report(ticket_state="valid"),
     ),
@@ -469,7 +478,7 @@ ENFORCEMENT_CASES = [
         EnforcementCase(
             f"posture_score {claimed}",
             (DENIES_ANY_TICKET,),
-            x_rail=(ticket(posture_score=claimed),),
+            x_rail=(encode_ticket(posture_score=claimed),),
             status=403,
             report=build_report(ticket_state="valid", agent_id=AGENT),
         )
@@ -493,7 +502,7 @@ ENFORCEMENT_CASES = [
         EnforcementCase(
             f"agent_id {name}",
             (DENIES_ANY_TICKET,),
-            x_rail=(ticket(agent_id=agent, posture_score=10),),
+            x_rail=(encode_ticket(agent_id=agent, posture_score=10),),
             status=403,
             report=build_report(ticket_state="valid", agent_id=agent, posture_score=10),
         )
@@ -509,7 +518,7 @@ ENFORCEMENT_CASES = [
         EnforcementCase(
             f"agent_id {name}",
             (DENIES_ANY_TICKET,),
-            x_rail=(ticket(agent_id=agent, posture_score=10),),
+            x_rail=(encode_ticket(agent_id=agent, posture_score=10),),
             status=403,
             report=build_report(ticket_state="valid", posture_score=10),
         )
