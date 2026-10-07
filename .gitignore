@@ -19,6 +19,9 @@ venv/
 # The routes file a from-source run creates
 /routes.yaml
 
+# What `make dump-enforcement-cases` writes
+/enforcement-cases.json
+
 # Build and packaging artefacts
 build/
 dist/

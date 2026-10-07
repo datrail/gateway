@@ -1,4 +1,4 @@
-.PHONY: init fmt lint test e2e e2e-standalone e2e-down
+.PHONY: init fmt lint test dump-enforcement-cases e2e e2e-standalone e2e-down
 
 # CI runs these same targets.
 
@@ -19,6 +19,10 @@ lint:
 # Runs a real gateway and upstream on ephemeral ports.
 test:
 	uv run pytest -q
+
+# The enforcement contract table as JSON, for review.
+dump-enforcement-cases:
+	uv run python gateway-core/tools/dump_enforcement_cases.py
 
 # Every e2e stack in turn. Leaves the containers up; `make e2e-down` removes them.
 e2e: e2e-standalone
