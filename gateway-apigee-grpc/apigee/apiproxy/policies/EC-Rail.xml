@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExternalCallout name="EC-Rail" continueOnError="false">
+  <DisplayName>EC-Rail</DisplayName>
+  <TimeoutMs>__TIMEOUT_MS__</TimeoutMs>
+  <GrpcConnection>
+    <Server name="__CALLOUT_SERVER__"/>
+    <!-- An ID token of the proxy's service account, which Cloud Run checks.
+         It is for this call only; the agent's Authorization is untouched.
+         Remove it for a callout that isn't on Cloud Run. -->
+    <Authentication>
+      <GoogleIDToken>
+        <Audience>__CALLOUT_AUDIENCE__</Audience>
+      </GoogleIDToken>
+    </Authentication>
+  </GrpcConnection>
+  <!-- The callout judges the request's headers and body; it never needs the
+       response. -->
+  <Configurations>
+    <Property name="with.request.content">true</Property>
+    <Property name="with.request.headers">true</Property>
+    <Property name="with.response.content">false</Property>
+    <Property name="with.response.headers">false</Property>
+  </Configurations>
+</ExternalCallout>

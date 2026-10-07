@@ -1,0 +1,10 @@
+{
+  "name": "__CALLOUT_SERVER__",
+  "host": "__CALLOUT_HOST__",
+  "port": 443,
+  "isEnabled": true,
+  "protocol": "EXTERNAL_CALLOUT",
+  "sSLInfo": {
+    "enabled": true
+  }
+}

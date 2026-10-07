@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The callout didn't answer, so the bundle carries the refusal itself:
+     the gateway's body for a ruleset it can't apply. -->
+<RaiseFault name="RF-CalloutFailed" continueOnError="false">
+  <DisplayName>RF-CalloutFailed</DisplayName>
+  <FaultResponse>
+    <Set>
+      <StatusCode>503</StatusCode>
+      <Payload contentType="application/json">{"error": "policy ruleset cannot be applied"}</Payload>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>false</IgnoreUnresolvedVariables>
+</RaiseFault>
