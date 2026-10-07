@@ -15,7 +15,7 @@ import httpx
 import pytest
 from grpc_health.v1 import health_pb2, health_pb2_grpc
 
-from gateway.apigee_grpc import health
+from gateway.apigee_grpc import probe_health
 from gateway.apigee_grpc._proto.external_callout_pb2 import MessageContext, Request
 from gateway.apigee_grpc._proto.external_callout_pb2_grpc import (
     ExternalCalloutServiceStub,
@@ -263,9 +263,9 @@ async def test_the_probe_exits_0_only_when_serving(
         _create_holder(answer), None, listen_port=0, max_message_bytes=_MB
     ) as port:
         monkeypatch.setenv("RAIL_GATEWAY_PORT", str(port))
-        assert await asyncio.to_thread(health.main, args) == exit_code
+        assert await asyncio.to_thread(probe_health.main, args) == exit_code
 
 
 def test_the_probe_exits_1_when_nothing_answers(monkeypatch):
     monkeypatch.setenv("RAIL_GATEWAY_PORT", str(_find_free_port()))
-    assert health.main([]) == 1
+    assert probe_health.main([]) == 1

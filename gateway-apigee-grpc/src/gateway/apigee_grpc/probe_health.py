@@ -1,6 +1,6 @@
 """A health probe: ask the callout's gRPC health service on this host.
 
-    python -m gateway.apigee_grpc.health [--ready]
+    python -m gateway.apigee_grpc.probe_health [--ready]
 
 Asks liveness, or readiness with `--ready`, on `RAIL_GATEWAY_PORT`. Exits 0
 when the answer is `SERVING`, and 1 otherwise.
@@ -19,7 +19,7 @@ _TIMEOUT_SECONDS = 5.0
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m gateway.apigee_grpc.health")
+    parser = argparse.ArgumentParser(prog="python -m gateway.apigee_grpc.probe_health")
     parser.add_argument("--ready", action="store_true", help="ask readiness")
     service = READY_SERVICE if parser.parse_args(argv).ready else ""
     try:

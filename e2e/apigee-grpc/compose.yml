@@ -12,7 +12,7 @@ x-callout: &callout
     dockerfile: gateway-apigee-grpc/Dockerfile
   healthcheck:
     # Liveness, on RAIL_GATEWAY_PORT.
-    test: ["CMD", "python", "-m", "gateway.apigee_grpc.health"]
+    test: ["CMD", "python", "-m", "gateway.apigee_grpc.probe_health"]
     interval: 2s
     timeout: 3s
     retries: 15
