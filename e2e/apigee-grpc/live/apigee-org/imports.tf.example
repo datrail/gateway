@@ -1,5 +1,7 @@
-# Brings what already exists under Terraform, on the next apply. Once applied,
-# these blocks do nothing and can stay: they document where the state came from.
+# A template, which Terraform ignores until copied to imports.tf: the next
+# apply then adopts an existing org, instance and keys instead of creating
+# them. Edit the IDs if yours are named differently. Once applied, delete
+# imports.tf.
 
 import {
   to = google_kms_key_ring.apigee
