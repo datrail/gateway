@@ -262,3 +262,28 @@ async def test_a_failure_in_the_servicer_allows_the_request(caplog, monkeypatch)
     assert "the callout failed (RuntimeError)" in caplog.text
     assert "explode" in caplog.text, "the traceback is logged"
     assert ticket not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_content_that_is_not_utf8_fails_before_the_servicer_runs():
+    """`content` is a proto string, so gRPC refuses to parse content that isn't
+    UTF-8, and the call fails before any of our code runs. The bundle answers
+    that failure with 503."""
+    raw = _build_context(content=b"AAAA").SerializeToString()
+    raw = raw.replace(b"AAAA", b"\xff\xfe\xfd\xfc")
+    judged = []
+
+    class Spy(RailCallout):
+        def _judge_request(self, request):
+            judged.append(request)
+            return super()._judge_request(request)
+
+    async with _serve(Spy(Holder(build_bundle()), None)) as channel:
+        # Raw bytes in: the stub would refuse to serialize this content.
+        call = channel.unary_unary("/apigee.ExternalCalloutService/ProcessMessage")
+        with pytest.raises(grpc.aio.AioRpcError) as failed:
+            await call(raw)
+
+    assert failed.value.code() == grpc.StatusCode.UNKNOWN
+    assert "bad UTF-8" in failed.value.details()
+    assert judged == []
