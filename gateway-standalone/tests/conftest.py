@@ -7,8 +7,6 @@ rather than a shape that only exists in the suite, and running each on its own
 loop is what keeps that honest: see `serve`.
 """
 
-from __future__ import annotations
-
 import pytest
 import pytest_asyncio
 from fastmcp import Context, FastMCP

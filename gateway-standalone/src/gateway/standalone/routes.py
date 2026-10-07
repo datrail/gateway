@@ -27,8 +27,6 @@ row per endpoint, and the same MCP server behind two gateways mounted at
 different prefixes would otherwise produce two keys for one row.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from dataclasses import dataclass
@@ -37,7 +35,7 @@ from typing import Any, Final
 
 import yaml
 
-log = logging.getLogger("gateway")
+log = logging.getLogger(__name__)
 
 #: Where the routes file is, unless the environment says otherwise. The image
 #: bakes a path that holds no file, so a container started without one mounted

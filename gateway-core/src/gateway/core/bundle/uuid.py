@@ -48,8 +48,6 @@ removes U+001C–U+001F and U+0085, which JavaScript's `trim` does not, and
 three implementations three answers rather than two.
 """
 
-from __future__ import annotations
-
 import re
 
 #: RFC 4122 §3, and the only prefix the URN form carries. Matched

@@ -23,8 +23,6 @@ settled in one implementation — the contract has no position on it, and the tw
 sides have to agree or they disagree exactly where it matters.
 """
 
-from __future__ import annotations
-
 import base64
 import json
 from typing import Any

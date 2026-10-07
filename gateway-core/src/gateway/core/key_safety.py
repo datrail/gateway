@@ -33,8 +33,6 @@ registers cleanly impossible to report, which shows up as an endpoint nobody can
 write a policy against.
 """
 
-from __future__ import annotations
-
 import math
 import unicodedata
 

@@ -11,8 +11,6 @@ The upstreams are real MCP servers on ephemeral ports, for the reason
 an in-process transport would exercise a shape only the suite has.
 """
 
-from __future__ import annotations
-
 from contextlib import asynccontextmanager
 
 import httpx
@@ -381,7 +379,7 @@ async def test_a_second_route_polls_no_control_plane_of_its_own(two_upstreams):
 async def test_a_second_routes_ready_is_the_gateways_own(two_upstreams):
     """Beneath a prefix, `/ready` answers off the bundle the gateway holds.
 
-    Readiness is what keeps traffic off a gateway holding nothing — `_judge`
+    Readiness is what keeps traffic off a gateway holding nothing — `judge`
     says so — and the enforcement layer on every route reads that one holder. A
     route answering ready while the gateway holds nothing therefore tells a
     probe that a route forwarding every call unjudged is ready to serve, which

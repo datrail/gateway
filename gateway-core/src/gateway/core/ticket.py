@@ -34,8 +34,6 @@ and one is a rule the reference has not caught up with.
    need telling.
 """
 
-from __future__ import annotations
-
 import base64
 import binascii
 import json

@@ -41,4 +41,4 @@ EXPOSE 8080
 # Exec form, so python is PID 1 and receives SIGTERM. CMD rather than ENTRYPOINT,
 # so a replacement command runs as given. The module's own entry point, rather than
 # a uvicorn command line, is what reads RAIL_GATEWAY_PORT.
-CMD ["python", "-m", "gateway.standalone.server"]
+CMD ["python", "-m", "gateway.standalone"]

@@ -45,8 +45,6 @@ them is a way for the two implementations to disagree:
     answers.
 """
 
-from __future__ import annotations
-
 import math
 from dataclasses import dataclass
 from typing import Any, Final

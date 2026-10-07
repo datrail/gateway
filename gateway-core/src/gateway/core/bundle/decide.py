@@ -53,8 +53,6 @@ were the first half of a verdict that was never reached, and reporting them
 would put half a decision in the alert log.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 
 from gateway.core.bundle.conditions import (

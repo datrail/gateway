@@ -13,8 +13,6 @@ so each of those is a case, because dropping the normalisation turns a file an
 operator wrote reasonably into either a refusal or a second route.
 """
 
-from __future__ import annotations
-
 import logging
 from pathlib import Path
 

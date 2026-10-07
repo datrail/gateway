@@ -10,12 +10,10 @@ dependencies = [
     # [standard] brings uvloop and httptools: the event loop and HTTP parser the image runs.
     "uvicorn[standard]==0.52.1",
     "starlette==1.4.1",
+    "httpx==0.28.1",
     # Same version as DatRail Proxy: both parse the same routes file.
     "pyyaml==6.0.1",
 ]
-
-[project.scripts]
-gateway-standalone = "gateway.standalone.server:main"
 
 [tool.uv.sources]
 gateway-core = { workspace = true }

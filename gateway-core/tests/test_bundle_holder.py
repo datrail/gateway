@@ -13,8 +13,6 @@ outcome's `kind` would pass on an implementation that cleared the bundle and
 reported the failure honestly, which is the bug this file exists to catch.
 """
 
-from __future__ import annotations
-
 import asyncio
 import gzip
 import json
@@ -301,10 +299,10 @@ async def test_an_unusable_first_bundle_claims_no_refusal_in_the_log(
     does to traffic: the holder has no mode, and the answer is opposite in the
     two it could be running under — every request refused under `enforce`,
     every request forwarded unjudged under `observe`. The line an operator
-    reaches for to tell those apart is `_judge`'s, not this one.
+    reaches for to tell those apart is `judge`'s, not this one.
     """
     h = holder(httpx.Response(200, json=bundle("v1", policies="not a list")))
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         await h.refresh()
 
     said = "\n".join(r.getMessage() for r in caplog.records)
@@ -329,7 +327,7 @@ async def test_a_failed_first_fetch_claims_no_refusal_in_the_log(
     bundle is held, and may not say what that does to traffic.
     """
     h = holder(httpx.Response(503))
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         await h.refresh()
 
     said = "\n".join(r.getMessage() for r in caplog.records)
@@ -360,7 +358,7 @@ async def test_both_failure_lines_call_the_held_value_the_same_thing(
         httpx.Response(503),
     )
 
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         await refused.refresh()
         await refused.refresh()
         await unreachable.refresh()
@@ -840,7 +838,7 @@ async def test_a_failure_is_a_warning_while_a_bundle_is_held(
     and a refresh is what just failed. So the second is the one an operator has
     to act on, and logging both at one level makes it invisible among the first.
     """
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         cold = holder(httpx.Response(503))
         await cold.refresh()
         levels_cold = [r.levelno for r in caplog.records]
@@ -872,7 +870,7 @@ async def test_a_bundle_still_carrying_rejected_is_read_and_not_logged(
         {"policy_id": TWO, "policy_name": "P2", "reason": "condition not evaluable"}
     ]
     h = holder(httpx.Response(200, json=body))
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         outcome = await h.refresh()
 
     assert outcome.kind == "replaced"
@@ -925,7 +923,7 @@ async def test_the_holding_line_names_the_content_hash_and_the_schema_version(
     body = {**bundle("hash-7f3a"), "schema_version": "1.4"}
     h = holder(httpx.Response(200, json=body))
 
-    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+    with caplog.at_level(logging.INFO, logger="gateway"):
         await h.refresh()
 
     said = "\n".join(r.getMessage() for r in caplog.records)
@@ -954,7 +952,7 @@ async def test_the_posture_is_logged_when_a_poll_moves_it(
             },
         ),
     )
-    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+    with caplog.at_level(logging.INFO, logger="gateway"):
         await h.refresh()
         first = "\n".join(r.getMessage() for r in caplog.records)
 
@@ -981,7 +979,7 @@ async def test_an_unchanged_posture_is_not_repeated_on_every_poll(
         httpx.Response(200, json={**bundle("v1"), **body}),
         httpx.Response(200, json={**bundle("v2"), **body}),
     )
-    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+    with caplog.at_level(logging.INFO, logger="gateway"):
         await h.refresh()
         await h.refresh()
 
@@ -1017,7 +1015,7 @@ async def test_a_fallback_that_moves_under_one_mode_is_logged(
             },
         ),
     )
-    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+    with caplog.at_level(logging.INFO, logger="gateway"):
         await h.refresh()
         caplog.clear()
         await h.refresh()
@@ -1055,7 +1053,7 @@ async def test_a_fallback_that_moves_where_it_decides_nothing_is_not_logged(
             },
         ),
     )
-    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+    with caplog.at_level(logging.INFO, logger="gateway"):
         await h.refresh()
         await h.refresh()
 
@@ -1090,7 +1088,7 @@ async def test_a_fallback_held_silently_reports_itself_when_enforce_arrives(
             },
         ),
     )
-    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+    with caplog.at_level(logging.INFO, logger="gateway"):
         await h.refresh()
         caplog.clear()
         await h.refresh()
@@ -1111,7 +1109,7 @@ async def test_a_bundle_naming_no_posture_does_not_report_one_rail_center_chose(
     gateway has just stopped judging anything on an upgrade.
     """
     h = holder(httpx.Response(200, json=bundle("old-rc")))
-    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+    with caplog.at_level(logging.INFO, logger="gateway"):
         await h.refresh()
 
     said = "\n".join(r.getMessage() for r in caplog.records)
@@ -1135,7 +1133,7 @@ async def test_a_rail_center_that_starts_naming_none_reports_that_it_spoke(
         httpx.Response(200, json=bundle("v1")),
         httpx.Response(200, json={**bundle("v2"), "enforcement": {"mode": "none"}}),
     )
-    with caplog.at_level(logging.INFO, logger="gateway.bundle"):
+    with caplog.at_level(logging.INFO, logger="gateway"):
         await h.refresh()
         caplog.clear()
         await h.refresh()
@@ -1559,7 +1557,7 @@ def test_an_interval_at_or_above_the_floor_is_taken(
     accepted from one that was overruled.
     """
     monkeypatch.setenv("RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS", value)
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         assert refresh_seconds() == int(value.strip())
 
     assert caplog.records == []
@@ -1579,7 +1577,7 @@ def test_an_interval_below_the_floor_is_raised_rather_than_refused(
     the contract and is asserted as such.
     """
     monkeypatch.setenv("RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS", value)
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         assert refresh_seconds() == MIN_REFRESH_SECONDS
 
     said = "\n".join(r.getMessage() for r in caplog.records)

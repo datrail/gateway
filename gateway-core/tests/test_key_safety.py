@@ -7,8 +7,6 @@ bounded — hold for every value JSON can carry, and the ones most likely to bre
 are the values JSON cannot spell.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from gateway.core.key_safety import (

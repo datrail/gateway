@@ -10,8 +10,6 @@ Each case is its own test, named after itself, so a failure names the rule that
 broke rather than the file that holds it.
 """
 
-from __future__ import annotations
-
 import base64
 import dataclasses
 import json
@@ -477,7 +475,7 @@ def test_a_fallback_inside_enforcement_is_warned_about_and_decides_nothing(
     """
     body = _postured({"mode": "enforce", "fallback": "pass"})
 
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         resolved = validate_bundle(body)
 
     assert resolved.fallback == "block"
@@ -509,7 +507,7 @@ def test_a_correctly_shaped_bundle_says_nothing_about_its_fallback(
     """
     body = _postured(enforcement, binding_fallback)
 
-    with caplog.at_level(logging.WARNING, logger="gateway.bundle"):
+    with caplog.at_level(logging.WARNING, logger="gateway"):
         validate_bundle(body)
 
     assert caplog.records == []
@@ -552,7 +550,7 @@ def test_a_refused_bundle_says_nothing_about_which_fallback_applies(
     body = _postured({"mode": "enforce", "fallback": "pass"}) | refused
 
     with (
-        caplog.at_level(logging.WARNING, logger="gateway.bundle"),
+        caplog.at_level(logging.WARNING, logger="gateway"),
         pytest.raises(UnusableBundle) as caught,
     ):
         validate_bundle(body)
