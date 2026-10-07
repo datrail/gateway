@@ -28,14 +28,14 @@ dev = [
 namespace-packages = ["gateway-*/src/gateway"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["gateway", "standalone_support"]
+known-first-party = ["gateway", "core_support", "standalone_support"]
 
 [tool.pytest.ini_options]
 testpaths = ["gateway-*"]
 # Several members have a tests/ folder, so tests are imported by path.
 addopts = "--import-mode=importlib"
-# So tests can import standalone_support.py, which importlib mode otherwise prevents.
-pythonpath = ["gateway-standalone/tests"]
+# So tests can import each member's *_support.py, which importlib mode otherwise prevents.
+pythonpath = ["gateway-core/tests", "gateway-standalone/tests"]
 # An async test missing its marker fails instead of silently not running.
 asyncio_mode = "strict"
 # Seconds per test: turns a hang into a named failure.

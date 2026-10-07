@@ -87,6 +87,7 @@ make init    # uv sync: every member, editable, plus the pinned dev tools
 make test
 make lint    # `make fmt` formats and fixes instead of only checking
 make e2e     # each image against a stubbed Rail Center and upstream; see e2e/README.md
+make dump-enforcement-cases  # the enforcement contract table as JSON; see gateway-core/README.md
 ```
 
 ## Related projects
