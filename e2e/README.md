@@ -17,6 +17,7 @@ containers up so a failed run's logs can be read; `make e2e-down` removes them.
 e2e/
   shared/       the stubs, the base services, the driver's helpers
   standalone/   the standalone gateway's stack
+  apigee-grpc/  the Apigee callout's stack (a stub, for now)
 ```
 
 ## What it proves that the unit suite cannot
@@ -83,3 +84,22 @@ before any journal reset, and a stub left over from an earlier run inflates it.
 **Denials are reported fire-and-forget**, after the caller is answered, so the
 driver waits for them. Reading the journal right after the `403` passes most of
 the time, then fails as if the gateway were at fault.
+
+## Apigee callout (stub)
+
+For now this stack only shows the image works: no Apigee stand-in and no
+upstream yet. The driver runs in the callout's own image, which has grpcio and
+the generated code.
+
+| Service | Configuration |
+|---|---|
+| `callout` | enrolled, credential `e2e-enforce` |
+| `callout-unreachable` | enrolled, Rail Center unreachable, `RAIL_GATEWAY_PORT=9100` |
+
+What the driver asserts:
+- the image runs as uid 10001;
+- `callout` fetches a bundle, and its gRPC liveness and readiness are `SERVING`;
+- a `GET` is allowed; a call with no ticket is refused with `403` and
+  standalone's body, and the denial names P0;
+- `callout-unreachable` is live on port 9100 and not ready;
+- every request to Rail Center found a stub.
