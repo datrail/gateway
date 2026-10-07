@@ -23,7 +23,7 @@ DENY_ID = "5c8f1e42-0000-4000-8000-0000000000d1"
 SKILL_ID = "5c8f1e42-0000-4000-8000-0000000000d2"
 BAD_ID = "5c8f1e42-0000-4000-8000-0000000000e1"
 
-#: The `agent_id` every ticket here carries unless a case says otherwise.
+# The `agent_id` every ticket here carries unless a case says otherwise.
 AGENT = "5c8f1e42-0000-4000-8000-00000000a9e7"
 
 
@@ -154,12 +154,12 @@ def deep_call(depth: int) -> bytes:
     ).encode()
 
 
-#: What each refusal tells the caller, spelled out rather than imported: the
-#: body is the wire format.
+# What each refusal tells the caller, spelled out rather than imported: the
+# body is the wire format.
 REASONS = {403: "denied by policy", 503: "policy ruleset cannot be applied"}
 
 
-def report(
+def build_report(
     *,
     policy_id: str | None = DENY_ID,
     key: str | None = KEY,
@@ -189,14 +189,14 @@ class EnforcementCase:
     what the caller and Rail Center get.
 
     Standalone's behaviour is the definition. An interface a row does not apply
-    to names it in `not_for` with the reason, which `enforcement_params` turns
+    to names it in `not_for` with the reason, which `get_enforcement_params` turns
     into a visible skip.
     """
 
     name: str
     policies: tuple[dict[str, Any], ...] = ()
     bindings: tuple[dict[str, Any], ...] = ()
-    #: The bundle's posture; None where no bundle is held.
+    # The bundle's posture; None where no bundle is held.
     enforcement: str | None = "enforce"
     fallback: str = "pass"
     method: str = "POST"
@@ -204,13 +204,13 @@ class EnforcementCase:
     body: bytes = call()
     x_rail: tuple[str, ...] = ()
     x_rail_status: tuple[str, ...] = ()
-    #: The refusal's status; None where the call is forwarded.
+    # The refusal's status; None where the call is forwarded.
     status: int | None = None
-    #: The denial report, as `report()` builds it; None where none is sent.
+    # The denial report, as `build_report()` builds it; None where none is sent.
     report: Mapping[str, Any] | None = None
     not_for: Mapping[str, str] = field(default_factory=dict)
 
-    def bundle(self) -> UsableBundle | None:
+    def build_bundle(self) -> UsableBundle | None:
         if self.enforcement is None:
             return None
         return bundle(
@@ -221,11 +221,11 @@ class EnforcementCase:
         )
 
 
-#: The undashed spelling of `AGENT`.
+# The undashed spelling of `AGENT`.
 UNDASHED_AGENT = "5c8f1e4200004000800000000000a9e7"
 
 
-def _raw_ticket(posture_literal: str) -> str:
+def _encode_raw_ticket(posture_literal: str) -> str:
     """A ticket whose `posture_score` is `posture_literal` as written: `json.dumps`
     would emit `Infinity` for an overflow, which is not JSON."""
     raw = (
@@ -241,7 +241,7 @@ ENFORCEMENT_CASES = [
         "denied",
         (DENIES_EVERYTHING,),
         status=403,
-        report=report(),
+        report=build_report(),
     ),
     EnforcementCase("denied, observe", (DENIES_EVERYTHING,), enforcement="observe"),
     EnforcementCase("denied, none", (DENIES_EVERYTHING,), enforcement="none"),
@@ -261,14 +261,17 @@ ENFORCEMENT_CASES = [
     # Refused as a policy denial is, so a caller can't map the bindings, and
     # reported naming no policy. Acted on at `enforce` only.
     EnforcementCase(
-        "unbound, block", fallback="block", status=403, report=report(policy_id=None)
+        "unbound, block",
+        fallback="block",
+        status=403,
+        report=build_report(policy_id=None),
     ),
     EnforcementCase(
         "unbound, block, with a ticket",
         fallback="block",
         x_rail=(ticket(),),
         status=403,
-        report=report(policy_id=None, ticket_state="valid", agent_id=AGENT),
+        report=build_report(policy_id=None, ticket_state="valid", agent_id=AGENT),
     ),
     EnforcementCase(
         "unbound, block, observe",
@@ -295,7 +298,7 @@ ENFORCEMENT_CASES = [
         (DENIES_EVERYTHING,),
         ({**BOUND, "policy_ids": [DENY_ID]},),
         status=403,
-        report=report(key=FULL_KEY),
+        report=build_report(key=FULL_KEY),
     ),
     # --- discovery ---
     # A session message is not a call: passed before the bundle is read.
@@ -334,7 +337,7 @@ ENFORCEMENT_CASES = [
         ({"endpoint_key": KEY, "mode": "gated", "policy_ids": [DENY_ID]},),
         x_rail=(ticket(),),
         status=403,
-        report=report(ticket_state="valid", agent_id=AGENT),
+        report=build_report(ticket_state="valid", agent_id=AGENT),
     ),
     # --- keyless and unrecognised keys ---
     # Naming no tool by design leaves the endpoint rules; a `tools/call` with no
@@ -344,7 +347,7 @@ ENFORCEMENT_CASES = [
         (DENIES_EVERYTHING,),
         body=KEYLESS,
         status=403,
-        report=report(key=None, resolution="keyless"),
+        report=build_report(key=None, resolution="keyless"),
     ),
     EnforcementCase(
         "keyless, block", fallback="block", body=KEYLESS, x_rail=(ticket(),)
@@ -361,7 +364,7 @@ ENFORCEMENT_CASES = [
         body=call("track_package\n"),
         x_rail=(ticket(),),
         status=403,
-        report=report(
+        report=build_report(
             policy_id=None,
             key=None,
             resolution="unrecognised",
@@ -376,7 +379,7 @@ ENFORCEMENT_CASES = [
             body=body,
             x_rail=(ticket(),),
             status=403,
-            report=report(
+            report=build_report(
                 policy_id=SKILL_ID,
                 key=None,
                 resolution="unrecognised",
@@ -400,14 +403,14 @@ ENFORCEMENT_CASES = [
         (DENIES_EVERYTHING,),
         x_rail=(ticket(), ticket(agent_id="5c8f1e42-0000-4000-8000-00000000a9e8")),
         status=403,
-        report=report(ticket_state="undecodable"),
+        report=build_report(ticket_state="undecodable"),
     ),
     EnforcementCase(
         "x-rail-status repeated",
         (DENIES_EVERYTHING,),
         x_rail_status=("not-found", "expired"),
         status=403,
-        report=report(),
+        report=build_report(),
     ),
     # --- too-deep bodies ---
     # Read as unrecognised rather than raising out of `judge`.
@@ -417,7 +420,7 @@ ENFORCEMENT_CASES = [
             (DENIES_EVERYTHING,),
             body=deep_call(depth),
             status=403,
-            report=report(key=None, resolution="unrecognised"),
+            report=build_report(key=None, resolution="unrecognised"),
         )
         for depth in (MAX_BODY_NESTING_DEPTH + 1, 1000, 10000)
     ],
@@ -436,21 +439,21 @@ ENFORCEMENT_CASES = [
         (DENIES_EVERYTHING,),
         x_rail_status=("issuer-unreachable",),
         status=403,
-        report=report(claimed="issuer-unreachable"),
+        report=build_report(claimed="issuer-unreachable"),
     ),
     EnforcementCase(
         "claimed status, control characters",
         (DENIES_EVERYTHING,),
         x_rail_status=("not-found\x9b[31mFAKE",),
         status=403,
-        report=report(claimed="<unprintable>"),
+        report=build_report(claimed="<unprintable>"),
     ),
     EnforcementCase(
         "claimed status, overlong",
         (DENIES_EVERYTHING,),
         x_rail_status=("n" * 60_000,),
         status=403,
-        report=report(claimed="n" * MAX_LOGGED_LENGTH + "…<truncated>"),
+        report=build_report(claimed="n" * MAX_LOGGED_LENGTH + "…<truncated>"),
     ),
     # --- the claims a report carries ---
     # A claim Rail Center's schema would refuse is dropped, not sent: a 422
@@ -460,7 +463,7 @@ ENFORCEMENT_CASES = [
         (DENIES_ANY_TICKET,),
         x_rail=(ticket(agent_id="agent-42", posture_score="very-low"),),
         status=403,
-        report=report(ticket_state="valid"),
+        report=build_report(ticket_state="valid"),
     ),
     *[
         EnforcementCase(
@@ -468,7 +471,7 @@ ENFORCEMENT_CASES = [
             (DENIES_ANY_TICKET,),
             x_rail=(ticket(posture_score=claimed),),
             status=403,
-            report=report(ticket_state="valid", agent_id=AGENT),
+            report=build_report(ticket_state="valid", agent_id=AGENT),
         )
         for claimed in (True, False)
     ],
@@ -476,9 +479,9 @@ ENFORCEMENT_CASES = [
         EnforcementCase(
             f"posture_score {name}",
             (DENIES_ANY_TICKET,),
-            x_rail=(_raw_ticket(literal),),
+            x_rail=(_encode_raw_ticket(literal),),
             status=403,
-            report=report(ticket_state="valid", agent_id=AGENT),
+            report=build_report(ticket_state="valid", agent_id=AGENT),
         )
         for name, literal in (
             ("overflows", "1e400"),
@@ -492,7 +495,7 @@ ENFORCEMENT_CASES = [
             (DENIES_ANY_TICKET,),
             x_rail=(ticket(agent_id=agent, posture_score=10),),
             status=403,
-            report=report(ticket_state="valid", agent_id=agent, posture_score=10),
+            report=build_report(ticket_state="valid", agent_id=agent, posture_score=10),
         )
         for name, agent in (
             ("canonical", AGENT),
@@ -508,7 +511,7 @@ ENFORCEMENT_CASES = [
             (DENIES_ANY_TICKET,),
             x_rail=(ticket(agent_id=agent, posture_score=10),),
             status=403,
-            report=report(ticket_state="valid", posture_score=10),
+            report=build_report(ticket_state="valid", posture_score=10),
         )
         for name, agent in (
             # Spellings `uuid.UUID` reads and Rail Center refuses.
@@ -538,7 +541,7 @@ ENFORCEMENT_CASES = [
 ]
 
 
-def enforcement_params(interface: str) -> list:
+def get_enforcement_params(interface: str) -> list:
     """`ENFORCEMENT_CASES` as pytest params for `interface`, ids by row name. A
     row that does not apply is skipped with the table's own reason."""
     return [

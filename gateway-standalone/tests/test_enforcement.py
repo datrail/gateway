@@ -54,7 +54,7 @@ from core_support import (
     Holder,
     bundle,
     call,
-    enforcement_params,
+    get_enforcement_params,
     policy,
     ticket,
 )
@@ -257,11 +257,11 @@ async def settled(recorder: _Reports, *, expecting: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", enforcement_params("standalone"))
+@pytest.mark.parametrize("case", get_enforcement_params("standalone"))
 async def test_the_answer_and_the_report_match_every_row_of_the_contract(case):
     """Each row through the layer: a refusal is answered here and never
     reaches the app below, and a forwarded call reaches it as sent."""
-    enforcement, downstream, reports = layer(case.bundle())
+    enforcement, downstream, reports = layer(case.build_bundle())
     headers = [(b"x-rail", v.encode("latin-1")) for v in case.x_rail] + [
         (b"x-rail-status", v.encode("latin-1")) for v in case.x_rail_status
     ]

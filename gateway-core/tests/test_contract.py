@@ -5,11 +5,11 @@ import json
 import httpx
 import pytest
 
-from core_support import REASONS, Holder, enforcement_params
+from core_support import REASONS, Holder, get_enforcement_params
 from gateway.core.enforcement import DenialReporter, judge
 
 
-async def _sent(verdict) -> list[dict]:
+async def collect_reports(verdict) -> list[dict]:
     """The report bodies the verdict sends, as Rail Center receives them."""
     bodies: list[dict] = []
 
@@ -28,10 +28,10 @@ async def _sent(verdict) -> list[dict]:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", enforcement_params("core"))
+@pytest.mark.parametrize("case", get_enforcement_params("core"))
 async def test_the_verdict_matches_every_row_of_the_contract(case):
     verdict = judge(
-        Holder(case.bundle()),
+        Holder(case.build_bundle()),
         case.path,
         case.body,
         list(case.x_rail) or None,
@@ -40,7 +40,7 @@ async def test_the_verdict_matches_every_row_of_the_contract(case):
 
     assert verdict.status == case.status
     assert verdict.reason == (REASONS[case.status] if case.status else "")
-    sent = await _sent(verdict)
+    sent = await collect_reports(verdict)
     if case.report is None:
         assert sent == []
     else:
