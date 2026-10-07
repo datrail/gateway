@@ -12,9 +12,7 @@ Run the self-contained end-to-end stack (Docker with Compose v2 is required):
 ```bash
 git clone https://github.com/datrail/gateway.git
 cd gateway
-docker compose -f e2e/compose.yml up --build --force-recreate \
-  --abort-on-container-exit --exit-code-from driver
-docker compose -f e2e/compose.yml down -v --remove-orphans
+make e2e
 ```
 
 To run it in front of a real MCP server, see
@@ -44,6 +42,10 @@ version the wire contract.
 
 The schemas in [`schemas/`](schemas/) define the ticket, bundle, and
 denial-event wire shapes.
+
+Each interface puts the gateway in the agent's path in its own way: see
+[gateway-standalone's](gateway-standalone/README.md#architecture)
+architecture.
 
 ## Layout
 
@@ -84,6 +86,7 @@ version in `.python-version`.
 make init    # uv sync: every member, editable, plus the pinned dev tools
 make test
 make lint    # `make fmt` formats and fixes instead of only checking
+make e2e     # each image against a stubbed Rail Center and upstream; see e2e/README.md
 ```
 
 ## Related projects

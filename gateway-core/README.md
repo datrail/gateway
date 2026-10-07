@@ -67,6 +67,69 @@ one upstream can be recorded against another. The gateway matched on a key with
 no data source in it and has nothing better to send — reporting the slug-less
 form instead would lose an attribution that is correct in every other case.
 
+## Configuration
+
+Every interface reads these, and refuses the same mistakes. Each interface's
+README lists its own variables beside them, and
+[`.env.example`](../.env.example) lists them all. A refusal stops the process
+at startup.
+
+#### `RAIL_PLUGIN_ENABLED`
+
+Whether RailXia is installed on this deployment: `true` or `false`, case
+folded. Blank or unset is `false`, so a plain gateway needs no variable at
+all. Off, it fetches no bundle and reads no Rail Center variable; on, it polls
+Rail Center and takes its posture from the bundle. It does not say how much of
+a decision is acted on: that is the bundle's `enforcement` posture.
+
+Off beside Rail Center configuration — `RAIL_CENTER_URL`, `RAIL_AUTH_TOKEN`,
+or `RAIL_AUTH_MODE` other than `none` — is refused, naming each one found, so
+the default can't silently unenrol a gateway that was enforcing.
+
+#### `RAIL_CENTER_URL`
+
+Where the policy bundle comes from, as an origin (e.g.
+`https://rail-center.example.com`). Required when the plugin is on. It must
+name a host. A `user:password@` in it is sent as Basic authentication, and is
+refused beside `RAIL_AUTH_MODE=bearer`. Error messages never carry it.
+
+#### `RAIL_GATEWAY_SLUG`
+
+Which gateway this is, and so whose bundle it fetches. Required when the
+plugin is on. It is **not** a data source's slug: a gateway fronts several data
+sources, and a data source may sit behind several gateways.
+
+#### `RAIL_AUTH_MODE`
+
+How to authenticate to Rail Center: `none` or `bearer`. Defaults to `none`.
+`gcp` is refused as not implemented by this component.
+
+#### `RAIL_AUTH_TOKEN`
+
+The bearer token. Required under `RAIL_AUTH_MODE=bearer`, and refused under
+`none`. It must be printable ASCII; the refusal names the offset, never the
+token.
+
+#### `RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS`
+
+How often to fetch the bundle again, in seconds. Defaults to `60`. Not an
+integer is refused; below `5` is raised to `5` with a warning.
+
+#### `RAIL_GATEWAY_PORT`
+
+The port to listen on. Defaults to `8080`; blank is the default. Not an
+integer, or outside 1–65535, is refused.
+
+#### `RAIL_GATEWAY_LOG_LEVEL`
+
+`CRITICAL`, `ERROR`, `WARNING`, `INFO` or `DEBUG`, case folded. Defaults to
+`INFO`; blank is the default. Anything else is refused.
+
+#### `RAIL_TICKET_MODE`
+
+Retired: the posture now arrives in the bundle. Any value but blank is
+refused, naming `RAIL_PLUGIN_ENABLED` and the bundle.
+
 ## Tests
 
 `tests/vectors/` holds the conformance vectors: ticket reading, bundle

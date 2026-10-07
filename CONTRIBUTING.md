@@ -6,6 +6,13 @@ The gateway is DatRail's enforcement point: it parses the `x-rail` ticket, allow
 
 Open an issue first for anything beyond an obvious fix. Anything that changes when a request is allowed belongs in an issue first, with the case you are trying to permit stated plainly.
 
+## Running it
+
+- From source: [gateway-standalone](gateway-standalone/README.md#from-source).
+  The README also covers its configuration.
+- The suite, lint and e2e: [Development](README.md#development) in the README.
+  CI runs the same `make` targets.
+
 ## Two rules that are not negotiable
 
 **1. It fails closed.** If the gateway cannot decide — unreachable control

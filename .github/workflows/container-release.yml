@@ -1,31 +1,15 @@
-# Build and publish a versioned container image to GitHub Packages (ghcr.io).
+# Build and publish versioned container images to GitHub Packages (ghcr.io).
 #
-# Publishing is driven by tags: `git tag v0.1.0 && git push --tags` produces
-# ghcr.io/<owner>/<repo>:0.1.0, :0.1, and :latest, multi-arch, with an SBOM and
-# a signed build-provenance attestation.
-#
-# Each repository owns its copy of this file: there is no shared workflow repo
-# and nothing here is consumed by `workflow_call` from elsewhere, so a component
-# that needs to differ just edits it. (The migration workspace keeps a template
-# of this file and a script that seeds it into a checkout, but that is a
-# one-time copy living outside this repository — nothing in this repo depends
-# on it, and it will not overwrite an edit made here.)
-#
-# Builds gateway-standalone/Dockerfile, with the repository root as context
-# (the image installs from the workspace's uv.lock). A second image needs a
-# build step of its own, under an image name of its own: this one publishes
-# as the repository's name, which existing deployments pull.
-name: container-release
+# `git tag v0.1.0 && git push --tags` publishes :0.1.0, :0.1 and :latest of
+# every image in `publish`, multi-arch, each with an SBOM and a signed
+# build-provenance attestation. A second image is a matrix entry. Standalone
+# publishes as the repository's name, which deployments pull.
+name: Release Container Images
 
 on:
   push:
-    # A shape check rather than the `v*` glob, which also matched `vfoo` and
-    # `v1` — neither of which can produce a version tag. It is deliberately
-    # not the whole rule: the trailing `*` still admits `v1.2.3.4` and
-    # `v1.2.3rc1`, because a tag filter cannot express "end of string" while
-    # still allowing the `-rc.1` and `+build` suffixes semver permits. The
-    # `version` job is the actual validator, and it runs before anything is
-    # checked out or built.
+    # Narrower than `v*`, which also matches `v1` and `vfoo`; `version` is the
+    # real check, since a filter can't anchor the end and still allow suffixes.
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
   workflow_dispatch:
     inputs:
@@ -39,46 +23,30 @@ permissions:
   id-token: write
   attestations: write
 
-# Keyed on the repository, not the ref. Every tag is a distinct ref, so a
-# ref-keyed group lets `v0.1.0` and `v0.1.1` publish concurrently — and both
-# write the same mutable `:0.1` and `:latest` tags, which is a last-write-wins
-# race on exactly the pointers people pull by.
-#
-# Known cost of that choice: a group keeps only one *pending* run, and
-# `cancel-in-progress: false` does not protect it — a third tag pushed while one
-# release is running and another is queued silently cancels the queued one. So
-# three tags in quick succession publish the first and the last, not the middle.
-# Serialising and never-dropping are not both available from one group; this
-# picks serialising, because a dropped release is visible (no package appears)
-# while a raced `:latest` is not (it points at the wrong build). Push release
-# tags one at a time and confirm each.
+# Per repository, not per ref: two tags publishing at once would race to write
+# `:0.1` and `:latest`. A group keeps one pending run, so a third tag pushed
+# while one runs and one waits cancels the waiting one: push tags one at a time.
 concurrency:
   group: container-release-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  # Its own job, not a step inside `publish`, for two reasons: the CI gate below
-  # needs the resolved tag to know *what* to test, and a malformed tag should
-  # fail in seconds rather than after a full test-and-build.
+  # Resolved in its own job so the release can be gated on the suite: a
+  # job-level `uses:` reads another job's outputs, and cannot read a step's.
   version:
+    # Named, not ubuntu-latest: that label moves to 26.04 from 2026-10-19 to
+    # 11-19, run by run (actions/runner-images#14748). Move on purpose (DR-133).
     runs-on: ubuntu-26.04
+    # Nothing here touches the repository or the registry; the workflow-level
+    # grants exist for `publish`.
+    permissions: {}
     outputs:
-      tag: ${{ steps.version.outputs.tag }}
-      latest: ${{ steps.version.outputs.latest }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      latest: ${{ steps.resolve.outputs.latest }}
     steps:
-      # Resolve the version before anything is checked out or built, and refuse
-      # anything that is not a release tag.
-      #
-      # This is load-bearing for workflow_dispatch. metadata-action derives its
-      # tags from the *event's* ref, not from what we checked out, so a manual
-      # run would tag whatever the "use workflow from" branch is — `type=semver`
-      # would match nothing and emit no version, while `latest` (a branch name
-      # has no hyphen) would fire anyway. Republishing v0.1.0 by hand would
-      # quietly push the branch head as `:latest` and nothing else.
-      #
-      # It also backstops the tag filter, which cannot express the whole semver
-      # shape: `v1.2.3.4` still matches the trigger and is refused here.
-      - id: version
+      # Refuse anything but vMAJOR.MINOR.PATCH: a manual run would otherwise tag
+      # the branch it was launched from, moving `latest` either way.
+      - id: resolve
         env:
           RAW_REF: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
@@ -96,16 +64,8 @@ jobs:
             echo "latest=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # Gate the publish on the same checks a pull request gets, rather than
-  # duplicating them here. A tag can sit on any commit, including one that
-  # never went through a PR, so "it passed on the PR" is not something this
-  # workflow can assume.
-  #
-  # `ref` is passed explicitly: a called workflow's `github.ref` is the
-  # *caller's*, which for workflow_dispatch is the branch chosen in "use
-  # workflow from", not the tag being published. Without this the gate would
-  # test one tree and publish another — precisely the divergence the version
-  # job exists to close.
+  # Never publish an untested version: the suite runs on the tag itself. A
+  # called workflow otherwise inherits this one's write grants.
   ci:
     needs: version
     uses: ./.github/workflows/ci.yml
@@ -117,12 +77,24 @@ jobs:
   publish:
     needs: [version, ci]
     runs-on: ubuntu-26.04
+    # One entry per image, as in ci.yml. Not fail-fast: a cancelled job doesn't
+    # unpublish, and rerunning the failed entry completes the release.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - stack: standalone
+            image: ghcr.io/${{ github.repository }}
     steps:
-      # This repository declares no submodules, so the checkout needs neither a
-      # recursive fetch nor a cross-repo token.
+      # No submodules, so no recursive fetch or cross-repo token.
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.tag }}
+
+      # The tag's commit: on a manual run, `github.sha` is the branch it was
+      # launched from, not what was built.
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
@@ -136,7 +108,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ matrix.image }}
           # `value=` pins every tag to the version resolved above, so a manual
           # dispatch tags what it built rather than what it was launched from.
           tags: |
@@ -145,66 +117,55 @@ jobs:
             type=raw,value=latest,enable=${{ needs.version.outputs.latest == 'true' }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.commit.outputs.sha }}
 
       - id: build
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: gateway-standalone/Dockerfile
+          file: gateway-${{ matrix.stack }}/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           sbom: true
-          # buildx would attach its own *unsigned* provenance, which the signed
-          # attestation below makes redundant — the org's docker-build-push
-          # action documents that same choice and lands on leaving this off.
+          # Off: the signed attestation below replaces buildx's unsigned provenance.
           provenance: false
-          # Shared with ci.yml's build job on purpose: the CI leg of this same
-          # run has just built amd64, and this multi-arch build reuses those
-          # layers rather than repeating the work.
-          #
-          # A literal name rather than `github.workflow`. Inside this run that
-          # would work — a called workflow sees the caller's name — but ci.yml
-          # also runs directly on master, where it resolves to `CI`, so those
-          # warm caches would systematically never be visible to a release.
-          cache-from: type=gha,scope=image-standalone
-          cache-to: type=gha,mode=max,scope=image-standalone
+          # Shared with ci.yml's e2e job, so a release reuses its amd64 layers:
+          # keep the names in step. Not `github.workflow`, which is `CI` when
+          # ci.yml runs on master, so a release would never see those caches.
+          cache-from: type=gha,scope=image-${{ matrix.stack }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.stack }}
 
-      # Signed, verifiable statement that this digest came from this workflow:
-      # `gh attestation verify oci://ghcr.io/<owner>/<repo>:<tag> --owner <org>`.
-      #
-      # GitHub only offers attestations on public repos or a paid org plan, and
-      # every datrail repo is private until DR-25. The image is already pushed by
-      # the time this runs, so a hard failure here would mark a successful
-      # publish as failed; it warns instead, and starts working on its own once
-      # the repos are flipped. Note this swallows every failure of the step, not
-      # only the plan one — the warning is the only signal either way.
+      # Checked with `gh attestation verify oci://<image>:<tag> --owner <org>`.
+      # Warns rather than fails: the image is already pushed. A manual run
+      # attests its own ref, not the tag; the image labels carry the commit.
       - id: attest
         continue-on-error: true
         uses: actions/attest-build-provenance@v4
         with:
-          subject-name: ghcr.io/${{ github.repository }}
+          subject-name: ${{ matrix.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
-          # v4 would also write an artifact-metadata storage record, which
-          # needs `artifact-metadata: write` and only logs a warning without
-          # it. Off, as in v2: the attestation is what verification reads.
+          # Off: it needs `artifact-metadata: write`, and verification doesn't
+          # read it.
           create-storage-record: false
-
-      - if: steps.attest.outcome == 'failure'
-        run: echo "::warning::Image published without a provenance attestation — private repo on a plan that does not include them (DR-25 flips these public)."
 
       # Values reach the shell through env, never through `${{ }}` inside run:,
       # which is substituted as raw text before bash sees it.
+      - if: steps.attest.outcome == 'failure'
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: echo "::warning::$IMAGE published without a provenance attestation — attestations need a public repository, or GitHub Enterprise Cloud (private until DR-25)."
+
       - name: Summary
         env:
+          IMAGE: ${{ matrix.image }}
           TAGS: ${{ steps.meta.outputs.tags }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           {
-            echo "### Published"
+            echo "### Published $IMAGE"
             echo
             echo '```'
             echo "$TAGS"

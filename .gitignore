@@ -16,6 +16,9 @@ venv/
 .env
 .env.local
 
+# The routes file a from-source run creates
+/routes.yaml
+
 # Build and packaging artefacts
 build/
 dist/

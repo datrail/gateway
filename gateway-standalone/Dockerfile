@@ -31,7 +31,8 @@ COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Non-root: the gateway faces untrusted agents.
-RUN useradd --system --no-create-home --uid 10001 railgateway
+# No --system: it asks for a uid below SYS_UID_MAX, which 10001 contradicts.
+RUN useradd --no-create-home --uid 10001 railgateway
 USER 10001
 
 # The default port; RAIL_GATEWAY_PORT changes it.

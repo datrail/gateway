@@ -14,9 +14,9 @@ people want to keep taking part.
 Report unacceptable behaviour privately through the repository's **Security**
 tab. Put `CODE OF CONDUCT` in the report title.
 
-While there is one named contact, a report concerning that person should go to
-any other maintainer instead — say so in the issue tracker without detail and
-someone will reach out privately.
+A report concerning the person who reads that address should go to a different
+maintainer instead — say so in the issue tracker without detail and someone will
+reach out privately.
 
 Reports are handled privately. You will get an acknowledgement within 3 working
 days. Whoever a report concerns takes no part in handling it.

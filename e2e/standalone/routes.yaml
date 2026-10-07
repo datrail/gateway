@@ -1,0 +1,6 @@
+# One upstream at the root, so the path in an endpoint key is the upstream's.
+schema_version: "1.0"
+mcp:
+  servers:
+    - name: delivery
+      url: http://upstream:8080/mcp
