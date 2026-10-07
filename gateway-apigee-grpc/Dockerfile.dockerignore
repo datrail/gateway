@@ -1,0 +1,13 @@
+# Used instead of a root .dockerignore when building with
+# -f gateway-apigee-grpc/Dockerfile. Send only what this image needs: another
+# member's changes never touch its cache.
+**
+!LICENSE
+!NOTICE
+!pyproject.toml
+!uv.lock
+!gateway-core/pyproject.toml
+!gateway-core/src/**
+!gateway-apigee-grpc/pyproject.toml
+!gateway-apigee-grpc/src/**
+**/__pycache__

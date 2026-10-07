@@ -1,0 +1,22 @@
+[project]
+name = "gateway-apigee-grpc"
+version = "0"  # never published; the image is versioned by its git tag
+description = "DatRail Gateway's Apigee ExternalCallout service, over gRPC."
+requires-python = ">=3.12"
+dependencies = [
+    "gateway-core",
+    "grpcio==1.84.0",
+    "grpcio-health-checking==1.84.0",
+    # No older than the gencode grpcio-tools writes the committed code for.
+    "protobuf==7.36.2",
+]
+
+[tool.uv.sources]
+gateway-core = { workspace = true }
+
+[build-system]
+requires = ["uv_build==0.12.21"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "gateway.apigee_grpc"

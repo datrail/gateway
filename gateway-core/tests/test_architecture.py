@@ -37,7 +37,20 @@ def _allowed(member: Path) -> set[str]:
 def test_every_member_is_found():
     # Without this, a glob that stopped matching would leave the test below
     # with nothing to check, and it would pass.
-    assert {m.name for m in MEMBERS} >= {"gateway-core", "gateway-standalone"}
+    assert {m.name for m in MEMBERS} >= {
+        "gateway-core",
+        "gateway-standalone",
+        "gateway-apigee-grpc",
+    }
+
+
+def test_the_callout_declares_core_and_no_other_member():
+    # An interface builds on core alone; importing standalone would pull its
+    # HTTP stack into the callout's image.
+    assert _allowed(ROOT / "gateway-apigee-grpc") == {
+        "gateway.apigee_grpc",
+        "gateway.core",
+    }
 
 
 @pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)

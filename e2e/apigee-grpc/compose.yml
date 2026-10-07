@@ -1,0 +1,59 @@
+# The Apigee callout's e2e stack, a stub until the Apigee stand-in joins it:
+# the image starts, answers gRPC health and judges a call.
+#
+#   make e2e-apigee-grpc   # the result is the driver's exit code
+#   make e2e-down
+
+name: datrail-gateway-e2e-apigee-grpc
+
+x-callout: &callout
+  build:
+    context: ../..
+    dockerfile: gateway-apigee-grpc/Dockerfile
+  healthcheck:
+    # Liveness, on RAIL_GATEWAY_PORT.
+    test: ["CMD", "python", "-m", "gateway.apigee_grpc.probe_health"]
+    interval: 2s
+    timeout: 3s
+    retries: 15
+
+services:
+  rail-center:
+    extends: {file: ../shared/services.yml, service: rail-center}
+
+  callout:
+    <<: *callout
+    environment:
+      RAIL_CENTER_URL: http://rail-center:8080
+      RAIL_GATEWAY_SLUG: edge
+      RAIL_PLUGIN_ENABLED: "true"
+      RAIL_AUTH_MODE: bearer
+      # Selects the enforce bundle from the stub.
+      RAIL_AUTH_TOKEN: e2e-enforce
+      RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS: "3600"
+    depends_on:
+      rail-center: {condition: service_healthy}
+
+  # Enrolled, on a non-default port, with a Rail Center it can't reach: it must
+  # still start, and serve on the port it was given.
+  callout-unreachable:
+    <<: *callout
+    environment:
+      RAIL_CENTER_URL: http://rail-center.invalid
+      RAIL_GATEWAY_SLUG: edge
+      RAIL_PLUGIN_ENABLED: "true"
+      RAIL_GATEWAY_PORT: "9100"
+
+  # The callout's own image: it has grpc and the generated code, and runs as
+  # the image's user.
+  driver:
+    <<: *callout
+    volumes:
+      - ./driver.py:/e2e/driver.py:ro
+      - ../shared/lib.py:/e2e/lib.py:ro
+    # Unbuffered, so each line shows as it is reached.
+    command: ["python", "-u", "/e2e/driver.py"]
+    healthcheck: {disable: true}
+    depends_on:
+      callout: {condition: service_healthy}
+      callout-unreachable: {condition: service_healthy}
