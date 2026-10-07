@@ -1,4 +1,5 @@
-.PHONY: init fmt lint test dump-enforcement-cases e2e e2e-standalone e2e-down
+.PHONY: init fmt lint test dump-enforcement-cases proto proto-check e2e e2e-standalone \
+	e2e-down
 
 # CI runs these same targets.
 
@@ -23,6 +24,10 @@ test:
 # The enforcement contract table as JSON, for review.
 dump-enforcement-cases:
 	uv run python gateway-core/tools/dump_enforcement_cases.py
+
+# The callout's proto and its generated code: see gateway-apigee-grpc/Makefile.
+proto proto-check:
+	$(MAKE) -C gateway-apigee-grpc $@
 
 # Every e2e stack in turn. Leaves the containers up; `make e2e-down` removes them.
 e2e: e2e-standalone
