@@ -64,6 +64,24 @@ jobs:
           PYTHONUNBUFFERED: "1"
           PYTEST_ADDOPTS: "-vv"
 
+  # The vendored proto is still the upstream one, and the committed code is
+  # what `make proto` writes.
+  proto:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.21"
+          cache-python: true
+
+      - run: make init
+      - run: make proto-check
+
   # Builds each image and runs it against stubs, which the unit suite, running
   # in-process, can't: a policy fetched, a real MCP call refused, the denial
   # reported. amd64 only: emulating the release's arm64 would add nothing here.
