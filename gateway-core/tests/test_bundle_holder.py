@@ -35,6 +35,7 @@ from gateway.core.bundle.client import (
     BundleHolder,
     refresh_seconds,
 )
+from gateway.core.errors import ConfigError
 
 ONE = "5c8f1e42-0000-4000-8000-0000000000a1"
 TWO = "5c8f1e42-0000-4000-8000-0000000000a2"
@@ -1594,6 +1595,6 @@ def test_an_interval_that_is_not_a_number(
     if not value:
         assert refresh_seconds() == DEFAULT_REFRESH_SECONDS
         return
-    with pytest.raises(RuntimeError) as caught:
+    with pytest.raises(ConfigError) as caught:
         refresh_seconds()
     assert "must be an integer" in str(caught.value)

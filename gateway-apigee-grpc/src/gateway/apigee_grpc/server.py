@@ -16,6 +16,7 @@ from gateway.apigee_grpc.servicer import RailCallout
 from gateway.apigee_grpc.settings import get_max_message_bytes
 from gateway.core.bundle.client import BundleHolder
 from gateway.core.enforcement import DenialReporter
+from gateway.core.errors import ConfigError
 from gateway.core.lifecycle import is_ready, running
 from gateway.core.logs import configure_logging
 from gateway.core.mode import describe_plugin, plugin_enabled
@@ -108,15 +109,20 @@ async def _serve_until_stopped(
         _log.info("stopping")
 
 
-def main() -> None:
-    """Read the settings, then serve until SIGTERM. A configuration error
-    raises before anything is served."""
-    configure_logging()
-    enabled = plugin_enabled()
-    _log.info("%s", describe_plugin(enabled))
-    holder = build_holder() if enabled else None
-    reporter = DenialReporter(*rail_center_from_environment()) if enabled else None
-    listen_port = port()
-    max_message_bytes = get_max_message_bytes()
+def main() -> int:
+    """Read the settings, then serve until SIGTERM. Returns the exit code: 2
+    for a configuration that can't be served, before anything is served."""
+    try:
+        configure_logging()
+        enabled = plugin_enabled()
+        _log.info("%s", describe_plugin(enabled))
+        holder = build_holder() if enabled else None
+        reporter = DenialReporter(*rail_center_from_environment()) if enabled else None
+        listen_port = port()
+        max_message_bytes = get_max_message_bytes()
+    except ConfigError as exc:
+        _log.error("%s", exc)
+        return 2
     _log.info("gRPC messages are limited to %d bytes", max_message_bytes)
     asyncio.run(_serve_until_stopped(holder, reporter, listen_port, max_message_bytes))
+    return 0

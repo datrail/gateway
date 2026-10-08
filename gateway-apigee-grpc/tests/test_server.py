@@ -204,15 +204,18 @@ async def _wait_until_live(port: int) -> None:
         ),
         ({"RAIL_GATEWAY_PORT": "0x50"}, "RAIL_GATEWAY_PORT must be an integer"),
         ({"RAIL_PLUGIN_ENABLED": "true"}, "RAIL_CENTER_URL is required"),
+        # Before logging is configured.
+        ({"RAIL_GATEWAY_LOG_LEVEL": "LOUD"}, "RAIL_GATEWAY_LOG_LEVEL must be one of"),
     ],
-    ids=["message limit", "port", "plugin on with no Rail Center"],
+    ids=["message limit", "port", "plugin on with no Rail Center", "log level"],
 )
-def test_a_configuration_error_exits_non_zero_before_serving(settings, named):
+def test_a_configuration_error_exits_2_before_serving(settings, named):
     callout = _start_callout(_create_environment(**settings))
     output, _ = callout.communicate(timeout=10)
 
-    assert callout.returncode != 0
+    assert callout.returncode == 2, output
     assert named in output
+    assert "Traceback" not in output
     assert "serving the ExternalCallout service" not in output
 
 

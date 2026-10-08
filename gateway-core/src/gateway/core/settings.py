@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from gateway.core.auth import auth_headers
 from gateway.core.bundle.client import BundleHolder, refresh_seconds
+from gateway.core.errors import ConfigError
 
 DEFAULT_PORT = 8080
 
@@ -23,7 +24,7 @@ def _required(name: str) -> str:
     """
     value = (os.environ.get(name) or "").strip()
     if not value:
-        raise RuntimeError(f"{name} is required and is unset or empty")
+        raise ConfigError(f"{name} is required and is unset or empty")
     return value
 
 
@@ -45,11 +46,11 @@ def _checked_url(name: str, url: str) -> str:
         # Through `_credential_free` and not `_safe_to_log`: the message being
         # reported is the one `urlsplit` raised, so anything that parses to
         # redact would raise it again.
-        raise RuntimeError(
+        raise ConfigError(
             f"{name} is not a URL that can be parsed: {_credential_free(str(exc), url)}"
         ) from None
     if not hostname:
-        raise RuntimeError(f"{name} names no host: {_safe_to_log(url)}")
+        raise ConfigError(f"{name} names no host: {_safe_to_log(url)}")
     return url
 
 
@@ -64,11 +65,9 @@ def port() -> int:
     try:
         value = int(raw)
     except ValueError:
-        raise RuntimeError(
-            f"RAIL_GATEWAY_PORT must be an integer, got: {raw}"
-        ) from None
+        raise ConfigError(f"RAIL_GATEWAY_PORT must be an integer, got: {raw}") from None
     if not 1 <= value <= 65535:
-        raise RuntimeError(
+        raise ConfigError(
             f"RAIL_GATEWAY_PORT must be between 1 and 65535, got: {value}"
         )
     return value
@@ -94,7 +93,7 @@ def rail_center_from_environment() -> tuple[str, dict[str, str]]:
     )
     configured = auth_headers()
     if from_url and "Authorization" in configured:
-        raise RuntimeError(
+        raise ConfigError(
             "RAIL_CENTER_URL carries a credential and RAIL_AUTH_MODE configures "
             "one; only one of them can be sent, so set exactly one"
         )

@@ -8,6 +8,7 @@ Released versions correspond to published images at `ghcr.io/datrail/gateway` an
 
 ### Changed
 
+- **A configuration the gateway can't serve exits 2, logging one line**, in place of an uncaught exception's traceback and exit 1: a bad variable, an unreadable routes file. As DatRail Proxy does.
 - **The source is a uv workspace of two packages**, `gateway-core` and `gateway-standalone` (importing as `gateway.core` and `gateway.standalone`), so a second image can install only what it runs. The image is unchanged — same name, user, port, environment and installed packages — except that its command is now `python -m gateway.standalone` and its Python environment lives in `/app/.venv`, first on `PATH`. Every dependency, transitive ones included, is now pinned by `uv.lock`, and running from source needs Python 3.12.
 - **Log lines name the module that wrote them**: `gateway.core.bundle.client`, `gateway.core.denial`, `gateway.standalone.server` and so on, in place of `gateway`, `gateway.bundle` and `gateway.denial`. The handler and level are still set on `gateway`, so a filter on that prefix sees everything it did.
 - The image ships `openapi-pydantic` 0.6.0 in place of 0.5.1, a dependency of fastmcp, so it ships the same packages as DatRail Proxy's.

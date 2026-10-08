@@ -3,6 +3,7 @@
 import pytest
 
 from gateway.apigee_grpc.settings import get_max_message_bytes
+from gateway.core.errors import ConfigError
 
 _NAME = "RAIL_GATEWAY_GRPC_MAX_MESSAGE_MB"
 
@@ -26,12 +27,12 @@ def test_a_limit_in_range_is_read_in_mb(monkeypatch, raw):
 @pytest.mark.parametrize("raw", ["16MB", "1e1", "4.5", "lots"])
 def test_a_message_limit_that_is_not_an_integer_is_refused(monkeypatch, raw):
     monkeypatch.setenv(_NAME, raw)
-    with pytest.raises(RuntimeError, match=f"{_NAME} must be an integer, got: "):
+    with pytest.raises(ConfigError, match=f"{_NAME} must be an integer, got: "):
         get_max_message_bytes()
 
 
 @pytest.mark.parametrize("raw", ["0", "101", "-1", "16777216"])
 def test_a_message_limit_outside_the_range_is_refused(monkeypatch, raw):
     monkeypatch.setenv(_NAME, raw)
-    with pytest.raises(RuntimeError, match=f"{_NAME} must be between 1 and 100, got: "):
+    with pytest.raises(ConfigError, match=f"{_NAME} must be between 1 and 100, got: "):
         get_max_message_bytes()

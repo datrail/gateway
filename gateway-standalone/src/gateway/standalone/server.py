@@ -129,6 +129,7 @@ from starlette.types import ASGIApp
 
 from gateway.core.bundle.client import BundleHolder
 from gateway.core.enforcement import DenialReporter, judge, refusal_body
+from gateway.core.errors import ConfigError
 from gateway.core.key_safety import safe_for_log
 from gateway.core.lifecycle import is_ready, running
 from gateway.core.logs import configure_logging
@@ -777,8 +778,9 @@ class _UpstreamErrorBoundary(Middleware):
             raise ToolError("the upstream service could not be reached") from None
 
 
-def main() -> None:
-    """Serve, on the configured port.
+def main() -> int:
+    """Serve, on the configured port. Returns the exit code: 2 for a
+    configuration that can't be served.
 
     The entry point exists so that `RAIL_GATEWAY_PORT` reaches the socket. A
     `CMD` naming the port on the uvicorn command line reads as equivalent and
@@ -788,7 +790,13 @@ def main() -> None:
     """
     import uvicorn
 
-    configure_logging()
+    try:
+        configure_logging()
+        app = build_app()
+        listen_port = port()
+    except ConfigError as exc:
+        log.error("%s", exc)
+        return 2
     # No `timeout_graceful_shutdown`: it was tried and does not do the job.
     # A tool call's answer travels on a streamable-http stream that uvicorn's
     # connection wait does not cover, so SIGTERM abandons a call in flight
@@ -797,4 +805,5 @@ def main() -> None:
     # than `docker stop`'s ten seconds would be SIGKILLed before it helped.
     # Draining this properly needs the ASGI app to hold the shutdown until its
     # streams finish, which this change does not build.
-    uvicorn.run(build_app(), host="0.0.0.0", port=port())
+    uvicorn.run(app, host="0.0.0.0", port=listen_port)
+    return 0

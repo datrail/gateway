@@ -14,6 +14,8 @@ the deployment that caused it and with nothing naming the cause.
 import os
 import re
 
+from gateway.core.errors import ConfigError
+
 #: The modes this component implements. `gcp` is named and refused under its own
 #: name rather than falling into the "unknown mode" branch: the platform's
 #: contract lists it, so an operator who sets it has configured something real
@@ -38,10 +40,6 @@ UNIMPLEMENTED_MODES = ("gcp",)
 _HEADER_UNSAFE = re.compile(r"[^\x21-\x7E]")
 
 
-class AuthConfigurationError(RuntimeError):
-    """The configured mode cannot be honoured. Fatal at startup, by design."""
-
-
 def _trimmed(name: str) -> str:
     return (os.environ.get(name) or "").strip()
 
@@ -57,14 +55,12 @@ def _bearer_credential(raw: str, name: str) -> str:
     """
     value = raw.strip()
     if not value:
-        raise AuthConfigurationError(
-            f"{name} is required when RAIL_AUTH_MODE is bearer"
-        )
+        raise ConfigError(f"{name} is required when RAIL_AUTH_MODE is bearer")
     found = _HEADER_UNSAFE.search(value)
     if found is not None:
         offset = found.start()
         code_point = ord(value[offset])
-        raise AuthConfigurationError(
+        raise ConfigError(
             f"{name} holds U+{code_point:04X} at offset {offset}, "
             "which cannot go in a header value"
         )
@@ -77,17 +73,17 @@ def auth_headers() -> dict[str, str]:
     A plain dict rather than a callable: this component's only credential source
     is an environment variable, which a running process cannot change.
 
-    Raises `AuthConfigurationError` for anything it cannot honour.
+    Raises `ConfigError` for anything it cannot honour.
     """
     mode = _trimmed("RAIL_AUTH_MODE").lower() or "none"
 
     if mode in UNIMPLEMENTED_MODES:
-        raise AuthConfigurationError(
+        raise ConfigError(
             f"RAIL_AUTH_MODE={mode} is a mode this platform defines and this "
             f"gateway does not implement; it accepts {', '.join(AUTH_MODES)}"
         )
     if mode not in AUTH_MODES:
-        raise AuthConfigurationError(
+        raise ConfigError(
             f"RAIL_AUTH_MODE must be one of {', '.join(AUTH_MODES)}, got: {mode}"
         )
 
@@ -107,7 +103,7 @@ def auth_headers() -> dict[str, str]:
             configured = (
                 "none" if _trimmed("RAIL_AUTH_MODE") else "unset, which is none"
             )
-            raise AuthConfigurationError(
+            raise ConfigError(
                 f"RAIL_AUTH_MODE is {configured} and sends no credential, but "
                 "RAIL_AUTH_TOKEN is set; set RAIL_AUTH_MODE=bearer to use it, "
                 "or unset RAIL_AUTH_TOKEN to mean none"
