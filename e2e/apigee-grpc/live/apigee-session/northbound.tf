@@ -1,9 +1,8 @@
 # The environment group and the external HTTPS load balancer in front of
-# Apigee (apigee-plan.md §2.3). No environment
-# here, so nothing Apigee bills for; the forwarding rule costs about $0.60/day.
+# Apigee: the driver calls the proxies through it.
 
 resource "google_apigee_envgroup" "envgroup" {
-  name      = var.apigee_envgroup
+  name      = "${var.prefix}-envgroup"
   org_id    = local.org_id
   hostnames = [var.apigee_hostname]
 }
@@ -15,9 +14,9 @@ resource "google_compute_global_address" "lb" {
   depends_on = [google_project_service.apis]
 }
 
-# A self-signed certificate that only needs to match the IP: clients call
-# https://<ip>/mcp with --cacert. The private key stays in the local state
-# (a prototype; nothing else trusts this certificate).
+# A self-signed certificate that only needs to match the IP: the driver
+# trusts it from an output. The private key stays in the local state, and
+# nothing else trusts this certificate.
 resource "tls_private_key" "lb" {
   algorithm = "RSA"
   rsa_bits  = 2048
@@ -82,7 +81,7 @@ resource "google_compute_backend_service" "apigee" {
 }
 
 # Every request goes to Apigee with Host rewritten to the envgroup hostname,
-# so clients can call the bare IP.
+# so the driver can call the bare IP.
 resource "google_compute_url_map" "apigee" {
   name            = "${var.prefix}-apigee-um"
   default_service = google_compute_backend_service.apigee.id

@@ -16,43 +16,23 @@ variable "prefix" {
 }
 
 variable "apigee_instance" {
-  description = "Name of the Apigee instance (created by ../apigee-org)."
+  description = "Name of the Apigee instance (../apigee-org)."
   type        = string
 }
 
-variable "apigee_envgroup" {
-  description = "Name of the Apigee environment group (created by ../apigee-callout-lb)."
-  type        = string
-}
-
-variable "apigee_env" {
-  description = "Name of the environment. It is billed while it exists."
+variable "apigee_hostname" {
+  description = "Hostname of the environment group. The load balancer rewrites Host to it."
   type        = string
 }
 
 variable "apigee_env_type" {
-  description = "BASE, INTERMEDIATE or COMPREHENSIVE. BASE only runs Standard policies."
+  description = "BASE, INTERMEDIATE or COMPREHENSIVE. The reference bundle needs only BASE."
   type        = string
+  default     = "BASE"
 }
 
-variable "rail_timeout_ms" {
-  description = "How long the proxy waits for the rail callout."
+variable "timeout_ms" {
+  description = "How long the proxy waits for the callout (EC-Rail's TimeoutMs)."
   type        = number
-}
-
-variable "mode" {
-  description = "passthrough: the route to the target only. rail: with the callout (EC-Rail, RF-Deny, RF-CalloutFailed)."
-  type        = string
-  default     = "rail"
-
-  validation {
-    condition     = contains(["passthrough", "rail"], var.mode)
-    error_message = "mode must be passthrough or rail."
-  }
-}
-
-variable "rail_with_request_headers" {
-  description = "Whether EC-Rail sends the request headers to the callout (scripts/apigee-test.sh headers-off sets false)."
-  type        = bool
-  default     = true
+  default     = 5000
 }

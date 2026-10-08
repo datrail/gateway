@@ -1,6 +1,5 @@
-# The Apigee org (Pay-as-you-go) and its runtime instance. Both exist and are
-# imported (imports.tf).
-# Neither costs anything without an environment; ../apigee-session adds that.
+# The Apigee org (Pay-as-you-go) and its runtime instance. Neither costs
+# anything without an environment; ../apigee-session adds that.
 #
 # Billing type, peering mode, analytics region and the keys are fixed at
 # creation. If a plan wants to replace (-/+) the org or the instance, the code
@@ -22,7 +21,7 @@ resource "google_apigee_organization" "org" {
 }
 
 resource "google_apigee_instance" "instance" {
-  name                     = "${var.prefix}-usc1"
+  name                     = var.apigee_instance
   location                 = var.region
   org_id                   = google_apigee_organization.org.id
   disk_encryption_key_name = google_kms_crypto_key.apigee["disk"].id

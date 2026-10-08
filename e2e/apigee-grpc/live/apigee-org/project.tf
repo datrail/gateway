@@ -1,6 +1,5 @@
 # What the org needs from the project: the APIs and Apigee's service
-# identity. The APIs of the callout and the load balancer are in
-# ../apigee-callout-lb.
+# identity. The session's own APIs are in ../apigee-session.
 
 resource "google_project_service" "apis" {
   for_each = toset([
@@ -10,7 +9,7 @@ resource "google_project_service" "apis" {
   ])
 
   service = each.key
-  # terraform destroy leaves the APIs enabled: the other roots and G1 use them.
+  # Left enabled on destroy: other work in the project may use them.
   disable_on_destroy = false
 }
 

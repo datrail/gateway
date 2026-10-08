@@ -1,8 +1,0 @@
-# Loaded automatically by terraform plan/apply. Keep project_id, region and
-# prefix in sync with ../../scripts/config.env, which the scripts read.
-project_id      = "your-project"
-region          = "us-central1"
-prefix          = "g2p"
-apigee_instance = "g2p-usc1"
-apigee_envgroup = "g2p-envgroup"
-apigee_hostname = "mcp.g2p.internal"

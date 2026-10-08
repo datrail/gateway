@@ -1,11 +1,7 @@
-# Loaded automatically by terraform plan/apply. Keep project_id, region,
-# prefix and rail_timeout_ms in sync with ../../scripts/config.env, which the
-# scripts read.
+# Copy to terraform.tfvars, which terraform plan/apply load automatically.
+# region and apigee_instance are ../apigee-org's.
 project_id      = "your-project"
 region          = "us-central1"
-prefix          = "g2p"
-apigee_instance = "g2p-usc1"
-apigee_envgroup = "g2p-envgroup"
-apigee_env      = "g2p-env"
-apigee_env_type = "BASE"
-rail_timeout_ms = 5000
+prefix          = "rail-e2e"
+apigee_instance = "rail-usc1"
+apigee_hostname = "mcp.rail-e2e.internal"

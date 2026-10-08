@@ -14,3 +14,8 @@ variable "prefix" {
   description = "Prefix for every resource name we choose."
   type        = string
 }
+
+variable "apigee_instance" {
+  description = "Name of the Apigee instance."
+  type        = string
+}

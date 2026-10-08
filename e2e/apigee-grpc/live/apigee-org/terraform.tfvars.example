@@ -1,5 +1,6 @@
-# Loaded automatically by terraform plan/apply. Keep project_id, region and
-# prefix in sync with ../../scripts/config.env, which the scripts read.
-project_id = "your-project"
-region     = "us-central1"
-prefix     = "g2p"
+# Copy to terraform.tfvars, which terraform plan/apply load automatically.
+# ../apigee-session takes the same region and apigee_instance.
+project_id      = "your-project"
+region          = "us-central1"
+prefix          = "rail"
+apigee_instance = "rail-usc1"
