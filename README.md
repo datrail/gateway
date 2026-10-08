@@ -16,7 +16,8 @@ make e2e
 ```
 
 To run it in front of a real MCP server, see
-[gateway-standalone](gateway-standalone/README.md).
+[gateway-standalone](gateway-standalone/README.md); behind an Apigee proxy,
+[gateway-apigee-grpc](gateway-apigee-grpc/README.md).
 
 ## Architecture
 
@@ -44,8 +45,9 @@ The schemas in [`schemas/`](schemas/) define the ticket, bundle, and
 denial-event wire shapes.
 
 Each interface puts the gateway in the agent's path in its own way: see
-[gateway-standalone's](gateway-standalone/README.md#architecture)
-architecture.
+[gateway-standalone's](gateway-standalone/README.md#architecture) and
+[gateway-apigee-grpc's](gateway-apigee-grpc/README.md#architecture)
+architectures.
 
 ## Layout
 
@@ -57,6 +59,7 @@ packages it runs:
 |---|---|---|
 | [gateway-core](gateway-core/README.md) | `gateway.core` | `x-rail` parsing, endpoint resolution, policy ingestion and decisions |
 | [gateway-standalone](gateway-standalone/README.md) | `gateway.standalone` | FastMCP/Starlette host, process configuration and routes file; its Dockerfile builds `ghcr.io/datrail/gateway` |
+| [gateway-apigee-grpc](gateway-apigee-grpc/README.md) | `gateway.apigee_grpc` | Apigee ExternalCallout service and its reference proxy bundle; its Dockerfile builds `ghcr.io/datrail/gateway-apigee-grpc` |
 
 Dependencies point one way: every interface imports the vendor-neutral core,
 and the core imports no interface. More generally, a package imports only the
@@ -66,7 +69,9 @@ packages its `pyproject.toml` declares, and
 A new interface is a `gateway-<name>/` package importing as `gateway.<name>`,
 with its own Dockerfile and image. Name it after its extension mechanism, not a
 cloud vendor (`gateway-ext-proc`, not `gateway-gcp`), so one implementation can
-serve every platform that speaks that mechanism.
+serve every platform that speaks that mechanism. A mechanism only one product
+has is named with it: `gateway-apigee-grpc` is Apigee's ExternalCallout, over
+gRPC.
 
 ## Security
 

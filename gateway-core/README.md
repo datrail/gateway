@@ -2,8 +2,22 @@
 
 `gateway.core`, DatRail Gateway's vendor-neutral enforcement core: `x-rail`
 ticket parsing, endpoint resolution, policy bundle ingestion and decisions. It
-imports no other member of this workspace; the standalone host, and any future
-interface, builds on it. See the [main README](../README.md) for the whole.
+imports no other member of this workspace; every interface builds on it. See
+the [main README](../README.md) for the whole.
+
+What every interface takes from it, so they behave alike:
+- **the settings** they all read, and their refusals (`settings`, `mode`);
+- **logging**, its format and level (`logs`);
+- **the lifecycle**: the first fetch's 5 s grace, the refresh loop, and
+  readiness (`lifecycle`);
+- **enforcement**: judging one call, the refusal bodies, and denial
+  reporting (`enforcement`);
+- **the enforcement contract**, `ENFORCEMENT_CASES` in
+  [`tests/core_support.py`](tests/core_support.py), which every interface's
+  tests run.
+
+An interface adds only its host: how a request arrives, and how the verdict
+is applied.
 
 ## The policy bundle
 
