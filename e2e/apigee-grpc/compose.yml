@@ -58,8 +58,10 @@ services:
       APIGEE_TARGET_URL: http://upstream:8080/mcp
       APIGEE_TIMEOUT_MS: "5000"
       APIGEE_BUNDLE: /e2e/apiproxy
+      APIGEE_OPERATOR_FAULT: /e2e/RF-E2E-OperatorFault.xml
     volumes:
       - ./apigee_standin.py:/e2e/apigee_standin.py:ro
+      - ./RF-E2E-OperatorFault.xml:/e2e/RF-E2E-OperatorFault.xml:ro
       - ../../gateway-apigee-grpc/apigee/apiproxy:/e2e/apiproxy:ro
     command: ["python", "-u", "/e2e/apigee_standin.py"]
     healthcheck:

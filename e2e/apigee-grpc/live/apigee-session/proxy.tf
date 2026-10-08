@@ -16,19 +16,34 @@ locals {
     }
   }
 
-  # Each proxy's bundle, the reference bundle's __PLACEHOLDERS__ filled in.
-  # Terraform has no loop over replacements, hence the nesting.
+  # Test only: an operator's policy faulting before EC-Rail, on a header.
+  operator_fault = "${path.module}/../../RF-E2E-OperatorFault.xml"
+  operator_step  = <<-EOT
+    <Name>RF-E2E-OperatorFault</Name>
+            <Condition>request.header.x-e2e-operator-fault != null</Condition>
+          </Step>
+          <Step>
+            <Name>EC-Rail</Name>
+  EOT
+
+  # Each proxy's bundle, the reference bundle's __PLACEHOLDERS__ filled in,
+  # plus the operator's policy. Terraform has no loop over replacements,
+  # hence the nesting.
   bundles = {
-    for proxy, p in local.proxies : proxy => {
-      for f in fileset(local.bundle_dir, "**/*.xml") : f =>
-      replace(replace(replace(replace(replace(replace(file("${local.bundle_dir}/${f}"),
-        "__PROXY_NAME__", "${var.prefix}-${proxy}"),
-        "__BASE_PATH__", p.base_path),
-        "__TARGET_URL__", "${google_cloud_run_v2_service.stub["upstream"].uri}/mcp"),
-        "__TIMEOUT_MS__", tostring(var.timeout_ms)),
-        "__CALLOUT_SERVER__", p.callout_server),
-      "__CALLOUT_AUDIENCE__", google_cloud_run_v2_service.callout.uri)
-    }
+    for proxy, p in local.proxies : proxy => merge(
+      {
+        for f in fileset(local.bundle_dir, "**/*.xml") : f =>
+        replace(replace(replace(replace(replace(replace(replace(file("${local.bundle_dir}/${f}"),
+          "__PROXY_NAME__", "${var.prefix}-${proxy}"),
+          "__BASE_PATH__", p.base_path),
+          "__TARGET_URL__", "${google_cloud_run_v2_service.stub["upstream"].uri}/mcp"),
+          "__TIMEOUT_MS__", tostring(var.timeout_ms)),
+          "__CALLOUT_SERVER__", p.callout_server),
+          "__CALLOUT_AUDIENCE__", google_cloud_run_v2_service.callout.uri),
+        "<Name>EC-Rail</Name>", trimspace(local.operator_step))
+      },
+      { "policies/RF-E2E-OperatorFault.xml" = file(local.operator_fault) },
+    )
   }
 }
 

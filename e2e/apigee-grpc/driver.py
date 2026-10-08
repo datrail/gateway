@@ -20,6 +20,7 @@ from lib import (
     bundle_fetches,
     call_tool,
     count_upstream_requests,
+    denials,
     expect,
     fail,
     finish,
@@ -74,6 +75,7 @@ def _process(target, verb, content=""):
 _AGENT = {"Authorization": "Bearer e2e-agent"}
 _REFUSED = '{"error": "denied by policy"}'
 _CALLOUT_FAILED = '{"error": "policy ruleset cannot be applied"}'
+_OPERATOR_FAULT = '{"error": "e2e operator fault"}'
 _CALL = json.dumps(
     {
         "jsonrpc": "2.0",
@@ -217,6 +219,25 @@ def _run_apigee_cases(enforce, no_callout):
     expect("the call is answered 503", 503, code)
     expect("with RF-CalloutFailed's body", _CALLOUT_FAILED, body)
     expect("nothing reached the upstream", 0, count_upstream_requests())
+
+    # The FaultRule names EC-Rail's fault, so an operator's policy failing
+    # before it (RF-E2E-OperatorFault, test only) keeps its own error.
+    block("an operator's fault before the callout keeps its own error")
+    reset_journals()
+    fault = {"x-e2e-operator-fault": "1", **_AGENT}
+    for name, url in (("enforce", enforce), ("no-callout", no_callout)):
+        code, body = call_tool(url, "track_package", headers=fault)
+        expect(f"{name}: the call is answered 418", 418, code)
+        expect(f"{name}: with the operator's body", _OPERATOR_FAULT, body)
+    expect("nothing reached the upstream", 0, count_upstream_requests())
+    # A refused call after it: once its denial is in, the first would be too.
+    expect(
+        "a call with no ticket is refused",
+        403,
+        status(enforce, "track_package", _AGENT),
+    )
+    expect("only that call reached the callout", 1, await_denial(1, P0))
+    expect("and it alone was reported", 1, denials())
 
     block("every request found a stub")
     sweep_unmatched()

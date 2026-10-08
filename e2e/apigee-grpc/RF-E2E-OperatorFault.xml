@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Test only: an operator's policy that faults before EC-Rail, as a failed
+     VerifyAPIKey would. The live harness and the stand-in add it in front of
+     EC-Rail; the reference bundle doesn't ship it. -->
+<RaiseFault name="RF-E2E-OperatorFault" continueOnError="false">
+  <DisplayName>RF-E2E-OperatorFault</DisplayName>
+  <FaultResponse>
+    <Set>
+      <StatusCode>418</StatusCode>
+      <Payload contentType="application/json">{"error": "e2e operator fault"}</Payload>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>false</IgnoreUnresolvedVariables>
+</RaiseFault>

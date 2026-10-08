@@ -86,7 +86,11 @@ variables; its exit code is the result. The Apigee cases:
   that isn't UTF-8 is refused; a 3.5 MiB call is forwarded and a 5 MiB one
   fails closed (the callout README's Caveats);
 - `no-callout` answers 503 with `RF-CalloutFailed`'s body, and nothing
-  reaches `upstream` (D2).
+  reaches `upstream` (D2);
+- an operator's policy faulting before `EC-Rail` keeps its own error, on
+  both proxies. The policy, `../RF-E2E-OperatorFault.xml`, is test only:
+  the session adds it in front of `EC-Rail`, on header
+  `x-e2e-operator-fault`.
 
 **Adding or changing an Apigee case:** run it here first, then on the
 stand-in. These cases are the stand-in's specification, so a change to one

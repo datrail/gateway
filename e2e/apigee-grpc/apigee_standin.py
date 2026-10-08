@@ -7,7 +7,8 @@ says where it comes from. Settings, from the environment:
 - APIGEE_PROXIES: `<base path>=<callout host:port>`, comma-separated;
 - APIGEE_TARGET_URL: where an allowed request goes, the base path replaced;
 - APIGEE_TIMEOUT_MS: EC-Rail's TimeoutMs;
-- APIGEE_BUNDLE: the reference bundle's `apiproxy/` folder.
+- APIGEE_BUNDLE: the reference bundle's `apiproxy/` folder;
+- APIGEE_OPERATOR_FAULT: the test-only policy faulting before EC-Rail.
 """
 
 import http.client
@@ -44,6 +45,9 @@ _CALLOUT_FAILED = (
     .findtext("FaultResponse/Set/Payload")
     .encode()
 )
+# The test-only policy, on the header the live harness's condition names.
+_OPERATOR_FAULT = ET.parse(os.environ["APIGEE_OPERATOR_FAULT"]).getroot()
+_OPERATOR_FAULT_HEADER = "x-e2e-operator-fault"
 # Set per hop, never forwarded.
 _HOP_HEADERS = {"connection", "content-length", "host", "transfer-encoding"}
 
@@ -118,6 +122,15 @@ class _Handler(BaseHTTPRequestHandler):
             return
         base, callout = proxy
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if _OPERATOR_FAULT_HEADER in self.headers:
+            # A fault before EC-Rail keeps its own error: the FaultRule names
+            # EC-Rail's.
+            self._answer(
+                int(_OPERATOR_FAULT.findtext("FaultResponse/Set/StatusCode")),
+                {"Content-Type": ["application/json"]},
+                _OPERATOR_FAULT.findtext("FaultResponse/Set/Payload").encode(),
+            )
+            return
         lines = [
             (name, value)
             for name, value in self.headers.items()
@@ -129,7 +142,7 @@ class _Handler(BaseHTTPRequestHandler):
             callout, self.command, self.path, _split_headers(lines), body
         )
         flow = answer.additional_flow_variables if answer is not None else {}
-        # The FaultRule: no decision means the callout failed (D2).
+        # The FaultRule on EC-Rail's fault, and the step on no decision (D2).
         if DECISION not in flow:
             self._answer(503, {"Content-Type": ["application/json"]}, _CALLOUT_FAILED)
             return
