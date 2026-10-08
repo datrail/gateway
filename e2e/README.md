@@ -17,7 +17,7 @@ containers up so a failed run's logs can be read; `make e2e-down` removes them.
 e2e/
   shared/       the stubs, the base services, the driver's helpers
   standalone/   the standalone gateway's stack
-  apigee-grpc/  the Apigee callout's stack (a stub, for now)
+  apigee-grpc/  the Apigee callout's stack, behind a stand-in for Apigee
     live/       a paid session on real Apigee X, run by hand
 ```
 
@@ -89,21 +89,43 @@ before any journal reset, and a stub left over from an earlier run inflates it.
 driver waits for them. Reading the journal right after the `403` passes most of
 the time, then fails as if the gateway were at fault.
 
-## Apigee callout (stub)
+## Apigee callout
 
-For now this stack only shows the image works: no Apigee stand-in and no
-upstream yet. The driver runs in the callout's own image, which has grpcio and
-the generated code.
+The callout behind `apigee_standin.py`, a stand-in for an Apigee proxy running
+the [reference bundle](../gateway-apigee-grpc/apigee/README.md). **The
+stand-in is a model of Apigee, not Apigee:** it does only what the bundle,
+Apigee's docs and the [live harness](apigee-grpc/live/README.md)'s runs say
+Apigee does. The same Apigee cases run on both; they were written and passed
+live first. The driver and the stand-in run in the callout's own image, which
+has grpcio and the generated code.
 
 | Service | Configuration |
 |---|---|
+| `apigee` | the stand-in: `/mcp` through `callout`, `/no-callout` through a callout host that never resolves, to `upstream` |
 | `callout` | enrolled, credential `e2e-enforce` |
 | `callout-unreachable` | enrolled, Rail Center unreachable, `RAIL_GATEWAY_PORT=9100` |
 
+What the stand-in models, each checked on the live harness (2026-10-08) unless
+noted:
+- header values split on commas, and a repeated line adding items, in what the
+  callout sees; headers it doesn't return forwarded as received;
+- a header returned with an empty list removed (Apigee's docs); one returned
+  with items written back as a line of its own each;
+- the answer's content forwarded as the body, even empty;
+- `RF-Refuse` answering `rail.status` with `rail.body`;
+- any callout failure answering `RF-CalloutFailed`'s 503, read from the bundle:
+  unreachable, timed out, a gRPC error, or an answer over gRPC's 4 MiB;
+- `uri` with the query string; a body that isn't UTF-8 sent with replacement
+  characters.
+
+Not modelled, so checked live only: TLS and the load balancer, Cloud Run's IAM
+check on the callout, base and target path rewriting beyond one prefix,
+Apigee's payload limit and target timeout, streamed responses, a 405 without
+`Allow` (a 502 on Apigee), analytics.
+
 What the driver asserts:
-- the image runs as uid 10001;
-- `callout` fetches a bundle, and its gRPC liveness and readiness are `SERVING`;
-- a `GET` is allowed; a call with no ticket is refused with `403` and
-  standalone's body, and the denial names P0;
-- `callout-unreachable` is live on port 9100 and not ready;
-- every request to Rail Center found a stub.
+- the image runs as uid 10001; `callout` fetches a bundle and its gRPC
+  liveness and readiness are `SERVING`; a direct `ProcessMessage` judges a
+  call; `callout-unreachable` is live on port 9100 and not ready;
+- then the Apigee cases, listed in the [live README](apigee-grpc/live/README.md#what-the-driver-checks);
+- every request found a stub.
