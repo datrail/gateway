@@ -5,11 +5,13 @@ believes it did something, a journal says it happened.
 """
 
 import base64
+import http.client
 import json
 import os
 import ssl
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # Overridden by the live harness, whose stubs run on Cloud Run.
@@ -119,18 +121,25 @@ def denials_naming_no_policy():
     )
 
 
-# The ticket's state as the gateway read it, such as `undecodable`.
-def count_denials_with_ticket_state(state):
-    return count(
-        RAIL_CENTER,
-        {
-            "method": "POST",
-            "urlPath": "/v1/denials",
-            "bodyPatterns": [
-                {"matchesJsonPath": f"$[?(@.metadata['x-rail-status'] == '{state}')]"}
-            ],
-        },
-    )
+def get_denials():
+    """The denial reports Rail Center's stub received, newest first; [] if it
+    could not be asked."""
+    try:
+        requests = _admin("GET", RAIL_CENTER, "/__admin/requests")["requests"]
+    except (OSError, ValueError, KeyError):
+        return []
+    return [
+        json.loads(r["request"]["body"])
+        for r in requests
+        if r["request"]["url"] == "/v1/denials"
+    ]
+
+
+# Denials are reported after the caller is answered, so wait for one.
+def await_last_denial():
+    """The newest denial report, or {} if none arrived."""
+    wait_for(lambda: len(get_denials()), 1)
+    return (get_denials() or [{}])[0]
 
 
 def count_upstream_requests():
@@ -192,6 +201,33 @@ def reset_journals():
     sweep_unmatched()
     _admin("DELETE", UPSTREAM, "/__admin/requests")
     _admin("DELETE", RAIL_CENTER, "/__admin/requests")
+
+
+def send_raw_post(url, body, headers):
+    """The status and body of a POST of `body` (bytes) with `headers`, a list of
+    (name, value) pairs, so a header can repeat; (None, "") if nothing
+    answered."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme == "https":
+        connection = http.client.HTTPSConnection(
+            parts.netloc, timeout=TIMEOUT_SECONDS, context=_TLS
+        )
+    else:
+        connection = http.client.HTTPConnection(parts.netloc, timeout=TIMEOUT_SECONDS)
+    try:
+        connection.putrequest(
+            "POST", parts.path + (f"?{parts.query}" if parts.query else "")
+        )
+        for name, value in [*MCP_HEADERS.items(), *headers]:
+            connection.putheader(name, value)
+        connection.putheader("Content-Length", str(len(body)))
+        connection.endheaders(body)
+        response = connection.getresponse()
+        return response.status, response.read().decode(errors="replace")
+    except OSError:
+        return None, ""
+    finally:
+        connection.close()
 
 
 def _post_mcp(url, payload, headers):

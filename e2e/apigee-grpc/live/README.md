@@ -12,7 +12,7 @@ Two Terraform roots:
 | Root | Holds | Lifetime | Cost |
 |---|---|---|---|
 | `apigee-org` | the Apigee organisation, its instance, their KMS keys | applied once per project, never destroyed | nothing without an environment, apart from the keys (about $0.06 a month each) |
-| `apigee-session` | the environment and its group, the TargetServers, the two proxies from the reference bundle, the load balancer in front of Apigee and its VPC, the image registry, the service accounts, and on Cloud Run the callout and the `rail-center` and `upstream` stubs | one session: `make e2e-apigee-live-up` to `make e2e-apigee-live-down` | a Base environment, about $0.50 an hour, and the load balancer |
+| `apigee-session` | the environment and its group, the TargetServers, the two proxies from the reference bundle, the load balancer in front of Apigee and its VPC, the image registry, the service accounts, and on Cloud Run the callout and the `rail-center` and `upstream` stubs | one session: `session.sh up` to `session.sh down` | a Base environment, about $0.50 an hour, and the load balancer |
 
 ## One-time setup: the Apigee organisation
 
@@ -50,10 +50,10 @@ Needs `gcloud`, `terraform`, `docker`, `jq` and `uv`, and `apigee-org` applied.
 ```sh
 cd e2e/apigee-grpc/live/apigee-session
 cp terraform.tfvars.example terraform.tfvars   # your values
-cd -
-make e2e-apigee-live-up     # builds and pushes the images, applies, waits for the proxy
-make e2e-apigee-live        # runs the driver against the session
-make e2e-apigee-live-down   # destroys everything, then checks no environment is left
+cd ..
+./session.sh up     # builds and pushes the images, applies, waits for the proxy
+./session.sh test   # runs the driver against the session
+./session.sh down   # destroys everything, then checks no environment is left
 ```
 
 ## Auth and TLS

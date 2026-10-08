@@ -1,8 +1,7 @@
 .PHONY: init fmt lint test dump-enforcement-cases proto proto-check e2e e2e-standalone \
-	e2e-apigee-grpc e2e-down e2e-apigee-live-up e2e-apigee-live \
-	e2e-apigee-live-down
+	e2e-apigee-grpc e2e-down
 
-# CI runs these same targets, apart from e2e-apigee-live-*.
+# CI runs these same targets.
 
 # Every member, editable, plus the pinned dev tools. Run once, and after pulling.
 init:
@@ -45,11 +44,3 @@ e2e-apigee-grpc:
 e2e-down:
 	docker compose -f e2e/standalone/compose.yml down -v --remove-orphans
 	docker compose -f e2e/apigee-grpc/compose.yml down -v --remove-orphans
-
-# A paid session on real Apigee: see e2e/apigee-grpc/live/README.md. Never in CI.
-e2e-apigee-live-up e2e-apigee-live-down:
-	e2e/apigee-grpc/live/session.sh $(subst e2e-apigee-live-,,$@)
-
-# The driver against the session; the result is its exit code.
-e2e-apigee-live:
-	e2e/apigee-grpc/live/session.sh test

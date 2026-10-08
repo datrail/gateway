@@ -2,7 +2,7 @@
 judges a call); live, through real Apigee and the reference bundle.
 
 E2E_TARGET picks which: `local` (the default, in compose.yml) or `live`
-(`make e2e-apigee-live`, through live/session.sh).
+(`live/session.sh test`).
 """
 
 import json
@@ -15,10 +15,10 @@ from lib import (
     RAIL_CENTER,
     UPSTREAM,
     await_denial,
+    await_last_denial,
     block,
     bundle_fetches,
     call_tool,
-    count_denials_with_ticket_state,
     count_upstream_requests,
     expect,
     fail,
@@ -29,6 +29,8 @@ from lib import (
     ok,
     open_session,
     reset_journals,
+    send_raw_post,
+    status,
     sweep_unmatched,
     unmatched,
     wait_for,
@@ -43,6 +45,7 @@ from gateway.apigee_grpc._proto.external_callout_pb2_grpc import (
 )
 
 P0 = "11111111-0000-4000-8000-000000000000"
+P2 = "11111111-0000-4000-8000-000000000002"
 CALL = {"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "x"}}
 
 
@@ -71,6 +74,14 @@ def _process(target, verb, content=""):
 _AGENT = {"Authorization": "Bearer e2e-agent"}
 _REFUSED = '{"error": "denied by policy"}'
 _CALLOUT_FAILED = '{"error": "policy ruleset cannot be applied"}'
+_CALL = json.dumps(
+    {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {"name": "track_package"},
+    }
+).encode()
 
 
 def _run_apigee_cases(enforce, no_callout):
@@ -129,9 +140,76 @@ def _run_apigee_cases(enforce, no_callout):
     )
     expect(
         "the denial reads the ticket as undecodable",
-        1,
-        wait_for(lambda: count_denials_with_ticket_state("undecodable"), 1),
+        "undecodable",
+        await_last_denial().get("metadata", {}).get("x-rail-status"),
     )
+
+    # §9 #1: standalone refuses a ticket sent twice.
+    block("enforce: a ticket sent on two header lines is undecodable")
+    reset_journals()
+    ticket = os.environ["E2E_GOOD_TICKET"]
+    code, _ = send_raw_post(
+        enforce, _CALL, [("x-rail", ticket), ("x-rail", ticket), *_AGENT.items()]
+    )
+    expect("the call is refused 403", 403, code)
+    expect(
+        "the denial reads the ticket as undecodable",
+        "undecodable",
+        await_last_denial().get("metadata", {}).get("x-rail-status"),
+    )
+
+    # §9 #2: Apigee splits the claim on its comma, so it reads as two and is
+    # dropped; standalone records it whole. No real claim has a comma.
+    block("enforce: a claimed status with a comma is dropped")
+    reset_journals()
+    claimed = {"x-rail-status": "not-found, expired", **_AGENT}
+    expect("the call is refused 403", 403, status(enforce, "track_package", claimed))
+    expect(
+        "the denial records no claim",
+        "<none>",
+        await_last_denial().get("metadata", {}).get("claimed-x-rail-status", "<none>"),
+    )
+
+    # §9 #5: the endpoint key is the path without the query.
+    block("enforce: the query string stays out of the endpoint key")
+    reset_journals()
+    expect(
+        "the forbidden call is refused 403",
+        403,
+        status(enforce + "?e2e=1", "forbidden_tool", good),
+    )
+    expect("it named P2, the endpoint rule", 1, await_denial(1, P2))
+
+    # §9 #6: whether Apigee sends such content, and what then answers.
+    block("enforce: a body that isn't UTF-8 never reaches the upstream")
+    reset_journals()
+    code, body = send_raw_post(
+        enforce, b"\xff\xfe{}", [("x-rail", ticket), *_AGENT.items()]
+    )
+    if code in (403, 503):
+        ok(f"the call is refused ({code}: {body})")
+    else:
+        fail(f"the call is refused 403 or 503 — got {code} {body}")
+    expect("nothing reached the upstream", 0, count_upstream_requests())
+
+    # §9 #8: Apigee accepts a callout answer of at most 4 MiB, and the answer
+    # echoes the body, so a larger call fails as if the callout were down.
+    block("enforce: a 3.5 MiB call is forwarded, a 5 MiB one fails closed")
+    reset_journals()
+    code, body = call_tool(
+        enforce, "track_package", {"pad": "x" * 7 * 512 * 1024}, good
+    )
+    if code == 200 and '"text":"delivered"' in body:
+        ok("the 3.5 MiB call returns the upstream answer")
+    else:
+        fail(f"the 3.5 MiB call returns the upstream answer — got {code} {body[:300]}")
+    reset_journals()
+    code, body = call_tool(
+        enforce, "track_package", {"pad": "x" * 5 * 1024 * 1024}, good
+    )
+    expect("the 5 MiB call is answered 503", 503, code)
+    expect("with RF-CalloutFailed's body", _CALLOUT_FAILED, body)
+    expect("nothing reached the upstream", 0, count_upstream_requests())
 
     block("no-callout: the proxy fails closed (D2)")
     reset_journals()

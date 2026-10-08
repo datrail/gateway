@@ -60,6 +60,18 @@ await_proxy() {
   return 1
 }
 
+# The stubs are open, so their journals and mappings must not be.
+check_stub_admin() {
+  local url code
+  for url in "$(terraform output -raw rail_center_url)" "$(terraform output -raw upstream_url)"; do
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$url/__admin/requests")
+    if [[ "$code" != 401 ]]; then
+      echo "$url/__admin answers $code without the password; it must be 401." >&2
+      return 1
+    fi
+  done
+}
+
 action=${1:-}
 start=$(date +%s)
 case "$action" in
@@ -80,6 +92,7 @@ case "$action" in
     echo
     echo "== Waiting for the enforce proxy to reach the upstream stub"
     await_proxy
+    check_stub_admin
     echo "Session up in $(elapsed "$start")."
     echo "END THE SESSION WITH ./session.sh down: the environment is billed while it exists."
     ;;
