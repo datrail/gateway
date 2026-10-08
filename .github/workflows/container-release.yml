@@ -86,7 +86,7 @@ jobs:
           - stack: standalone
             image: ghcr.io/${{ github.repository }}
           - stack: apigee-grpc
-            image: ghcr.io/${{ github.repository_owner }}/gateway-apigee-grpc
+            image: ghcr.io/${{ github.repository }}-apigee-grpc
     steps:
       # No submodules, so no recursive fetch or cross-repo token.
       - uses: actions/checkout@v7
