@@ -2,10 +2,11 @@
 # Starts and ends a paid Apigee session (the apigee-session root). The
 # environment is billed from `up` until `down`.
 #
-# Usage: ./session.sh up | down
+# Usage: ./session.sh up | test | down
 #   up    builds and pushes the callout's and the stubs' images, applies the
 #         root, then waits until a call through the enforce proxy reaches the
 #         upstream stub.
+#   test  runs ../driver.py against the session; its exit code is the result.
 #   down  terraform destroy, then lists the org's environments, which must be [].
 # ../apigee-org must be applied first, once (README.md).
 set -euo pipefail
@@ -82,6 +83,23 @@ case "$action" in
     echo "Session up in $(elapsed "$start")."
     echo "END THE SESSION WITH ./session.sh down: the environment is billed while it exists."
     ;;
+  test)
+    cert=$(mktemp)
+    trap 'rm -f "$cert"' EXIT
+    terraform output -raw lb_cert > "$cert"
+    set -a
+    # shellcheck source-path=SCRIPTDIR source=../../shared/tickets.env
+    . "$repo/e2e/shared/tickets.env"
+    set +a
+    E2E_TARGET=live E2E_CA_FILE="$cert" \
+      E2E_ENFORCE_URL=$(terraform output -raw enforce_url) \
+      E2E_NO_CALLOUT_URL=$(terraform output -raw no_callout_url) \
+      E2E_UPSTREAM=$(terraform output -raw upstream_url) \
+      E2E_RAIL_CENTER=$(terraform output -raw rail_center_url) \
+      E2E_STUB_ADMIN_PASSWORD=$(terraform output -raw stub_admin_password) \
+      PYTHONPATH="$repo/e2e/shared" \
+      uv run --project "$repo" python -u "$live/../driver.py"
+    ;;
   down)
     terraform destroy -auto-approve -input=false
     echo
@@ -94,7 +112,7 @@ case "$action" in
     fi
     ;;
   *)
-    sed -n '5,9p' "$0" >&2
+    sed -n '5,10p' "$0" >&2
     exit 1
     ;;
 esac

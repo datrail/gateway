@@ -45,13 +45,14 @@ state, and the KMS keys they depend on have `prevent_destroy`.
 
 ## A session
 
-Needs `gcloud`, `terraform`, `docker` and `jq`, and `apigee-org` applied.
+Needs `gcloud`, `terraform`, `docker`, `jq` and `uv`, and `apigee-org` applied.
 
 ```sh
 cd e2e/apigee-grpc/live/apigee-session
 cp terraform.tfvars.example terraform.tfvars   # your values
 cd -
 make e2e-apigee-live-up     # builds and pushes the images, applies, waits for the proxy
+make e2e-apigee-live        # runs the driver against the session
 make e2e-apigee-live-down   # destroys everything, then checks no environment is left
 ```
 

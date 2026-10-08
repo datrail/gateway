@@ -4,13 +4,17 @@ Assertions read WireMock's request journals, not logs: a log says the gateway
 believes it did something, a journal says it happened.
 """
 
+import base64
 import json
+import os
+import ssl
 import time
 import urllib.error
 import urllib.request
 
-UPSTREAM = "http://upstream:8080"
-RAIL_CENTER = "http://rail-center:8080"
+# Overridden by the live harness, whose stubs run on Cloud Run.
+UPSTREAM = os.environ.get("E2E_UPSTREAM", "http://upstream:8080")
+RAIL_CENTER = os.environ.get("E2E_RAIL_CENTER", "http://rail-center:8080")
 TIMEOUT_SECONDS = 15
 MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
@@ -29,6 +33,19 @@ INITIALIZE = {
 
 fails = 0
 
+# The live harness's load balancer has a self-signed certificate.
+_TLS = ssl.create_default_context()
+if os.environ.get("E2E_CA_FILE"):
+    _TLS.load_verify_locations(os.environ["E2E_CA_FILE"])
+
+# The live harness's stubs lock /__admin with basic auth.
+_ADMIN_HEADERS = {}
+if os.environ.get("E2E_STUB_ADMIN_PASSWORD"):
+    _credential = base64.b64encode(
+        f"e2e:{os.environ['E2E_STUB_ADMIN_PASSWORD']}".encode()
+    )
+    _ADMIN_HEADERS["Authorization"] = f"Basic {_credential.decode()}"
+
 
 def _send(method, url, body=None, headers=None):
     """The response, open. Raises `HTTPError` on anything but a 2xx."""
@@ -38,13 +55,13 @@ def _send(method, url, body=None, headers=None):
         method=method,
         headers={"Content-Type": "application/json", **(headers or {})},
     )
-    return urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS)
+    return urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS, context=_TLS)
 
 
 # Raises on failure: a reset that silently 404s (the endpoint moved in WireMock
 # 3.x) would leave the last block's traffic in the journal.
 def _admin(method, base, path, body=None):
-    with _send(method, base + path, body) as response:
+    with _send(method, base + path, body, _ADMIN_HEADERS) as response:
         text = response.read().decode()
     return json.loads(text) if text else None
 
@@ -100,6 +117,37 @@ def denials_naming_no_policy():
             "bodyPatterns": [{"matchesJsonPath": "$[?(!@.policy_id)]"}],
         },
     )
+
+
+# The ticket's state as the gateway read it, such as `undecodable`.
+def count_denials_with_ticket_state(state):
+    return count(
+        RAIL_CENTER,
+        {
+            "method": "POST",
+            "urlPath": "/v1/denials",
+            "bodyPatterns": [
+                {"matchesJsonPath": f"$[?(@.metadata['x-rail-status'] == '{state}')]"}
+            ],
+        },
+    )
+
+
+def count_upstream_requests():
+    return count(UPSTREAM, {"method": "ANY", "urlPattern": ".*"})
+
+
+def get_received_headers(base):
+    """The headers of each request the stub at `base` logged, newest first, names
+    lower-cased; None if it could not be asked."""
+    try:
+        requests = _admin("GET", base, "/__admin/requests")["requests"]
+    except (OSError, ValueError, KeyError):
+        return None
+    return [
+        {name.lower(): value for name, value in r["request"]["headers"].items()}
+        for r in requests
+    ]
 
 
 def wait_for(read, want, tries=40, interval=0.25):
