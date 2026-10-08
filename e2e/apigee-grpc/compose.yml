@@ -1,5 +1,6 @@
-# The Apigee callout's e2e stack, a stub until the Apigee stand-in joins it:
-# the image starts, answers gRPC health and judges a call.
+# The Apigee callout's e2e stack: the callout behind a stand-in for an Apigee
+# proxy running the reference bundle (apigee_standin.py, a model of Apigee),
+# and the image's own checks.
 #
 #   make e2e-apigee-grpc   # the result is the driver's exit code
 #   make e2e-down
@@ -20,6 +21,9 @@ x-callout: &callout
 services:
   rail-center:
     extends: {file: ../shared/services.yml, service: rail-center}
+
+  upstream:
+    extends: {file: ../shared/services.yml, service: upstream}
 
   callout:
     <<: *callout
@@ -44,6 +48,29 @@ services:
       RAIL_PLUGIN_ENABLED: "true"
       RAIL_GATEWAY_PORT: "9100"
 
+  # Two proxies, as on the live harness: /mcp judged by the callout, and
+  # /no-callout, whose callout never resolves. The callout's image has grpc
+  # and the generated code.
+  apigee:
+    <<: *callout
+    environment:
+      APIGEE_PROXIES: /mcp=callout:8080,/no-callout=no-callout.invalid:8080
+      APIGEE_TARGET_URL: http://upstream:8080/mcp
+      APIGEE_TIMEOUT_MS: "5000"
+      APIGEE_BUNDLE: /e2e/apiproxy
+    volumes:
+      - ./apigee_standin.py:/e2e/apigee_standin.py:ro
+      - ../../gateway-apigee-grpc/apigee/apiproxy:/e2e/apiproxy:ro
+    command: ["python", "-u", "/e2e/apigee_standin.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8080))"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    depends_on:
+      callout: {condition: service_healthy}
+      upstream: {condition: service_healthy}
+
   # The callout's own image: it has grpc and the generated code, and runs as
   # the image's user.
   driver:
@@ -54,6 +81,8 @@ services:
     # Unbuffered, so each line shows as it is reached.
     command: ["python", "-u", "/e2e/driver.py"]
     healthcheck: {disable: true}
+    env_file: ../shared/tickets.env
     depends_on:
       callout: {condition: service_healthy}
       callout-unreachable: {condition: service_healthy}
+      apigee: {condition: service_healthy}

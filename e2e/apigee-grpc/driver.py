@@ -1,5 +1,5 @@
-"""Checks the callout: locally, its image (it starts, answers gRPC health and
-judges a call); live, through real Apigee and the reference bundle.
+"""Checks the callout through the reference bundle: live, on real Apigee;
+locally, on the stand-in (apigee_standin.py), after the image's own checks.
 
 E2E_TARGET picks which: `local` (the default, in compose.yml) or `live`
 (`live/session.sh test`).
@@ -263,5 +263,7 @@ def _run_local_cases():
 if os.environ.get("E2E_TARGET", "local") == "live":
     _run_apigee_cases(os.environ["E2E_ENFORCE_URL"], os.environ["E2E_NO_CALLOUT_URL"])
 else:
+    # First: the Apigee cases reset the journals, and these count a startup fetch.
     _run_local_cases()
+    _run_apigee_cases("http://apigee:8080/mcp", "http://apigee:8080/no-callout")
 finish()
