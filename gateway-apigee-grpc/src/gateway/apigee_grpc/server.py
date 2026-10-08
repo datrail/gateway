@@ -80,7 +80,12 @@ async def serving(
         )
         health = _Health(holder)
         health_pb2_grpc.add_HealthServicer_to_server(health, server)
-        bound = server.add_insecure_port(f"0.0.0.0:{listen_port}")
+        try:
+            bound = server.add_insecure_port(f"0.0.0.0:{listen_port}")
+        except RuntimeError as exc:
+            raise ConfigError(
+                f"RAIL_GATEWAY_PORT: cannot bind port {listen_port}"
+            ) from exc
         await server.start()
         await health.set("", _SERVING)
         await health._update_readiness()
@@ -111,7 +116,7 @@ async def _serve_until_stopped(
 
 def main() -> int:
     """Read the settings, then serve until SIGTERM. Returns the exit code: 2
-    for a configuration that can't be served, before anything is served."""
+    for a configuration that can't be served, a port it can't bind included."""
     try:
         configure_logging()
         enabled = plugin_enabled()
@@ -124,5 +129,11 @@ def main() -> int:
         _log.error("%s", exc)
         return 2
     _log.info("gRPC messages are limited to %d bytes", max_message_bytes)
-    asyncio.run(_serve_until_stopped(holder, reporter, listen_port, max_message_bytes))
+    try:
+        asyncio.run(
+            _serve_until_stopped(holder, reporter, listen_port, max_message_bytes)
+        )
+    except ConfigError as exc:
+        _log.error("%s", exc)
+        return 2
     return 0

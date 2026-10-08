@@ -219,6 +219,19 @@ def test_a_configuration_error_exits_2_before_serving(settings, named):
     assert "serving the ExternalCallout service" not in output
 
 
+def test_a_port_in_use_exits_2():
+    with socket.socket() as taken:
+        taken.bind(("0.0.0.0", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        callout = _start_callout(_create_environment(RAIL_GATEWAY_PORT=str(port)))
+        output, _ = callout.communicate(timeout=10)
+
+    assert callout.returncode == 2, output
+    assert f"RAIL_GATEWAY_PORT: cannot bind port {port}" in output
+    assert "Traceback" not in output
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("plugin", [False, True], ids=["plugin off", "plugin on"])
 async def test_sigterm_stops_it_cleanly(plugin):
