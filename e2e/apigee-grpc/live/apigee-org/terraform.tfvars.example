@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars, which terraform plan/apply load automatically.
+# ../apigee-session takes the same region and apigee_instance.
+project_id      = "your-project"
+region          = "us-central1"
+prefix          = "rail"
+apigee_instance = "rail-usc1"

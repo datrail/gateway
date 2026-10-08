@@ -27,9 +27,9 @@ _log = logging.getLogger(__name__)
 READY_SERVICE = "datrail.gateway.Ready"
 # How long a stopping server lets calls in flight finish.
 _STOP_GRACE_SECONDS = 5.0
-# The answer echoes the content plus our flow variables and removals, so it can
-# be larger than the request: this lets anything received be answered.
-_SEND_HEADROOM_BYTES = 64 * 1024
+# The answer echoes the content plus our flow variables and removals (a few
+# hundred bytes), so it can be larger than the request.
+_SEND_HEADROOM_BYTES = 1024
 
 _SERVING = health_pb2.HealthCheckResponse.SERVING
 _NOT_SERVING = health_pb2.HealthCheckResponse.NOT_SERVING

@@ -18,7 +18,11 @@ e2e/
   shared/       the stubs, the base services, the driver's helpers
   standalone/   the standalone gateway's stack
   apigee-grpc/  the Apigee callout's stack (a stub, for now)
+    live/       a paid session on real Apigee X, run by hand
 ```
+
+`apigee-grpc/live/` runs the callout's driver against real Apigee X on GCP,
+never in CI: see [its README](apigee-grpc/live/README.md).
 
 ## What it proves that the unit suite cannot
 

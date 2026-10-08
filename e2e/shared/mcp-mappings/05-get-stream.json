@@ -7,7 +7,8 @@
   "response": {
     "status": 405,
     "headers": {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "Allow": "POST, DELETE"
     },
     "body": "{\"jsonrpc\":\"2.0\",\"id\":\"e2e\",\"error\":{\"code\":-32600,\"message\":\"stream not offered\"}}"
   }

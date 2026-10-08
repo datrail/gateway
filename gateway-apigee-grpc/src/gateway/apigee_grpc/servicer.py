@@ -1,8 +1,8 @@
 """Judge each request Apigee sends, and answer with what Apigee should change.
 
-Apigee applies only what the returned maps contain, and writes back only the
-last item of each header returned. So the answer removes the `x-rail` headers
-and sets our flow variables, and touches nothing else.
+Apigee applies only what the returned maps contain, and writes each item of a
+header returned back as a header line of its own. So the answer removes the
+`x-rail` headers and sets our flow variables, and touches nothing else.
 """
 
 import logging

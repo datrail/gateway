@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The callout's refusal: it sets both variables whenever it refuses. A
+     missing one is an error rather than an empty answer. -->
+<RaiseFault name="RF-Refuse" continueOnError="false">
+  <DisplayName>RF-Refuse</DisplayName>
+  <FaultResponse>
+    <Set>
+      <StatusCode>{rail.status}</StatusCode>
+      <Payload contentType="application/json">{rail.body}</Payload>
+    </Set>
+  </FaultResponse>
+  <IgnoreUnresolvedVariables>false</IgnoreUnresolvedVariables>
+</RaiseFault>

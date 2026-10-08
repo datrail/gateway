@@ -1,0 +1,10 @@
+# Local state and downloaded providers; the lock files are committed.
+.terraform/
+*.tfstate
+*.tfstate.*
+# Each person's values; the .example files are committed.
+terraform.tfvars
+# A local copy of imports.tf.example, applied once.
+apigee-org/imports.tf
+# The proxy bundle's zip.
+apigee-session/.build/

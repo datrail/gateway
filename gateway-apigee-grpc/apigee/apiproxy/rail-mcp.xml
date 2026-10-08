@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<APIProxy name="__PROXY_NAME__">
+  <DisplayName>__PROXY_NAME__</DisplayName>
+  <Description>An MCP server, each request judged by the datrail gateway's callout.</Description>
+</APIProxy>

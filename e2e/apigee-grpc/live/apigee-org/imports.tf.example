@@ -1,0 +1,25 @@
+# A template, which Terraform ignores until copied to imports.tf: the next
+# apply then adopts an existing org, instance and keys instead of creating
+# them. Edit the IDs if yours are named differently. Once applied, delete
+# imports.tf.
+
+import {
+  to = google_kms_key_ring.apigee
+  id = "projects/${var.project_id}/locations/${var.region}/keyRings/${var.prefix}-apigee"
+}
+
+import {
+  for_each = toset(["runtime-db", "disk"])
+  to       = google_kms_crypto_key.apigee[each.key]
+  id       = "projects/${var.project_id}/locations/${var.region}/keyRings/${var.prefix}-apigee/cryptoKeys/${var.prefix}-${each.key}"
+}
+
+import {
+  to = google_apigee_organization.org
+  id = "organizations/${var.project_id}"
+}
+
+import {
+  to = google_apigee_instance.instance
+  id = "organizations/${var.project_id}/instances/${var.apigee_instance}"
+}

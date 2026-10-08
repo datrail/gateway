@@ -25,8 +25,8 @@ from lib import (
     wait_for,
 )
 
-GOOD = {"x-rail": os.environ["GOOD_TICKET"]}
-LOW_SCORE = {"x-rail": os.environ["LOW_SCORE_TICKET"]}
+GOOD = {"x-rail": os.environ["E2E_GOOD_TICKET"]}
+LOW_SCORE = {"x-rail": os.environ["E2E_LOW_SCORE_TICKET"]}
 
 P0 = "11111111-0000-4000-8000-000000000000"
 P1 = "11111111-0000-4000-8000-000000000001"
