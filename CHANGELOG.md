@@ -2,7 +2,7 @@
 
 Notable changes to this project. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Released versions correspond to published images at `ghcr.io/datrail/gateway`.
+Released versions correspond to published images at `ghcr.io/datrail/gateway` and, from the next release, `ghcr.io/datrail/gateway-apigee-grpc`.
 
 ## [Unreleased]
 
@@ -21,6 +21,7 @@ Released versions correspond to published images at `ghcr.io/datrail/gateway`.
 
 ### Added
 
+- **An Apigee ExternalCallout interface**, `gateway-apigee-grpc`, and its image `ghcr.io/datrail/gateway-apigee-grpc`. An Apigee X or hybrid proxy calls it on each request; it judges the call with the same core as standalone, and answers with flow variables the proxy acts on. A [reference proxy bundle](gateway-apigee-grpc/apigee/README.md) forwards or refuses as the callout says, removes `x-rail` and `x-rail-*`, and fails closed with standalone's 503 when the callout can't be reached. Health is gRPC health: liveness, and readiness as `datrail.gateway.Ready`. `RAIL_GATEWAY_GRPC_MAX_MESSAGE_MB` sets its gRPC message limit. Apigee fails a callout answer over 4 MiB, so a call with a larger body gets that 503: see its README's caveats.
 - An enforcement point that fronts an MCP server as a transparent proxy: admitted calls are forwarded and answered as though it were not there.
 - `x-rail` ticket reading, classified into one state per outcome — `absent`, `undecodable`, `malformed`, `expired`, `valid`. All four unusable states fold into one decision, and they stay distinguishable so that an operator can tell a credential that lapsed from one that could never be read.
 - Policy bundle validation against `schemas/policy-bundle.schema.json`.

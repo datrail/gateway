@@ -52,6 +52,23 @@ Anything that gets a request past the gateway that should have been refused:
 - Header smuggling: a request that presents differently to the gateway than to
   the upstream behind it.
 
+## The Apigee callout
+
+[gateway-apigee-grpc](gateway-apigee-grpc/README.md) sees what standalone
+sees, from Apigee rather than from the agent:
+
+- **It receives every request header and the body**, the agent's bearer token
+  included. It never logs a header value: an error inside it logs the
+  exception's type and frames, not its message.
+- **Only Apigee should be able to call it.** A caller could otherwise ask for
+  verdicts and send denial reports under this gateway's name. On Cloud Run,
+  IAM checks the proxy's ID token: grant `roles/run.invoker` to the proxy's
+  service account alone. Elsewhere nothing checks it yet, so keep it
+  reachable from Apigee only.
+- **The agent's headers reach the upstream**, `Authorization` included,
+  except `x-rail` and `x-rail-*`, which the callout removes whatever the
+  verdict. An upstream never sees the ticket.
+
 ## Scope
 
 In scope: this repository, its images, anything that gets a request past the
