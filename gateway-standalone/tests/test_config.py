@@ -4,16 +4,15 @@ import logging
 
 import pytest
 
-from gateway.core.auth import AuthConfigurationError
+from gateway.core.errors import ConfigError
 from gateway.core.mode import (
     ENFORCEMENTS,
-    PluginConfigError,
     describe_enforcement,
     describe_plugin,
     plugin_enabled,
 )
 from gateway.core.settings import gateway_slug
-from gateway.standalone.routes import Route, RoutesError
+from gateway.standalone.routes import Route
 from gateway.standalone.server import _Enforcement, build_app, build_gateway
 
 
@@ -41,7 +40,7 @@ def test_an_upstream_url_with_no_host_refuses_to_start(url):
     """Both parse, and a gateway built on either starts and answers /health
     while able to forward nothing — the condition this check exists to prevent,
     and it is per route now that a gateway fronts several."""
-    with pytest.raises(RuntimeError, match="names no host"):
+    with pytest.raises(ConfigError, match="names no host"):
         build_gateway(Route(name="delivery", url=url, prefix="/"))
 
 
@@ -49,7 +48,7 @@ def test_a_refused_upstream_url_names_the_route_that_carries_it():
     """One gateway fronts several upstreams, so a message naming the variable
     would name nothing an operator could go and fix. The route's own label is
     what they wrote in the file."""
-    with pytest.raises(RuntimeError, match="finretail"):
+    with pytest.raises(ConfigError, match="finretail"):
         build_gateway(Route(name="finretail", url="http://", prefix="/fr"))
 
 
@@ -59,7 +58,7 @@ def test_a_missing_rail_center_url_refuses_to_start(monkeypatch):
     ever, and reports that in the log as a control plane which is down."""
     monkeypatch.delenv("RAIL_CENTER_URL", raising=False)
 
-    with pytest.raises(RuntimeError, match="RAIL_CENTER_URL is required"):
+    with pytest.raises(ConfigError, match="RAIL_CENTER_URL is required"):
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
@@ -80,9 +79,9 @@ def test_a_missing_gateway_slug_refuses_to_start(monkeypatch, raw):
     else:
         monkeypatch.setenv("RAIL_GATEWAY_SLUG", raw)
 
-    with pytest.raises(RuntimeError, match="RAIL_GATEWAY_SLUG is required"):
+    with pytest.raises(ConfigError, match="RAIL_GATEWAY_SLUG is required"):
         gateway_slug()
-    with pytest.raises(RuntimeError, match="RAIL_GATEWAY_SLUG is required"):
+    with pytest.raises(ConfigError, match="RAIL_GATEWAY_SLUG is required"):
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
@@ -90,7 +89,7 @@ def test_a_missing_gateway_slug_refuses_to_start(monkeypatch, raw):
 def test_a_rail_center_url_with_no_host_refuses_to_start(monkeypatch, url):
     monkeypatch.setenv("RAIL_CENTER_URL", url)
 
-    with pytest.raises(RuntimeError, match="RAIL_CENTER_URL names no host"):
+    with pytest.raises(ConfigError, match="RAIL_CENTER_URL names no host"):
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
@@ -106,7 +105,7 @@ def test_a_rail_center_url_with_no_scheme_keeps_its_credential_out_of_the_error(
         "RAIL_CENTER_URL", "svcuser:s3cret-rc-password@rail-center.test/"
     )
 
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(ConfigError) as raised:
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
     message = str(raised.value)
@@ -122,7 +121,7 @@ def test_an_unparseable_upstream_url_names_the_upstream():
     it was given, so what an operator is told is which of the two they mistyped
     — and that is the whole reason the message is not a constant."""
     with pytest.raises(
-        RuntimeError, match="upstream 'delivery' is not a URL that can be parsed"
+        ConfigError, match="upstream 'delivery' is not a URL that can be parsed"
     ):
         build_gateway(Route(name="delivery", url="http://[::1", prefix="/"))
 
@@ -133,7 +132,7 @@ def test_an_unparseable_rail_center_url_names_the_control_plane(monkeypatch):
     monkeypatch.setenv("RAIL_CENTER_URL", "http://[::1")
 
     with pytest.raises(
-        RuntimeError, match="RAIL_CENTER_URL is not a URL that can be parsed"
+        ConfigError, match="RAIL_CENTER_URL is not a URL that can be parsed"
     ):
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
@@ -145,7 +144,7 @@ def test_an_unparseable_url_carrying_no_credential_keeps_its_diagnostic(monkeypa
     the operator loses the half of it that says what they mistyped."""
     monkeypatch.setenv("RAIL_CENTER_URL", "http://[::1")
 
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(ConfigError) as raised:
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
     message = str(raised.value)
@@ -177,7 +176,7 @@ def test_an_unparseable_rail_center_url_keeps_its_credential_out_of_the_error(
         f"{prefix}svcuser:s3cret-rc-password@rail\u2100center.test/",
     )
 
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(ConfigError) as raised:
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
     message = str(raised.value)
@@ -199,7 +198,7 @@ def test_a_query_or_fragment_does_not_let_the_credential_through(monkeypatch, ta
         f"http://svcuser:s3cret-rc-password@rail\u2100center.test{tail}",
     )
 
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(ConfigError) as raised:
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
     message = str(raised.value)
@@ -215,7 +214,7 @@ def test_the_routes_file_is_read_before_the_control_plane(monkeypatch, tmp_path)
     monkeypatch.setenv("RAIL_GATEWAY_ROUTES_FILE", str(tmp_path / "absent.yaml"))
     monkeypatch.delenv("RAIL_CENTER_URL", raising=False)
 
-    with pytest.raises(RoutesError, match="cannot read"):
+    with pytest.raises(ConfigError, match="cannot read"):
         build_app()
 
 
@@ -227,7 +226,7 @@ def test_a_credential_that_cannot_be_sent_is_refused_at_startup(monkeypatch):
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     monkeypatch.setenv("RAIL_AUTH_TOKEN", "line-one\nline-two")
 
-    with pytest.raises(AuthConfigurationError, match="RAIL_AUTH_TOKEN holds U\\+000A"):
+    with pytest.raises(ConfigError, match="RAIL_AUTH_TOKEN holds U\\+000A"):
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
@@ -246,7 +245,7 @@ def test_an_unreadable_refresh_interval_is_refused_at_startup(monkeypatch):
     monkeypatch.delenv("RAIL_AUTH_TOKEN", raising=False)
     monkeypatch.setenv("RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS", "often")
 
-    with pytest.raises(RuntimeError, match="must be an integer"):
+    with pytest.raises(ConfigError, match="must be an integer"):
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
@@ -259,7 +258,7 @@ def test_two_rail_center_credentials_are_refused_at_startup(monkeypatch):
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     monkeypatch.setenv("RAIL_AUTH_TOKEN", "configured-token")
 
-    with pytest.raises(RuntimeError, match="only one of them can be sent"):
+    with pytest.raises(ConfigError, match="only one of them can be sent"):
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
@@ -331,7 +330,7 @@ def test_an_unrecognised_plugin_flag_refuses_to_start(monkeypatch, raw):
     allowed to produce.
     """
     monkeypatch.setenv("RAIL_PLUGIN_ENABLED", raw)
-    with pytest.raises(PluginConfigError, match="RAIL_PLUGIN_ENABLED must be one of"):
+    with pytest.raises(ConfigError, match="RAIL_PLUGIN_ENABLED must be one of"):
         plugin_enabled()
 
 
@@ -340,7 +339,7 @@ def test_a_refused_plugin_flag_names_what_the_operator_wrote(monkeypatch):
     value refused for some reason other than its case reads back to whoever set
     it."""
     monkeypatch.setenv("RAIL_PLUGIN_ENABLED", "Plugged")
-    with pytest.raises(PluginConfigError, match="Plugged"):
+    with pytest.raises(ConfigError, match="Plugged"):
         plugin_enabled()
 
 
@@ -359,11 +358,11 @@ def test_a_leftover_ticket_mode_refuses_to_start_and_says_what_replaced_it(
     """
     monkeypatch.setenv("RAIL_TICKET_MODE", raw)
     monkeypatch.setenv("RAIL_PLUGIN_ENABLED", "true")
-    with pytest.raises(PluginConfigError, match="RAIL_TICKET_MODE is no longer read"):
+    with pytest.raises(ConfigError, match="RAIL_TICKET_MODE is no longer read"):
         plugin_enabled()
-    with pytest.raises(PluginConfigError, match="RAIL_PLUGIN_ENABLED"):
+    with pytest.raises(ConfigError, match="RAIL_PLUGIN_ENABLED"):
         plugin_enabled()
-    with pytest.raises(PluginConfigError, match="enforcement.mode"):
+    with pytest.raises(ConfigError, match="enforcement.mode"):
         plugin_enabled()
 
 
@@ -386,7 +385,7 @@ def test_rail_center_configuration_beside_a_disabled_plugin_refuses_to_start(
         monkeypatch.delenv(other, raising=False)
     monkeypatch.setenv(name, "set-to-something")
 
-    with pytest.raises(PluginConfigError, match=name) as raised:
+    with pytest.raises(ConfigError, match=name) as raised:
         plugin_enabled()
     assert "RAIL_PLUGIN_ENABLED" in str(raised.value)
 
@@ -427,7 +426,7 @@ def test_an_auth_mode_of_none_beside_a_rail_center_url_still_refuses(monkeypatch
     monkeypatch.setenv("RAIL_AUTH_MODE", "none")
     monkeypatch.setenv("RAIL_CENTER_URL", "http://rail-center.test")
 
-    with pytest.raises(PluginConfigError) as raised:
+    with pytest.raises(ConfigError) as raised:
         plugin_enabled()
     message = str(raised.value)
     assert "RAIL_CENTER_URL" in message
@@ -441,7 +440,7 @@ def test_the_contradiction_refusal_names_every_variable_it_found(monkeypatch):
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     monkeypatch.delenv("RAIL_AUTH_TOKEN", raising=False)
 
-    with pytest.raises(PluginConfigError) as raised:
+    with pytest.raises(ConfigError) as raised:
         plugin_enabled()
     message = str(raised.value)
     assert "RAIL_CENTER_URL" in message and "RAIL_AUTH_MODE" in message
@@ -506,7 +505,7 @@ def test_build_gateway_refuses_a_leftover_ticket_mode_from_the_environment(
     _unenrolled(monkeypatch)
     monkeypatch.setenv("RAIL_TICKET_MODE", "enforce")
 
-    with pytest.raises(PluginConfigError, match="RAIL_TICKET_MODE is no longer read"):
+    with pytest.raises(ConfigError, match="RAIL_TICKET_MODE is no longer read"):
         build_gateway(Route(name="delivery", url=UPSTREAM, prefix="/"))
 
 
@@ -527,7 +526,7 @@ def test_build_app_refuses_a_leftover_ticket_mode_from_the_environment(monkeypat
     _unenrolled(monkeypatch)
     monkeypatch.setenv("RAIL_TICKET_MODE", "plugin")
 
-    with pytest.raises(PluginConfigError, match="RAIL_TICKET_MODE is no longer read"):
+    with pytest.raises(ConfigError, match="RAIL_TICKET_MODE is no longer read"):
         build_app()
 
 
@@ -543,7 +542,7 @@ def test_build_app_refuses_rail_center_configuration_beside_a_disabled_plugin(
     _unenrolled(monkeypatch)
     monkeypatch.setenv("RAIL_CENTER_URL", "http://rail-center.test")
 
-    with pytest.raises(PluginConfigError, match="RAIL_CENTER_URL"):
+    with pytest.raises(ConfigError, match="RAIL_CENTER_URL"):
         build_app()
 
 

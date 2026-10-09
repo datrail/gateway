@@ -3,6 +3,8 @@
 import logging
 import os
 
+from gateway.core.errors import ConfigError
+
 #: Checked against by name rather than through `logging.getLevelName`, whose
 #: return type is the contract: an integer for a known name and the string
 #: "Level <n>" for anything else, so a typo would set a level nobody chose.
@@ -21,7 +23,7 @@ def configure_logging() -> None:
     raw = (os.environ.get("RAIL_GATEWAY_LOG_LEVEL") or "").strip() or "INFO"
     level = raw.upper()
     if level not in LOG_LEVELS:
-        raise RuntimeError(
+        raise ConfigError(
             f"RAIL_GATEWAY_LOG_LEVEL must be one of "
             f"{', '.join(sorted(LOG_LEVELS))}, got: {raw}"
         )

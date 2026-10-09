@@ -35,6 +35,8 @@ from typing import Any, Final
 
 import yaml
 
+from gateway.core.errors import ConfigError
+
 log = logging.getLogger(__name__)
 
 #: Where the routes file is, unless the environment says otherwise. The image
@@ -60,10 +62,6 @@ CONFIG_SCHEMA_MAJOR: Final[int] = 1
 #: that dropped it silently would 401 every call to that upstream with nothing
 #: anywhere saying why. Whether to *honour* it is an open scope question.
 ENTRY_KEYS: Final[frozenset[str]] = frozenset({"name", "url", "prefix"})
-
-
-class RoutesError(RuntimeError):
-    """The routes file cannot be honoured. Fatal at startup, by design."""
 
 
 @dataclass(frozen=True)
@@ -128,12 +126,12 @@ def _check_schema_version(path: Path, raw: Any) -> None:
     # decimal digits, which `int` accepts — so `١.0` would be served as major 1.
     # A version in this file is written in the digits the rest of it is.
     if not all(part.isascii() and part.isdigit() for part in parts):
-        raise RoutesError(
+        raise ConfigError(
             f"{path}: schema_version {text!r} is not a version; this gateway "
             f"reads {CONFIG_SCHEMA_MAJOR}.x"
         )
     if int(parts[0]) != CONFIG_SCHEMA_MAJOR:
-        raise RoutesError(
+        raise ConfigError(
             f"{path}: schema_version {text!r} is a format this gateway does not "
             f"read; it reads {CONFIG_SCHEMA_MAJOR}.x"
         )
@@ -154,7 +152,7 @@ def _prefix(path: Path, name: str, raw: Any) -> str:
     if raw is None:
         return "/"
     if not isinstance(raw, str):
-        raise RoutesError(
+        raise ConfigError(
             f"{path}: upstream '{name}' has a prefix that is not text "
             f"({type(raw).__name__})"
         )
@@ -168,7 +166,7 @@ def _prefix(path: Path, name: str, raw: Any) -> str:
     # have meant: a path this gateway would never match is a route that silently
     # serves nothing, which is the failure the whole file exists to make visible.
     if "//" in text or any(part in ("", ".", "..") for part in text[1:].split("/")):
-        raise RoutesError(f"{path}: upstream '{name}' has an unusable prefix {raw!r}")
+        raise ConfigError(f"{path}: upstream '{name}' has an unusable prefix {raw!r}")
     return text
 
 
@@ -190,7 +188,7 @@ def _refuse_overlaps(path: Path, routes: list[Route]) -> None:
         for other in routes[i + 1 :]:
             a, b = one.prefix, other.prefix
             if a == "/" or b == "/" or a == b or _under(a, b) or _under(b, a):
-                raise RoutesError(
+                raise ConfigError(
                     f"{path}: upstreams '{one.name}' and '{other.name}' both "
                     f"claim requests under {a!r} and {b!r}; a request matching "
                     f"two routes has no answer this gateway can give"
@@ -214,30 +212,30 @@ def load_routes() -> list[Route]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise RoutesError(f"cannot read {path}: {exc}") from exc
+        raise ConfigError(f"cannot read {path}: {exc}") from exc
     except UnicodeDecodeError as exc:
-        raise RoutesError(f"{path} is not valid UTF-8") from exc
+        raise ConfigError(f"{path} is not valid UTF-8") from exc
 
     try:
         data = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
-        raise RoutesError(f"{path} is not valid YAML: {exc}") from exc
+        raise ConfigError(f"{path} is not valid YAML: {exc}") from exc
 
     # Each level is checked rather than assumed: a hand-edited file goes wrong
     # in more shapes than an empty one, and `.get` on a list is a traceback
     # where a sentence would do.
     if not isinstance(data, dict):
-        raise RoutesError(f"{path} must hold a mapping, not {type(data).__name__}")
+        raise ConfigError(f"{path} must hold a mapping, not {type(data).__name__}")
     # Before anything under `mcp` is read: the version describes the shape this
     # loader is about to assume, so a reader must settle it first or it is
     # parsing on a guess.
     _check_schema_version(path, data.get("schema_version"))
     mcp = data.get("mcp") or {}
     if not isinstance(mcp, dict):
-        raise RoutesError(f"{path}: `mcp` must be a mapping, not {type(mcp).__name__}")
+        raise ConfigError(f"{path}: `mcp` must be a mapping, not {type(mcp).__name__}")
     entries = mcp.get("servers") or []
     if not isinstance(entries, list):
-        raise RoutesError(
+        raise ConfigError(
             f"{path}: `mcp.servers` must be a list, not {type(entries).__name__}"
         )
 
@@ -252,7 +250,7 @@ def load_routes() -> list[Route]:
             continue
         name = str(entry["name"])
         if name in seen:
-            raise RoutesError(f"{path}: two upstreams are both named '{name}'")
+            raise ConfigError(f"{path}: two upstreams are both named '{name}'")
         seen.add(name)
         extra = set(entry) - ENTRY_KEYS
         if extra:
@@ -272,6 +270,6 @@ def load_routes() -> list[Route]:
         )
 
     if not routes:
-        raise RoutesError(f"{path} names no upstream this gateway could front")
+        raise ConfigError(f"{path} names no upstream this gateway could front")
     _refuse_overlaps(path, routes)
     return routes

@@ -4,6 +4,7 @@ import logging
 
 import pytest
 
+from gateway.core.errors import ConfigError
 from gateway.core.logs import configure_logging
 
 # Where `configure_logging` installs the handler and level.
@@ -36,5 +37,5 @@ def test_an_unknown_level_is_refused_by_name(monkeypatch, raw):
     """`logging.getLevelName` answers "Level 20" for an unknown name rather than
     failing, so a typo would otherwise set a level nobody chose."""
     monkeypatch.setenv("RAIL_GATEWAY_LOG_LEVEL", raw)
-    with pytest.raises(RuntimeError, match="RAIL_GATEWAY_LOG_LEVEL must be one of"):
+    with pytest.raises(ConfigError, match="RAIL_GATEWAY_LOG_LEVEL must be one of"):
         configure_logging()

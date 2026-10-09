@@ -12,6 +12,8 @@ says where it comes from. Settings, from the environment:
 
 import http.client
 import os
+import signal
+import sys
 import urllib.parse
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -184,4 +186,6 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # PID 1 has no default SIGTERM action, so `compose down` would wait and kill.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     ThreadingHTTPServer(("0.0.0.0", 8080), _Handler).serve_forever()

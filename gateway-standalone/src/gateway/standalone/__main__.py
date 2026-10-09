@@ -4,6 +4,8 @@ The entry point is this module rather than `server`, so `server` is only ever
 imported.
 """
 
+import sys
+
 from gateway.standalone.server import main
 
-main()
+sys.exit(main())

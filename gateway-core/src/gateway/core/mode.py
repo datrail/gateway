@@ -65,6 +65,8 @@ point at, nothing configured — boots as the plain gateway it is.
 import os
 from typing import Final, Literal
 
+from gateway.core.errors import ConfigError
+
 #: The variable that says whether RailXia is installed on this deployment.
 PLUGIN_FLAG: Final[str] = "RAIL_PLUGIN_ENABLED"
 
@@ -128,10 +130,6 @@ FALLBACKS: Final[tuple[Fallback, ...]] = ("pass", "block")
 DEFAULT_FALLBACK: Final[Fallback] = "block"
 
 
-class PluginConfigError(RuntimeError):
-    """`RAIL_PLUGIN_ENABLED` cannot be honoured. Fatal at startup, by design."""
-
-
 def _asserts_enrolment(name: str) -> bool:
     """Whether this variable, as it is set, says an operator meant to enrol.
 
@@ -183,7 +181,7 @@ def plugin_enabled() -> bool:
     refuse to start on the `TRUE` its proxy resolved happily.
     """
     if (os.environ.get(RETIRED_FLAG) or "").strip():
-        raise PluginConfigError(
+        raise ConfigError(
             f"{RETIRED_FLAG} is no longer read. Whether this gateway has a "
             f"control plane is {PLUGIN_FLAG}=true|false; what it does with a "
             f"call arrives in the policy bundle as `enforcement.mode`. Remove "
@@ -196,7 +194,7 @@ def plugin_enabled() -> bool:
     else:
         folded = raw.lower()
         if folded not in PLUGIN_VALUES:
-            raise PluginConfigError(
+            raise ConfigError(
                 f"{PLUGIN_FLAG} must be one of {', '.join(PLUGIN_VALUES)}, got: {raw}"
             )
         enabled = folded == "true"
@@ -206,7 +204,7 @@ def plugin_enabled() -> bool:
             name for name in RAIL_CENTER_VARIABLES if _asserts_enrolment(name)
         ]
         if configured:
-            raise PluginConfigError(
+            raise ConfigError(
                 f"{PLUGIN_FLAG} is {raw or 'unset, which is false'} and this "
                 f"gateway would reach no control plane, but "
                 f"{', '.join(configured)} "

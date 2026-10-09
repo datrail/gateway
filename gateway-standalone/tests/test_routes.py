@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from gateway.standalone.routes import CONFIG_SCHEMA_MAJOR, RoutesError, load_routes
+from gateway.core.errors import ConfigError
+from gateway.standalone.routes import CONFIG_SCHEMA_MAJOR, load_routes
 
 
 @pytest.fixture
@@ -106,7 +107,7 @@ def test_a_prefix_no_path_could_match_is_refused(routes_file, prefix):
     silently serves nothing."""
     routes_file(file_of(one("delivery", prefix)))
 
-    with pytest.raises(RoutesError, match="unusable prefix"):
+    with pytest.raises(ConfigError, match="unusable prefix"):
         load_routes()
 
 
@@ -122,7 +123,7 @@ def test_overlapping_prefixes_are_refused(routes_file):
     """
     routes_file(file_of(one("a", "/delivery"), one("b", "/delivery/mcp")))
 
-    with pytest.raises(RoutesError, match="both claim requests under"):
+    with pytest.raises(ConfigError, match="both claim requests under"):
         load_routes()
 
 
@@ -135,7 +136,7 @@ def test_the_root_prefix_cannot_share_a_file(routes_file):
     """
     routes_file(file_of(one("delivery"), one("finretail", "/finretail")))
 
-    with pytest.raises(RoutesError, match="both claim requests under"):
+    with pytest.raises(ConfigError, match="both claim requests under"):
         load_routes()
 
 
@@ -156,7 +157,7 @@ def test_two_upstreams_with_one_name_are_refused(routes_file):
     line about either one ambiguous."""
     routes_file(file_of(one("delivery", "/a"), one("delivery", "/b")))
 
-    with pytest.raises(RoutesError, match="two upstreams are both named"):
+    with pytest.raises(ConfigError, match="two upstreams are both named"):
         load_routes()
 
 
@@ -165,7 +166,7 @@ def test_a_file_naming_no_upstream_is_refused(routes_file):
     doing it — the state the required-variable check has always prevented."""
     routes_file('schema_version: "1.0"\nmcp:\n  servers: []\n')
 
-    with pytest.raises(RoutesError, match="names no upstream"):
+    with pytest.raises(ConfigError, match="names no upstream"):
         load_routes()
 
 
@@ -176,7 +177,7 @@ def test_a_file_whose_entries_are_all_unusable_is_refused(routes_file, caplog):
 
     with (
         caplog.at_level(logging.WARNING, logger="gateway"),
-        pytest.raises(RoutesError, match="names no upstream"),
+        pytest.raises(ConfigError, match="names no upstream"),
     ):
         load_routes()
 
@@ -191,7 +192,7 @@ def test_a_later_major_version_is_refused(routes_file):
     file it cannot read whole must stop it rather than be parsed on a guess."""
     routes_file(file_of(one("delivery", "/delivery"), version="2.0"))
 
-    with pytest.raises(RoutesError, match="a format this gateway does not read"):
+    with pytest.raises(ConfigError, match="a format this gateway does not read"):
         load_routes()
 
 
@@ -215,7 +216,7 @@ def test_a_schema_version_that_is_not_a_version_is_refused(routes_file):
     it means honouring a file whose version nobody can compare to the next."""
     routes_file(file_of(one("delivery", "/delivery"), version="1.x"))
 
-    with pytest.raises(RoutesError, match="is not a version"):
+    with pytest.raises(ConfigError, match="is not a version"):
         load_routes()
 
 
@@ -243,12 +244,12 @@ def test_an_absent_file_is_refused_by_name(routes_file, tmp_path, monkeypatch):
     one mounted stops here rather than coming up fronting nothing."""
     monkeypatch.setenv("RAIL_GATEWAY_ROUTES_FILE", str(tmp_path / "absent.yaml"))
 
-    with pytest.raises(RoutesError, match="cannot read"):
+    with pytest.raises(ConfigError, match="cannot read"):
         load_routes()
 
 
 def test_a_file_that_is_not_a_mapping_is_refused(routes_file):
     routes_file("- delivery\n")
 
-    with pytest.raises(RoutesError, match="must hold a mapping"):
+    with pytest.raises(ConfigError, match="must hold a mapping"):
         load_routes()

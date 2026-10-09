@@ -35,6 +35,7 @@ from urllib.parse import urlencode
 import httpx
 
 from gateway.core.bundle.validate import UnusableBundle, UsableBundle, validate_bundle
+from gateway.core.errors import ConfigError
 from gateway.core.key_safety import safe_for_log
 from gateway.core.mode import describe_enforcement
 
@@ -219,7 +220,7 @@ def refresh_seconds() -> int:
     try:
         value = int(raw)
     except ValueError:
-        raise RuntimeError(
+        raise ConfigError(
             "RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS must be an integer, "
             f"got: {safe_for_log(raw)}"
         ) from None

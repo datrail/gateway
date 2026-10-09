@@ -86,7 +86,9 @@ form instead would lose an attribution that is correct in every other case.
 Every interface reads these, and refuses the same mistakes. Each interface's
 README lists its own variables beside them, and
 [`.env.example`](../.env.example) lists them all. A refusal stops the process
-at startup.
+at startup: it logs one line naming the variable, with no traceback, and exits
+2. An interface's own settings, and standalone's routes file, are refused the
+same way.
 
 #### `RAIL_PLUGIN_ENABLED`
 

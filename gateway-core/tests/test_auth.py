@@ -7,7 +7,8 @@ about every refusal is that the token is not in it.
 
 import pytest
 
-from gateway.core.auth import AUTH_MODES, AuthConfigurationError, auth_headers
+from gateway.core.auth import AUTH_MODES, auth_headers
+from gateway.core.errors import ConfigError
 
 SECRET = "s3cr3t-token-nobody-should-see"
 
@@ -57,7 +58,7 @@ def test_gcp_is_refused_under_its_own_name(monkeypatch: pytest.MonkeyPatch) -> N
     a typo instead of for the component that has not built it yet.
     """
     monkeypatch.setenv("RAIL_AUTH_MODE", "gcp")
-    with pytest.raises(AuthConfigurationError) as caught:
+    with pytest.raises(ConfigError) as caught:
         auth_headers()
     assert "does not implement" in str(caught.value)
     assert "none, bearer" in str(caught.value)
@@ -67,7 +68,7 @@ def test_an_unknown_mode_names_what_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("RAIL_AUTH_MODE", "mtls")
-    with pytest.raises(AuthConfigurationError) as caught:
+    with pytest.raises(ConfigError) as caught:
         auth_headers()
     assert "must be one of" in str(caught.value)
     for mode in AUTH_MODES:
@@ -86,7 +87,7 @@ def test_bearer_without_a_token_stops_the_process(
     """
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     monkeypatch.setenv("RAIL_AUTH_TOKEN", token)
-    with pytest.raises(AuthConfigurationError) as caught:
+    with pytest.raises(ConfigError) as caught:
         auth_headers()
     assert "RAIL_AUTH_TOKEN is required" in str(caught.value)
 
@@ -118,7 +119,7 @@ def test_a_token_illegal_in_a_header_is_refused_by_location(
     """
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     monkeypatch.setenv("RAIL_AUTH_TOKEN", token)
-    with pytest.raises(AuthConfigurationError) as caught:
+    with pytest.raises(ConfigError) as caught:
         auth_headers()
     message = str(caught.value)
     assert code_point in message
@@ -132,7 +133,7 @@ def test_no_refusal_ever_carries_the_token(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("RAIL_AUTH_MODE", "bearer")
     for token in (f"{SECRET}\n{SECRET}", f"\t{SECRET}\t{SECRET}", f"{SECRET}\x7f"):
         monkeypatch.setenv("RAIL_AUTH_TOKEN", token)
-        with pytest.raises(AuthConfigurationError) as caught:
+        with pytest.raises(ConfigError) as caught:
             auth_headers()
         assert SECRET not in str(caught.value)
 
@@ -155,7 +156,7 @@ def test_a_token_beside_none_stops_the_process(
         monkeypatch.setenv("RAIL_AUTH_MODE", mode)
     monkeypatch.setenv("RAIL_AUTH_TOKEN", SECRET)
 
-    with pytest.raises(AuthConfigurationError) as caught:
+    with pytest.raises(ConfigError) as caught:
         auth_headers()
 
     message = str(caught.value)

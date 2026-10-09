@@ -2,6 +2,8 @@
 
 import os
 
+from gateway.core.errors import ConfigError
+
 _MB = 1024 * 1024
 # Apigee X takes request bodies up to 10 MB, and gRPC's own default is 4 MB.
 _DEFAULT_MAX_MESSAGE_MB = 16
@@ -26,9 +28,9 @@ def get_max_message_bytes() -> int:
     try:
         value = int(raw)
     except ValueError:
-        raise RuntimeError(f"{name} must be an integer, got: {raw}") from None
+        raise ConfigError(f"{name} must be an integer, got: {raw}") from None
     if not _MIN_MAX_MESSAGE_MB <= value <= _MAX_MAX_MESSAGE_MB:
-        raise RuntimeError(
+        raise ConfigError(
             f"{name} must be between {_MIN_MAX_MESSAGE_MB} and "
             f"{_MAX_MAX_MESSAGE_MB}, got: {value}"
         )
