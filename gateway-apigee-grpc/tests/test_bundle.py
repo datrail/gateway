@@ -19,3 +19,23 @@ def test_the_bundle_agrees_with_the_servicer_and_core():
     failed = ET.parse(_BUNDLE / "policies" / "RF-CalloutFailed.xml").getroot()
     payload = failed.findtext("FaultResponse/Set/Payload")
     assert payload.encode() == refusal_body(REASONS[503])
+
+
+def test_only_the_callouts_own_fault_or_no_decision_fails_closed():
+    callout = ET.parse(_BUNDLE / "policies" / "EC-Rail.xml").getroot().get("name")
+    proxy = ET.parse(_BUNDLE / "proxies" / "default.xml").getroot()
+
+    # The policy's own flag, so another policy's fault keeps its own error.
+    rule = proxy.find("FaultRules/FaultRule")
+    assert rule.findtext("Step/Name") == "RF-CalloutFailed"
+    assert rule.findtext("Condition") == f"externalcallout.{callout}.failed = true"
+
+    steps = [
+        (step.findtext("Name"), step.findtext("Condition"))
+        for step in proxy.findall("PreFlow/Request/Step")
+    ]
+    assert steps == [
+        (callout, None),
+        ("RF-CalloutFailed", f"{DECISION} = null"),
+        ("RF-Refuse", f'{DECISION} = "refuse"'),
+    ]

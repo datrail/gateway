@@ -1,20 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ProxyEndpoint name="default">
   <FaultRules>
-    <!-- Any fault before the callout decided (unreachable, timed out, refused
-         by IAM, a gRPC error) fails closed. RF-Refuse and target errors come
-         after a decision, so they don't match. -->
+    <!-- EC-Rail's own faults only (unreachable, timed out, refused by IAM, a
+         gRPC error) fail closed; another policy's fault keeps its own error.
+         Names the policy: rename both together. -->
     <FaultRule name="callout-failed">
       <Step>
         <Name>RF-CalloutFailed</Name>
       </Step>
-      <Condition>rail.decision = null</Condition>
+      <Condition>externalcallout.EC-Rail.failed = true</Condition>
     </FaultRule>
   </FaultRules>
   <PreFlow name="PreFlow">
     <Request>
       <Step>
         <Name>EC-Rail</Name>
+      </Step>
+      <!-- An answer with no decision fails closed too. -->
+      <Step>
+        <Name>RF-CalloutFailed</Name>
+        <Condition>rail.decision = null</Condition>
       </Step>
       <Step>
         <Name>RF-Refuse</Name>

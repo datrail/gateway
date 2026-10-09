@@ -14,6 +14,15 @@ through. Replace each `__NAME__` before importing them.
 | `__CALLOUT_AUDIENCE__` | `EC-Rail.xml` | the callout's URL on Cloud Run, such as `https://rail-callout-123.us-central1.run.app`: the audience of the ID token Apigee sends it |
 | `__CALLOUT_HOST__` | `targetserver.json` | the callout's host name |
 
+## Your own policies
+
+Put them in the PreFlow before `EC-Rail`, as an API key or a rate limit
+usually is: a request they reject never reaches the callout, and keeps
+their error. Only `EC-Rail`'s own fault, or an answer with no decision,
+gets `RF-CalloutFailed`'s 503. The FaultRule names the policy
+(`externalcallout.EC-Rail.failed`): renaming `EC-Rail` means renaming it
+there too.
+
 ## Caveats
 
 - **The callout is assumed to run on Cloud Run.** `EC-Rail` sends an ID

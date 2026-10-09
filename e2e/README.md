@@ -115,6 +115,8 @@ noted:
 - `RF-Refuse` answering `rail.status` with `rail.body`;
 - any callout failure answering `RF-CalloutFailed`'s 503, read from the bundle:
   unreachable, timed out, a gRPC error, or an answer over gRPC's 4 MiB;
+- a fault of another policy before `EC-Rail` keeping its own error: the
+  test-only `RF-E2E-OperatorFault.xml`, on header `x-e2e-operator-fault`;
 - `uri` with the query string; a body that isn't UTF-8 sent with replacement
   characters.
 
