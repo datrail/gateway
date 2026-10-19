@@ -1,4 +1,4 @@
-"""A stand-in for an Apigee proxy running the reference bundle, for the e2e stack.
+"""A stand-in for an Apigee proxy running live/apiproxy, for the e2e stack.
 
 A model, not Apigee: it does what the bundle, Apigee's docs and the live
 harness's runs (DR-147 plan, §9) say Apigee does, and nothing else. Each rule
@@ -7,7 +7,7 @@ says where it comes from. Settings, from the environment:
 - APIGEE_PROXIES: `<base path>=<callout host:port>`, comma-separated;
 - APIGEE_TARGET_URL: where an allowed request goes, the base path replaced;
 - APIGEE_TIMEOUT_MS: EC-Rail's TimeoutMs;
-- APIGEE_BUNDLE: the reference bundle's `apiproxy/` folder;
+- APIGEE_BUNDLE: the `live/apiproxy/` folder;
 - APIGEE_OPERATOR_FAULT: the test-only policy faulting before EC-Rail.
 """
 

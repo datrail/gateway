@@ -59,7 +59,7 @@ packages it runs:
 |---|---|---|
 | [gateway-core](gateway-core/README.md) | `gateway.core` | `x-rail` parsing, endpoint resolution, policy ingestion and decisions |
 | [gateway-standalone](gateway-standalone/README.md) | `gateway.standalone` | FastMCP/Starlette host, process configuration and routes file; its Dockerfile builds `ghcr.io/datrail/gateway` |
-| [gateway-apigee-grpc](gateway-apigee-grpc/README.md) | `gateway.apigee_grpc` | Apigee ExternalCallout service and its reference proxy bundle; its Dockerfile builds `ghcr.io/datrail/gateway-apigee-grpc` |
+| [gateway-apigee-grpc](gateway-apigee-grpc/README.md) | `gateway.apigee_grpc` | Apigee ExternalCallout service; its Dockerfile builds `ghcr.io/datrail/gateway-apigee-grpc` |
 
 Dependencies point one way: every interface imports the vendor-neutral core,
 and the core imports no interface. More generally, a package imports only the

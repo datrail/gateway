@@ -4,15 +4,30 @@ Runs the callout's e2e driver against real Apigee X, by hand; never in CI.
 
 **A test harness, not a deployment template.** It takes shortcuts a
 production setup shouldn't: open stubs and proxies, a self-signed
-certificate, fake credentials. For deploying the callout, start from
-`gateway-apigee-grpc/apigee/` and its README.
+certificate, fake credentials. For deploying the callout, see
+[its README](../../../gateway-apigee-grpc/README.md#run-it-beside-apigee).
 
 Two Terraform roots:
 
 | Root | Holds | Lifetime | Cost |
 |---|---|---|---|
 | `apigee-org` | the Apigee organisation, its instance, their KMS keys | applied once per project, never destroyed | nothing without an environment, apart from the keys (about $0.06 a month each) |
-| `apigee-session` | the environment and its group, the TargetServers, the two proxies from the reference bundle, the load balancer in front of Apigee and its VPC, the image registry, the service accounts, and on Cloud Run the callout and the `rail-center` and `upstream` stubs | one session: `session.sh up` to `session.sh down` | a Base environment, about $0.50 an hour, and the load balancer |
+| `apigee-session` | the environment and its group, the TargetServers, the two proxies from `apiproxy/`, the load balancer in front of Apigee and its VPC, the image registry, the service accounts, and on Cloud Run the callout and the `rail-center` and `upstream` stubs | one session: `session.sh up` to `session.sh down` | a Base environment, about $0.50 an hour, and the load balancer |
+
+## The proxy bundle
+
+`apiproxy/` is the proxy both harnesses run: `apigee-session` imports it
+twice, and the [stand-in](../apigee_standin.py) reads its policies.
+`apigee-session/proxy.tf` replaces each `__NAME__` per proxy:
+
+| Placeholder | File | Value |
+|---|---|---|
+| `__PROXY_NAME__` | `rail-mcp.xml` | the name the proxy is imported under |
+| `__BASE_PATH__` | `proxies/default.xml` | the path agents call, such as `/mcp`; part of every endpoint key the callout judges |
+| `__TARGET_URL__` | `targets/default.xml` | the `upstream` stub's URL |
+| `__TIMEOUT_MS__` | `policies/EC-Rail.xml` | how long to wait for the callout, in milliseconds; past it, `RF-CalloutFailed` answers 503 |
+| `__CALLOUT_SERVER__` | `policies/EC-Rail.xml` | the TargetServer's name |
+| `__CALLOUT_AUDIENCE__` | `policies/EC-Rail.xml` | the callout's Cloud Run URL: the audience of the ID token Apigee sends it |
 
 ## One-time setup: the Apigee organisation
 

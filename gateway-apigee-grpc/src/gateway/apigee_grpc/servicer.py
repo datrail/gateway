@@ -22,7 +22,7 @@ from gateway.core.enforcement import PASS, DenialReporter, Verdict, judge, refus
 
 _log = logging.getLogger(__name__)
 
-# The flow variables the reference bundle reads.
+# The flow variables the Apigee proxy reads.
 DECISION = "rail.decision"
 STATUS = "rail.status"
 BODY = "rail.body"

@@ -1,5 +1,5 @@
 # The Apigee callout's e2e stack: the callout behind a stand-in for an Apigee
-# proxy running the reference bundle (apigee_standin.py, a model of Apigee),
+# proxy running live/apiproxy (apigee_standin.py, a model of Apigee),
 # and the image's own checks.
 #
 #   make e2e-apigee-grpc   # the result is the driver's exit code
@@ -62,7 +62,7 @@ services:
     volumes:
       - ./apigee_standin.py:/e2e/apigee_standin.py:ro
       - ./RF-E2E-OperatorFault.xml:/e2e/RF-E2E-OperatorFault.xml:ro
-      - ../../gateway-apigee-grpc/apigee/apiproxy:/e2e/apiproxy:ro
+      - ./live/apiproxy:/e2e/apiproxy:ro
     command: ["python", "-u", "/e2e/apigee_standin.py"]
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8080))"]

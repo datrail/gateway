@@ -1,4 +1,4 @@
-"""The reference bundle and the code it copies from agree."""
+"""The e2e suite's Apigee bundle and the code it copies from agree."""
 
 import re
 import xml.etree.ElementTree as ET
@@ -8,7 +8,7 @@ from core_support import REASONS
 from gateway.apigee_grpc.servicer import BODY, DECISION, STATUS
 from gateway.core.enforcement import refusal_body
 
-_BUNDLE = Path(__file__).parents[1] / "apigee" / "apiproxy"
+_BUNDLE = Path(__file__).parents[2] / "e2e" / "apigee-grpc" / "live" / "apiproxy"
 
 
 def test_the_bundle_agrees_with_the_servicer_and_core():
