@@ -109,12 +109,15 @@ async def _call_once(held, context: MessageContext):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", get_enforcement_params("apigee-grpc"))
-async def test_the_answer_and_the_report_match_every_row_of_the_contract(case):
+async def test_the_answer_and_the_report_match_every_row_of_the_contract(case, caplog):
+    caplog.set_level(logging.WARNING, logger="gateway")
     headers = {}
     if case.x_rail:
         headers["x-rail"] = list(case.x_rail)
     if case.x_rail_status:
         headers["x-rail-status"] = list(case.x_rail_status)
+    for name, value in case.headers:
+        headers.setdefault(name, []).append(value)
     context = _build_context(
         verb=case.method, uri=case.path, content=case.body, headers=headers
     )
@@ -138,6 +141,10 @@ async def test_the_answer_and_the_report_match_every_row_of_the_contract(case):
         (body,) = sent
         body.pop("denied_at")
         assert body == case.report
+    if case.logged:
+        assert any(
+            all(part in r.getMessage() for part in case.logged) for r in caplog.records
+        )
 
 
 # --- reading ---

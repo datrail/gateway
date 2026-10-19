@@ -63,7 +63,7 @@ GATEWAY_SLUG = "edge"
 #: across a hundred cases, and this is a single fixed example — collapsing them
 #: would give that factory a second caller with different reasons to change it.
 POLICY_BUNDLE = {
-    "schema_version": "1.0",
+    "schema_version": "2.0",
     "content_hash": "v1",
     "policies": [
         {"id": "5c8f1e42-0000-4000-8000-0000000000a1", "name": "P", "priority": 1}

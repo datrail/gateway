@@ -58,7 +58,10 @@ from gateway.core.mode import (
 #: enforcement — the caller keeps the bundle it already holds — except on a
 #: first fetch, where there is nothing to fall back to and the gateway reports
 #: itself unready.
-SUPPORTED_SCHEMA_MAJOR: Final[int] = 1
+SUPPORTED_SCHEMA_MAJORS: Final[tuple[int, ...]] = (1, 2)
+
+#: How the supported majors are named in a refusal.
+_SUPPORTED_NAMED: Final[str] = " and ".join(f"{m}.x" for m in SUPPORTED_SCHEMA_MAJORS)
 
 #: `MAJOR.MINOR` in ASCII digits, anchored at both ends.
 #:
@@ -155,6 +158,9 @@ class UsableBundle:
     #: refused before anything else in this component understood the new root
     #: would refuse the only bundles it can read.
     schema_version: str
+    #: The `schema_version` major, which picks the grammar conditions are read
+    #: in: `conditions.grammar(major)`.
+    major: int
     #: A sha256 over the fields that change behaviour, truncated. **A content
     #: hash and not a version**: two builds of the same inputs produce the same
     #: value, nothing stores it, and it orders nothing. It is what a poller
@@ -192,6 +198,12 @@ class UsableBundle:
     #: verdict is acted on, a fallback says what the verdict *is* for a call
     #: nothing matched.
     fallback: Fallback
+    #: What happens to a call carrying no usable ticket — absent, undecodable,
+    #: malformed or expired — read from `ticket_fallback` at the root. Asked
+    #: before the binding fallback and the chain, and acted on at `enforce`
+    #: only, as `fallback` is. `pass` walks the chain with no ticket; `block`
+    #: refuses it there.
+    ticket_fallback: Fallback
     #: Whether the bundle *said* so. False only for a bundle naming no
     #: `enforcement` at all, which resolves to the same `none` a bundle naming
     #: `none` resolves to — so the posture alone cannot tell a control plane
@@ -449,7 +461,8 @@ def _posture(value: object) -> tuple[Enforcement, bool]:
 
 
 def _fallback(value: object) -> Fallback:
-    """What a call no binding matches is judged to be.
+    """What a call no binding matches, or one carrying no usable ticket, is
+    judged to be — `binding_fallback` and `ticket_fallback` read alike.
 
     **Read from the bundle root, beside `bindings`, and not from
     `enforcement`.** It is a property of the binding set rather than of the
@@ -474,7 +487,7 @@ def _fallback(value: object) -> Fallback:
     return value  # type: ignore[return-value]
 
 
-def _refuse_an_unsupported_schema(declared: str) -> None:
+def _refuse_an_unsupported_schema(declared: str) -> int:
     """Refuse a bundle whose shape this reader cannot claim to understand.
 
     **`MAJOR.MINOR`, and only the major is compared.** A matching major with any
@@ -492,12 +505,13 @@ def _refuse_an_unsupported_schema(declared: str) -> None:
         raise UnusableBundle(
             f"a schema_version that is not MAJOR.MINOR ({_q(declared)})"
         )
-    major = declared.partition(".")[0]
-    if int(major) != SUPPORTED_SCHEMA_MAJOR:
+    major = int(declared.partition(".")[0])
+    if major not in SUPPORTED_SCHEMA_MAJORS:
         raise UnusableBundle(
             f"schema_version {_q(declared)} is a bundle shape this gateway does "
-            f"not read; it understands {SUPPORTED_SCHEMA_MAJOR}.x"
+            f"not read; it understands {_SUPPORTED_NAMED}"
         )
+    return major
 
 
 def validate_bundle(body: object) -> UsableBundle:
@@ -532,7 +546,7 @@ def validate_bundle(body: object) -> UsableBundle:
         raise UnusableBundle(
             f"a schema_version that cannot be recorded ({_q(schema_version)})"
         )
-    _refuse_an_unsupported_schema(schema_version)
+    major = _refuse_an_unsupported_schema(schema_version)
 
     content_hash = body.get("content_hash")
     if not isinstance(content_hash, str) or content_hash == "":
@@ -567,6 +581,15 @@ def validate_bundle(body: object) -> UsableBundle:
     told_enforcement = body.get("enforcement")
     enforcement, posture_told = _posture(told_enforcement)
     fallback = _fallback(body.get("binding_fallback"))
+    # A `1.x` bundle predates the field, and its chain carries the rule about a
+    # missing ticket itself, so an absent one is `pass` there: reading it as
+    # `block` would refuse ahead of that rule and report no policy where the
+    # bundle's own rule would have named one.
+    ticket_fallback = (
+        _fallback(body.get("ticket_fallback"))
+        if major >= 2 or "ticket_fallback" in body
+        else "pass"
+    )
 
     # Last, because the two of them are what can still refuse the bundle whole.
     chain = _order(policies)
@@ -595,10 +618,12 @@ def validate_bundle(body: object) -> UsableBundle:
 
     return UsableBundle(
         schema_version=schema_version,
+        major=major,
         content_hash=content_hash,
         chain=chain,
         bindings=indexed,
         enforcement=enforcement,
         fallback=fallback,
+        ticket_fallback=ticket_fallback,
         posture_told=posture_told,
     )

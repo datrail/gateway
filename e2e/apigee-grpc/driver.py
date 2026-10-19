@@ -21,6 +21,7 @@ from lib import (
     call_tool,
     count_upstream_requests,
     denials,
+    denials_naming_no_policy,
     expect,
     fail,
     finish,
@@ -45,7 +46,6 @@ from gateway.apigee_grpc._proto.external_callout_pb2_grpc import (
     ExternalCalloutServiceStub,
 )
 
-P0 = "11111111-0000-4000-8000-000000000000"
 P2 = "11111111-0000-4000-8000-000000000002"
 CALL = {"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "x"}}
 
@@ -96,7 +96,11 @@ def _run_apigee_cases(enforce, no_callout):
     expect("the call is refused 403", 403, code)
     expect("with standalone's body", _REFUSED, body)
     expect("no call reached the upstream", 0, forwarded_tool_calls())
-    expect("the denial names P0", 1, await_denial(1, P0))
+    expect(
+        "the ticket fallback refused it, naming no policy",
+        1,
+        wait_for(denials_naming_no_policy, 1),
+    )
 
     block("enforce: a good ticket is forwarded, with only the agent's headers")
     reset_journals()
@@ -236,7 +240,11 @@ def _run_apigee_cases(enforce, no_callout):
         403,
         status(enforce, "track_package", _AGENT),
     )
-    expect("only that call reached the callout", 1, await_denial(1, P0))
+    expect(
+        "only that call reached the callout",
+        1,
+        wait_for(denials_naming_no_policy, 1),
+    )
     expect("and it alone was reported", 1, denials())
 
     block("every request found a stub")
@@ -267,7 +275,11 @@ def _run_local_cases():
         '{"error": "denied by policy"}',
         refused.get("rail.body"),
     )
-    expect("the denial is reported, naming P0", 1, await_denial(1, P0))
+    expect(
+        "the denial is reported, naming no policy",
+        1,
+        wait_for(denials_naming_no_policy, 1),
+    )
 
     block("unreachable: serves on the port it was given, and isn't ready")
     expect("liveness on 9100", "SERVING", _check_health("callout-unreachable:9100"))

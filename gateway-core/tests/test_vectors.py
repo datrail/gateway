@@ -20,11 +20,15 @@ from typing import Any
 
 import pytest
 
-from gateway.core.bundle.conditions import ConditionInput, UninterpretableCondition
+from gateway.core.bundle.conditions import (
+    ConditionInput,
+    UninterpretableCondition,
+    request_headers,
+)
 from gateway.core.bundle.decide import decide, refuses_unbound
 from gateway.core.bundle.validate import (
     _SCHEMA_VERSION,
-    SUPPORTED_SCHEMA_MAJOR,
+    SUPPORTED_SCHEMA_MAJORS,
     Binding,
     UnusableBundle,
     validate_bundle,
@@ -149,6 +153,12 @@ def test_bundle_vector(case: dict[str, Any]) -> None:
     assert bundle.content_hash == case["bundle"]["content_hash"]
     assert bundle.schema_version == case["bundle"]["schema_version"]
 
+    # What a call with no usable ticket meets, where the case says. Read
+    # wrongly it fails open: every such call walks a chain the bundle said
+    # should never see it.
+    if "ticket_fallback" in case:
+        assert bundle.ticket_fallback == case["ticket_fallback"]
+
 
 def test_an_unusable_bundle_names_what_was_wrong() -> None:
     """Every refusal carries a reason, and no reason carries a raw wire value.
@@ -202,7 +212,7 @@ def test_a_validated_bundle_cannot_be_edited_in_place() -> None:
     """
     bundle = validate_bundle(
         {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "content_hash": "v1",
             "policies": [{"id": "5c8f1e42-0000-4000-8000-0000000000a1", "priority": 1}],
             "bindings": [
@@ -248,7 +258,7 @@ def test_a_refusal_names_the_value_it_refused() -> None:
 
     def body(**over: Any) -> dict[str, Any]:
         return {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "content_hash": "v",
             "policies": [],
             "bindings": [],
@@ -276,7 +286,7 @@ def test_a_refusal_names_the_value_it_refused() -> None:
         (body(schema_version="\u0661.\u0660"), "\u0661.\u0660"),
         # The second raise, where the version parses and the major is one this
         # reader has no rules for.
-        (body(schema_version="2.0"), "2.0"),
+        (body(schema_version="3.0"), "3.0"),
         (body(policies=["not a policy"]), "not a policy"),
         # The binding half of the same message, which round 8's docstring
         # described away as naming nothing rather than noticing it was silent.
@@ -326,7 +336,7 @@ def test_two_data_sources_reaching_one_key_are_refused_naming_both() -> None:
     with pytest.raises(UnusableBundle) as caught:
         validate_bundle(
             {
-                "schema_version": "1.0",
+                "schema_version": "2.0",
                 "content_hash": "v",
                 "policies": [],
                 "bindings": [
@@ -350,8 +360,8 @@ def test_an_unreadable_shape_is_refused_before_anything_beneath_it() -> None:
 
     `schema_version` is read and acted on before anything else because it
     describes the shape of everything under it, so every refusal after it is a
-    claim about a `1.x` document — the only kind this reader can make a claim
-    about. A bundle declaring a major it does not know *and* carrying a second
+    claim about a document of a supported major — the only kind this reader can
+    make a claim about. A bundle declaring a major it does not know *and* carrying a second
     fault is therefore refused for its shape: naming the field below would send
     an operator to fix a document whose shape is the actual fault, against a
     rule this reader has just said it cannot apply.
@@ -364,7 +374,7 @@ def test_an_unreadable_shape_is_refused_before_anything_beneath_it() -> None:
     """
     for beneath in ({"policies": "nope"}, {"bindings": "nope"}, {"content_hash": ""}):
         body = {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "content_hash": "h",
             "policies": [],
             "bindings": [],
@@ -372,7 +382,7 @@ def test_an_unreadable_shape_is_refused_before_anything_beneath_it() -> None:
         }
         with pytest.raises(UnusableBundle) as caught:
             validate_bundle(body)
-        assert f"{SUPPORTED_SCHEMA_MAJOR}.x" in caught.value.reason, (
+        assert all(f"{m}.x" in caught.value.reason for m in SUPPORTED_SCHEMA_MAJORS), (
             beneath,
             caught.value.reason,
         )
@@ -424,7 +434,7 @@ def _postured(
     argument cannot tell them apart.
     """
     body: dict[str, Any] = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "v-posture",
         "policies": [],
         "bindings": [],
@@ -659,7 +669,7 @@ def test_the_published_version_grammar_is_the_language_this_reader_parses() -> N
     it is written and says nothing on the day one of them moves.
 
     **Well-formed is a different claim from read**, and the vectors own the
-    second: `2.0` and `0.9` are well-formed and refused. A published pattern
+    second: `3.0` and `0.9` are well-formed and refused. A published pattern
     that hard-coded the supported major would be a wire contract that expired
     the first time a reader moved on, so nothing here asserts one.
 
@@ -838,7 +848,16 @@ def test_the_bundle_file_is_worth_running() -> None:
     assert sum(1 for c in BUNDLE_CASES if not c["usable"]) >= 45
 
 
-DECIDE_CASES = _load("decide.json")
+#: The condition vectors, one file per grammar: `v1/decide.json` is read as a
+#: `1.x` bundle and `v2/decide.json` as a `2.x` one. Everything but how a
+#: condition is read is shared, so the walk cases in each pin the same walk.
+DECIDE_FILES = {1: "v1/decide.json", 2: "v2/decide.json"}
+DECIDE_BY_MAJOR = {major: _load(name) for major, name in DECIDE_FILES.items()}
+DECIDE_CASES = [
+    {**case, "_major": major}
+    for major, cases in DECIDE_BY_MAJOR.items()
+    for case in cases
+]
 
 #: The policy a *condition* case is walked behind: one enabled `block` rule at
 #: priority 1, so the decision reads straight back as whether the condition
@@ -868,6 +887,7 @@ def _decide_request(case: dict[str, Any]) -> ConditionInput:
     return ConditionInput(
         ticket=parse_rail_header(header, case["now"]),
         endpoint_key=case["endpoint_key"],
+        headers=request_headers([tuple(pair) for pair in case.get("headers", [])]),
     )
 
 
@@ -875,7 +895,7 @@ def _decide_bundle(case: dict[str, Any]) -> dict[str, Any]:
     if "bundle" in case:
         return case["bundle"]
     return {
-        "schema_version": "1.0",
+        "schema_version": f"{case['_major']}.0",
         "content_hash": CONDITION_BUNDLE_VERSION,
         "policies": [
             {
@@ -893,7 +913,9 @@ def _decide_bundle(case: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    "case", DECIDE_CASES, ids=[case["name"] for case in DECIDE_CASES]
+    "case",
+    DECIDE_CASES,
+    ids=[f"v{case['_major']} {case['name']}" for case in DECIDE_CASES],
 )
 def test_decide_vector(case: dict[str, Any]) -> None:
     bundle = validate_bundle(_decide_bundle(case))
@@ -936,7 +958,8 @@ def test_decide_vector(case: dict[str, Any]) -> None:
     assert [policy.id for policy in verdict.alerts] == expect["alerts"]
 
 
-def test_the_decide_file_is_worth_running() -> None:
+@pytest.mark.parametrize("major", sorted(DECIDE_BY_MAJOR))
+def test_the_decide_file_is_worth_running(major: int) -> None:
     """The same guard the other two vector files carry, and one more.
 
     Every group here can pass by being empty, and the ways that happens are not
@@ -946,6 +969,7 @@ def test_the_decide_file_is_worth_running() -> None:
     false — which is precisely the shape the contract's most emphasised rule
     forbids.
     """
+    DECIDE_CASES = DECIDE_BY_MAJOR[major]
     assert len(DECIDE_CASES) >= 140
     # The contract models `endpoint_key` as an argument that is always present,
     # so it takes no position on a call naming none. This gateway's answer to
@@ -989,7 +1013,7 @@ INERT_CHAIN = [
         "id": FALLBACK_POLICY_ID,
         "name": "something for a binding to name",
         "priority": 1,
-        "condition": {"field": "agent_id", "operator": "present"},
+        "condition": {"path": "ticket.agent_id", "op": "existing"},
         "action": "alert",
         "enabled": True,
     }
@@ -999,7 +1023,7 @@ INERT_CHAIN = [
 def _fallback_bundle(case: dict[str, Any]):
     return validate_bundle(
         {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             # The content hash moves with the posture and the fallback because
             # Rail Center hashes both into it, and a file whose cases shared one
             # hash across four postures would describe a control plane whose
@@ -1049,7 +1073,6 @@ def test_fallback_vector(case: dict[str, Any]) -> None:
             ticket=parse_rail_header(_encoded(case["claims"]), case["now"]),
             endpoint_key=case["endpoint_key"],
         ),
-        keyless=case["keyless"],
     )
     assert verdict.allowed == case["expect"]["allowed"]
     assert (verdict.denied_by.id if verdict.denied_by else None) == case["expect"][

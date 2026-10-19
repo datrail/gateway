@@ -26,7 +26,7 @@ and one is a rule the reference has not caught up with.
 3. Nesting past `MAX_NESTING_DEPTH` is `undecodable` here and parses there. The
    contract expects this one and bounds it: implementations' limits differ, so
    what it requires is that the limit sit above anything the mint can issue,
-   which two levels of `skills` does by a wide margin.
+   which the four levels of `posture.categories.<name>` does by a wide margin.
 4. A leading byte-order mark is stripped here and kept there, so a ticket
    carrying one is `valid` here and `undecodable` in the reference. This is the
    one the reference is simply behind on — the contract names stripping as the
@@ -52,7 +52,7 @@ from gateway.core.json_wire import MAX_SAFE_INTEGER
 #:                   base64; or the bytes are not strictly valid UTF-8; or are
 #:                   not JSON; or nest past ``MAX_NESTING_DEPTH``; or the value
 #:                   handed over was not text at all
-#: - ``malformed``   not a JSON object; no string ``agent_id``; or an ``exp``
+#: - ``malformed``   not a JSON object; or an ``exp``
 #:                   that is missing, fractional, non-numeric or outside
 #:                   ±(2^53 − 1)
 #: - ``expired``     ``now >= exp``. A correctly-formed credential that is
@@ -104,10 +104,11 @@ _BASE64_BODY = re.compile(r"[A-Za-z0-9\-_+/]*")
 #: the TypeScript reference, whose parser is iterative. Left to the runtime, the
 #: same header would classify differently across implementations and versions.
 #:
-#: Sixty-four because a ticket is a flat object of scalars with one array of
-#: skills — two levels used, and sixty-two spare for a shape nobody has
-#: proposed. The contract asks only that the limit sit above anything the mint
-#: can issue, which this clears by a factor of thirty.
+#: Sixty-four because the deepest a ticket nests is a category's score —
+#: the ticket, `posture`, `categories`, the category: four levels used, and
+#: sixty spare for a shape nobody has proposed. The contract asks only that the
+#: limit sit above anything the mint can issue, which this clears by a factor
+#: of sixteen.
 MAX_NESTING_DEPTH = 64
 
 
@@ -119,7 +120,7 @@ class ParseResult:
     #: Populated only when ``state`` is ``valid``. ``None`` otherwise, because
     #: the contract says every claim of an unusable ticket resolves to absent —
     #: returning a readable token would invite a caller to trust an expired
-    #: ticket's ``posture_score``.
+    #: ticket's ``posture.overall.score``.
     token: dict[str, Any] | None = None
 
 
@@ -160,7 +161,7 @@ def _reject_non_json_constant(name: str) -> Any:
 
     Python's `json` accepts all three by default; they are not JSON, and the
     reference implementation's `JSON.parse` rejects them. Left accepted, a
-    ticket carrying `"posture_score": NaN` decodes here and does not there —
+    ticket carrying a score of `NaN` decodes here and does not there —
     and a NaN satisfies neither `score < 40` nor `score >= 40`, so it passes a
     threshold rule from both directions while every type check calls it a
     number.
@@ -298,9 +299,10 @@ def parse_rail_header(
     if not isinstance(parsed, dict):
         return ParseResult("malformed")
 
-    if not isinstance(parsed.get("agent_id"), str):
-        return ParseResult("malformed")
-
+    # `exp` is the one claim read here, and the only one this gateway names at
+    # all beside `id`: whether a ticket may be relied on is settled before any
+    # policy runs, so it cannot be a policy's to describe. Every other claim is
+    # whatever a policy's path asks for.
     # Shape before expiry, per the contract: a payload that is both shapeless
     # and stale reports `malformed`, so an operator is pointed at the fault that
     # has to be fixed first.

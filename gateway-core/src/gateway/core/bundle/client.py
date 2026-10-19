@@ -47,11 +47,14 @@ def _posture_line(bundle: UsableBundle) -> str:
 
     The rendered sentence rather than the values behind it, because that is
     what `_refresh_once` measures a change against: the line names the
-    fallback only at `enforce`, and a move it cannot express is not a move an
+    fallbacks only at `enforce`, and a move it cannot express is not a move an
     operator can be told about.
     """
     return describe_enforcement(
-        bundle.enforcement, bundle.fallback, told=bundle.posture_told
+        bundle.enforcement,
+        bundle.fallback,
+        ticket_fallback=bundle.ticket_fallback,
+        told=bundle.posture_told,
     )
 
 

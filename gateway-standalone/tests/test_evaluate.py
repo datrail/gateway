@@ -1,6 +1,6 @@
 """What the gateway does with a verdict, which in this build is write it down.
 
-The walk itself is pinned by `gateway-core/tests/vectors/decide.json`, which
+The walk itself is pinned by `gateway-core/tests/vectors/v1/decide.json` and `v2/decide.json`, which
 `gateway-core/tests/test_vectors.py` runs; the one walk rule no vector reaches — a call
 naming no endpoint — by `gateway-core/tests/test_decide.py`; and how a message resolves to a
 key at all by `gateway-core/tests/test_endpoint.py`. This file is about the wiring around
@@ -40,14 +40,18 @@ DENY_ID = "5c8f1e42-0000-4000-8000-0000000000d1"
 ALERT_ID = "5c8f1e42-0000-4000-8000-0000000000a1"
 
 BUNDLE = {
-    "schema_version": "1.0",
+    "schema_version": "2.0",
     "content_hash": "v-evaluate",
     "policies": [
         {
             "id": DENY_ID,
             "name": "deny an unscored or low-scoring agent",
             "priority": 1,
-            "condition": {"field": "posture_score", "operator": "lt", "value": 40},
+            "condition": {
+                "path": "ticket.posture.overall.score",
+                "op": "lt",
+                "value": 40,
+            },
             "action": "block",
             "enabled": True,
         },
@@ -56,8 +60,8 @@ BUNDLE = {
             "name": "note every call to this data source",
             "priority": 2,
             "condition": {
-                "field": "endpoint_key",
-                "operator": "matches",
+                "path": "request.endpoint_key",
+                "op": "matches",
                 "value": "/mcp#tools/call#*",
             },
             "action": "alert",
@@ -79,9 +83,12 @@ BUNDLE = {
 
 
 def ticket(**claims) -> str:
-    """An `x-rail` header carrying `claims`, unpadded as the mint emits it."""
+    """An `x-rail` header carrying `claims`, unpadded as the mint emits it.
+    `score` is `posture.overall.score`."""
     claims.setdefault("agent_id", "agent-1")
     claims.setdefault("exp", 4102444800)  # 2100-01-01, comfortably unexpired
+    if "score" in claims:
+        claims["posture"] = {"overall": {"score": claims.pop("score")}}
     raw = json.dumps(claims).encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -126,7 +133,7 @@ async def test_a_call_that_would_be_denied_is_forwarded_anyway(evaluating, caplo
     upstream's answer exactly as an allowed caller would."""
     with caplog.at_level(logging.INFO, logger="gateway"):
         async with evaluating() as url:
-            answer = await call(url, {"x-rail": ticket(posture_score=10)})
+            answer = await call(url, {"x-rail": ticket(score=10)})
 
     assert answer == "delivered:77123"
     written = "\n".join(caplog.messages)
@@ -138,7 +145,7 @@ async def test_a_call_that_would_be_denied_is_forwarded_anyway(evaluating, caplo
 async def test_an_allowed_call_says_so(evaluating, caplog):
     with caplog.at_level(logging.INFO, logger="gateway"):
         async with evaluating() as url:
-            answer = await call(url, {"x-rail": ticket(posture_score=95)})
+            answer = await call(url, {"x-rail": ticket(score=95)})
 
     assert answer == "delivered:77123"
     written = "\n".join(caplog.messages)
@@ -155,7 +162,7 @@ async def test_an_alert_is_written_and_denies_nothing(evaluating, caplog):
     the alert rule is allowed and still reported."""
     with caplog.at_level(logging.INFO, logger="gateway"):
         async with evaluating() as url:
-            await call(url, {"x-rail": ticket(posture_score=95)})
+            await call(url, {"x-rail": ticket(score=95)})
 
     written = "\n".join(caplog.messages)
     assert ALERT_ID in written
@@ -168,7 +175,7 @@ async def test_the_endpoint_key_is_the_path_the_method_and_the_call(evaluating, 
     the call's identity in the message rather than the URL."""
     with caplog.at_level(logging.INFO, logger="gateway"):
         async with evaluating() as url:
-            await call(url, {"x-rail": ticket(posture_score=95)})
+            await call(url, {"x-rail": ticket(score=95)})
 
     assert "/mcp#tools/call#track_package" in "\n".join(caplog.messages)
 
@@ -194,8 +201,8 @@ async def test_a_repeated_x_rail_header_is_undecodable(evaluating, caplog):
     first, the last, or the joined list. Together these make the only way to
     read `undecodable` here be refusing the repeat itself.
     """
-    first = ticket(posture_score=95)
-    second = ticket(posture_score=95, agent_id="agent-2")
+    first = ticket(score=95)
+    second = ticket(score=95, agent_id="agent-2")
     with caplog.at_level(logging.INFO, logger="gateway"):
         async with evaluating() as url:
             async with httpx.AsyncClient() as raw:
@@ -272,18 +279,18 @@ async def test_a_condition_outside_the_grammar_forwards_and_reports_the_drift(
         "policies": [
             {
                 **BUNDLE["policies"][0],
-                "condition": {"field": "moon_phase", "operator": "eq", "value": "full"},
+                "condition": {"path": "moon.phase", "op": "eq", "value": "full"},
             }
         ],
     }
     with caplog.at_level(logging.INFO, logger="gateway"):
         async with evaluating(bundle=unreadable) as url:
-            answer = await call(url, {"x-rail": ticket(posture_score=10)})
+            answer = await call(url, {"x-rail": ticket(score=10)})
 
     assert answer == "delivered:77123"
     written = "\n".join(caplog.messages)
     assert "drifted" in written
-    assert "moon_phase" in written
+    assert "moon.phase" in written
 
 
 # --- and the mode that evaluates nothing ----------------------------------
@@ -307,7 +314,7 @@ async def test_a_plain_gateway_evaluates_nothing_and_is_ready_without_a_bundle(
             url = f"http://127.0.0.1:{port}"
             async with httpx.AsyncClient() as client:
                 assert (await client.get(f"{url}/ready")).status_code == 200
-            answer = await call(url, {"x-rail": ticket(posture_score=10)})
+            answer = await call(url, {"x-rail": ticket(score=10)})
 
     assert answer == "delivered:77123"
     written = "\n".join(caplog.messages)
@@ -357,7 +364,7 @@ async def test_a_gateway_told_none_judges_nothing_and_keeps_its_bundle(
     """
     async with evaluating(bundle_at("none")) as url:
         with caplog.at_level(logging.INFO, logger="gateway"):
-            answer = await call(url, {"x-rail": ticket(posture_score=10)})
+            answer = await call(url, {"x-rail": ticket(score=10)})
         async with httpx.AsyncClient() as client:
             ready = await client.get(f"{url}/ready")
 
@@ -387,14 +394,14 @@ async def test_moving_the_posture_takes_effect_on_the_next_poll(upstream, caplog
     async with serve(app, port):
         url = f"http://127.0.0.1:{port}"
         with caplog.at_level(logging.INFO, logger="gateway"):
-            await call(url, {"x-rail": ticket(posture_score=10)})
+            await call(url, {"x-rail": ticket(score=10)})
             judged_at_none = "would deny" in "\n".join(caplog.messages)
 
             posture["mode"] = "observe"
             await holder.refresh()
 
             caplog.clear()
-            await call(url, {"x-rail": ticket(posture_score=10)})
+            await call(url, {"x-rail": ticket(score=10)})
             judged_at_observe = "would deny" in "\n".join(caplog.messages)
 
     assert not judged_at_none, "a gateway told `none` judges nothing"
@@ -475,7 +482,7 @@ async def test_a_posture_change_under_an_unchanged_version_never_arrives(
         posture["mode"] = "observe"
         await holder.refresh()
         with caplog.at_level(logging.INFO, logger="gateway"):
-            await call(url, {"x-rail": ticket(posture_score=10)})
+            await call(url, {"x-rail": ticket(score=10)})
 
     written = "\n".join(caplog.messages)
     assert "would deny" not in written, (

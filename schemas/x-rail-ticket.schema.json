@@ -2,22 +2,27 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/datrail/gateway/schemas/x-rail-ticket.schema.json",
   "title": "x-rail ticket payload",
-  "description": "The decoded payload of the `x-rail` header — what Rail Center mints, as the thing an enforcement point reads. The header itself is urlsafe-base64 of this object, with no `Bearer` prefix and padding optional.\n\nThis is the *payload* contract. How to decode the header safely, how to classify what comes out, and what a claim resolving to absent means are the *reading* contract, and are deliberately not restated here: an implementation validating a payload against this schema has not thereby read a ticket correctly. In particular this schema describes a ticket the mint produced, and a reader must handle ones it did not — the forged, the truncated and the expired.\n\nWave 1 tickets are unsigned. Anyone able to construct JSON can produce one that satisfies this schema, so conformance here is a statement about shape and never about authenticity.",
+  "description": "The decoded payload of the `x-rail` header — the ticket Rail Center stores for an agent's latest run and serves, as the thing an enforcement point reads. The header itself is urlsafe-base64 of this object, with no `Bearer` prefix and padding optional.\n\nThis is the *payload* contract. How to decode the header safely, how to classify what comes out, and what a claim resolving to absent means are the *reading* contract, and are deliberately not restated here: an implementation validating a payload against this schema has not thereby read a ticket correctly. In particular this schema describes a ticket the mint produced, and a reader must handle ones it did not — the forged, the truncated and the expired.\n\nWave 1 tickets are unsigned. Anyone able to construct JSON can produce one that satisfies this schema, so conformance here is a statement about shape and never about authenticity.\n\nThe posture claims are nested, and a policy names one by its path from the `ticket` source — `ticket.posture.overall.score`, `ticket.alignment.baseline.id`. There are no flat `posture_score`, `tier` or `scored_at` claims. An enforcement point reads two claims itself: `exp`, to decide whether the ticket is usable at all, and `id`, which it reports with a denial. Everything else is read only where a policy's path names it.",
   "type": "object",
   "required": [
+    "id",
     "agent_id",
     "sandbox_id",
     "environment_fingerprint",
     "sandbox_type",
-    "posture_score",
-    "tier",
+    "posture",
+    "alignment",
     "skills",
-    "scored_at",
     "iat",
     "exp"
   ],
   "additionalProperties": true,
   "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The stored ticket's own id. An enforcement point copies it into each denial it reports as `ticket_id`, which is what links a denial to the ticket and through it to the run that produced it. Unsigned like every other claim: a reader validates its shape before sending it on."
+    },
     "agent_id": {
       "type": "string",
       "format": "uuid",
@@ -32,22 +37,112 @@
       "description": "sha256(sandbox_type:llm_provider:llm_model:skills_hash)[:16]. Changes when the agent's environment does."
     },
     "sandbox_type": {
-      "type": "string",
-      "description": "For example nemo_claw, kubernetes, bare_metal. Not an enumeration: a deployment may name a sandbox this schema has never heard of, and refusing it here would make an agent that registers cleanly impossible to admit."
-    },
-    "posture_score": {
-      "type": [
-        "number",
-        "null"
-      ],
-      "description": "null until scoring has run, and always null on the ticket that agent registration returns. A number here is a score, never a string: the evaluation contract's ordered operators compare numbers only, so \"30\" does not satisfy `lt 40`."
-    },
-    "tier": {
       "type": [
         "string",
         "null"
       ],
-      "description": "trusted at 80 or above, caution at 60, elevated_risk at 40, critical below. null until scored. Left unconstrained rather than enumerated for the same reason as sandbox_type — the bands are Rail Center's to change, and a reader that refused an unfamiliar one would deny an agent whose score is perfectly readable."
+      "description": "For example nemo_claw, kubernetes, bare_metal. Not an enumeration: a deployment may name a sandbox this schema has never heard of, and refusing it here would make an agent that registers cleanly impossible to admit. null when Rail Center holds no environment record for the agent; still required, so its absence is a different ticket from its being unknown."
+    },
+    "posture": {
+      "type": "object",
+      "required": [
+        "overall",
+        "categories"
+      ],
+      "additionalProperties": true,
+      "description": "The agent's posture as of the run this ticket was built from.",
+      "properties": {
+        "overall": {
+          "type": "object",
+          "required": [
+            "score",
+            "level"
+          ],
+          "additionalProperties": true,
+          "description": "The posture as a whole: a weighted combination of every category.",
+          "properties": {
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "0 to 100, higher is better. A number, never a string: the evaluation contract's ordered operators compare numbers only, so \"30\" does not satisfy `lt 40`. The policy path `ticket.posture.overall.score`."
+            },
+            "level": {
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low"
+              ],
+              "description": "The band the score falls in: **critical** below 40, **high** from 40 to below 60, **medium** from 60 to below 80, **low** from 80. A claim of its own rather than something a reader derives, so a policy written against it follows if the bands move. The policy path `ticket.posture.overall.level`."
+            }
+          }
+        },
+        "categories": {
+          "type": "object",
+          "description": "Each risk category by name. The names are the Profiler's; no category is a policy field in this release.",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "score",
+              "capped"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 10,
+                "description": "The category's score on the Profiler's own 0–10 scale, after any cap — not the 0–100 of the overall score. null when the category was not scored."
+              },
+              "capped": {
+                "type": "boolean",
+                "description": "Whether a hard cap lowered this category's score."
+              }
+            }
+          }
+        }
+      }
+    },
+    "alignment": {
+      "type": "object",
+      "required": [
+        "drifted"
+      ],
+      "additionalProperties": true,
+      "description": "How the agent compares to the baseline applied to it.",
+      "properties": {
+        "baseline": {
+          "type": "object",
+          "required": [
+            "id",
+            "label"
+          ],
+          "additionalProperties": true,
+          "description": "The baseline the run was compared against. **Absent when the agent has none**, in which case `alignment.baseline.id` and `alignment.baseline.label` are missing and a `not_existing` condition on either holds.",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The policy path `ticket.alignment.baseline.id`."
+            },
+            "label": {
+              "type": "string",
+              "description": "The baseline's label as an operator named it. Compared exactly, with no case folding. The policy path `ticket.alignment.baseline.label`."
+            }
+          }
+        },
+        "drifted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The names of the attributes that differ from the baseline. Empty when nothing drifted, or when there is no baseline — an empty list is a present claim, not a missing one. The policy path `ticket.alignment.drifted`, which admits `contains`."
+        }
+      }
     },
     "skills": {
       "type": "array",
@@ -55,14 +150,6 @@
         "type": "string"
       },
       "description": "Declared skill names, read by the skill_match derived field. An empty list is a present claim, not a missing one."
-    },
-    "scored_at": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "format": "date-time",
-      "description": "When posture was last computed. Not a lifetime — that is exp."
     },
     "iat": {
       "type": "integer",
@@ -72,21 +159,48 @@
       "type": "integer",
       "minimum": -9007199254740991,
       "maximum": 9007199254740991,
-      "description": "Expires at, in the same units. The ticket is dead *at* exp, not one second after. Bounded by ±(2^53 − 1) because JSON has no integer type: past that a double cannot separate adjacent integers, and two readers would take different instants from the same bytes."
+      "description": "Expires at, in the same units. Stamped when Rail Center serves the ticket, not stored with it. The ticket is dead *at* exp, not one second after. Bounded by ±(2^53 − 1) because JSON has no integer type: past that a double cannot separate adjacent integers, and two readers would take different instants from the same bytes."
     }
   },
   "examples": [
     {
+      "id": "0d9b6f3c-8a52-4e1f-9c7a-2b3e4f5a6b7c",
       "agent_id": "550e8400-e29b-41d4-a716-446655440000",
       "sandbox_id": "9f2c4b7e1a8d3056",
       "environment_fingerprint": "c7d1e05a3b924f68",
       "sandbox_type": "nemo_claw",
-      "posture_score": 100.0,
-      "tier": "trusted",
+      "posture": {
+        "overall": {
+          "score": 72.5,
+          "level": "medium"
+        },
+        "categories": {
+          "secrets": {
+            "score": 6.4,
+            "capped": true
+          },
+          "network": {
+            "score": 8.8,
+            "capped": false
+          },
+          "supply_chain": {
+            "score": null,
+            "capped": false
+          }
+        }
+      },
+      "alignment": {
+        "baseline": {
+          "id": "7e1c2d3b-4a5f-4b6c-8d9e-0f1a2b3c4d5e",
+          "label": "prod"
+        },
+        "drifted": [
+          "llm_model"
+        ]
+      },
       "skills": [
         "package-tracking"
       ],
-      "scored_at": "2026-07-31T18:04:23.881204+00:00",
       "iat": 1785528262,
       "exp": 1785529162
     }

@@ -28,6 +28,48 @@ redeploy. Decisions use the last valid policy bundle, so a failed refresh does
 not silently become an empty policy. [`schemas/`](../schemas/) defines the
 ticket, bundle and denial-event wire shapes.
 
+## Conditions are data
+
+Only how a condition is read depends on the bundle's `schema_version`; the walk,
+the fallbacks and the report are shared. The grammars live side by side in
+`gateway.core.bundle.conditions`: `v1` reads a `1.x` bundle's
+`{field, operator, value}` over its fixed field table, and `v2` reads a `2.x`
+bundle's conditions, below. Each has its vectors in `tests/vectors/v1/` and
+`tests/vectors/v2/`.
+
+In a `2.x` bundle a condition is `{path, op, value}`. The path's first segment names a source,
+and the rest is walked through that source's JSON one key at a time:
+
+- `ticket` — the decoded `x-rail` ticket, present only when it decoded and its
+  `exp` has not passed: `ticket.posture.overall.score`,
+  `ticket.alignment.baseline.id`.
+- `request` — `{endpoint_key, headers}`: the resolved
+  `<path>#<method>#<call>` (absent for a message naming no tool), and the
+  headers with names lowercased and every value split on commas: one value is
+  a string, several — on one line or many — a list: `request.headers.x-tenant`.
+
+A missing, null or non-object step reads as absent, so `not_existing` holds
+across it. The gateway keeps no list of admitted paths — Rail Center checks
+them before it publishes — and names only two claims itself: `exp`, to decide
+whether a ticket is usable, and `id`, which it reports with a denial. What it
+does fix is the operators: `existing`, `not_existing`, `eq`, `ne`, `lt`,
+`lte`, `gt`, `gte`, `in`, `contains`, `not_contains`, `matches`. On a list,
+`eq` holds when every value equals, `ne` when any value differs, and `in` and
+`matches` when any value does: `ne "acme"` plus `not_existing` admits only
+`acme` however a header repeats, and `matches "*sqlmap*"` alone refuses that
+tool beside any other value. An unknown source, an unknown
+op or a wrong operand is uninterpretable and answered `503`.
+
+A call carrying no usable ticket — absent, undecodable, malformed, expired — is
+decided by the bundle's `ticket_fallback` before the binding fallback and the
+chain: `block` (the default in `2.x`; a `1.x` bundle without the field reads it as `pass`) refuses it at `enforce` and reports a denial with
+no `policy_id` and `metadata.fallback: "ticket"`; `pass` walks the chain with
+the `ticket` source absent.
+
+A denial carries the ticket's `id` as `ticket_id`, when it is a UUID, and no
+other claim: Rail Center resolves the agent and its posture from the ticket it
+stored.
+
 ## Endpoint keys, and the constraint they place on you
 
 Rail Center composes `<slug>#<path>#<method>#<call>` and publishes that whole

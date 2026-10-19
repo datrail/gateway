@@ -33,15 +33,17 @@ it can call none of them.
 
 The two remaining keyless outcomes are not judged alike. ``keyless`` is any
 other method that names no tool — ``resources/read``, ``prompts/get``,
-``completion/complete`` — which can return content, so it faces the chain: a
-rule keyed on the endpoint has no subject to ask about and is dropped, while
-every other rule applies as it would anywhere. ``unrecognised`` is a
+``completion/complete`` — which can return content, so it faces the whole
+chain, with ``request.endpoint_key`` absent. ``unrecognised`` is a
 ``tools/call`` that **did** name a tool, one this gateway declined to compose a
-key for, so nothing is dropped and the whole chain applies — a rule about the
-endpoint holds against it. `decide.chain_for` takes that as its ``keyless`` argument rather than
-reading it off the absent key: both outcomes reach it as ``None``, and deciding
-on the absence alone would let a caller shed every endpoint-derived rule by
-appending a newline to a tool name.
+key for; it faces the whole chain too, and a `block` binding fallback refuses
+it, where it does not refuse a keyless message — and a `1.x` grammar drops
+its endpoint-derived rules from a keyless chain, never from an unrecognised
+one. `decide.refuses_unbound` and `decide.chain_for` take that as their
+``keyless`` argument rather than reading it off the absent key: both outcomes
+reach them as ``None``, and deciding on the absence alone would let a caller
+shed the fallback, or a `1.x` endpoint rule, by appending a newline to a tool
+name.
 
 **The two keyless outcomes are kept distinguishable on purpose.** They behave
 identically for the caller, and an operator needs to tell them apart: drift and

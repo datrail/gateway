@@ -645,6 +645,10 @@ class _Enforcement:
             body,
             _x_rail_values(scope),
             _x_rail_status_values(scope),
+            [
+                (k.decode("latin-1"), v.decode("latin-1"))
+                for k, v in scope.get("headers", ())
+            ],
         )
         if verdict.report is not None:
             self._reporter.send(verdict.report)

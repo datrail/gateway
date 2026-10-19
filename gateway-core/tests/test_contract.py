@@ -1,11 +1,16 @@
 """The enforcement contract, against `judge` and the reporter alone."""
 
 import json
+import logging
 
 import httpx
 import pytest
 
-from core_support import REASONS, Holder, get_enforcement_params
+from core_support import (
+    REASONS,
+    Holder,
+    get_enforcement_params,
+)
 from gateway.core.enforcement import DenialReporter, judge
 
 
@@ -19,7 +24,9 @@ async def _collect_reports(verdict) -> list[dict]:
 
     if verdict.report is not None:
         reporter = DenialReporter(
-            "http://rail-center.test", {}, transport=httpx.MockTransport(receive)
+            "http://rail-center.test",
+            {},
+            transport=httpx.MockTransport(receive),
         )
         reporter.send(verdict.report)
         for task in list(reporter._reports):
@@ -29,13 +36,17 @@ async def _collect_reports(verdict) -> list[dict]:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", get_enforcement_params("core"))
-async def test_the_verdict_matches_every_row_of_the_contract(case):
+async def test_the_verdict_matches_every_row_of_the_contract(case, caplog):
+    caplog.set_level(logging.WARNING, logger="gateway")
     verdict = judge(
         Holder(case.get_bundle()),
         case.path,
         case.body,
         list(case.x_rail) or None,
         list(case.x_rail_status) or None,
+        [("x-rail", v) for v in case.x_rail]
+        + [("x-rail-status", v) for v in case.x_rail_status]
+        + list(case.headers),
     )
 
     assert verdict.status == case.status
@@ -47,3 +58,7 @@ async def test_the_verdict_matches_every_row_of_the_contract(case):
         (body,) = sent
         body.pop("denied_at")
         assert body == case.report
+    if case.logged:
+        assert any(
+            all(part in r.getMessage() for part in case.logged) for r in caplog.records
+        )

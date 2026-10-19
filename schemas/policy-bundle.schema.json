@@ -16,14 +16,14 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "description": "The shape of this document, so a reader can tell an unsupported bundle from a malformed one and refuse it whole rather than half-read it. At the root beside `content_hash` because it describes the document: a reader must find it before parsing, so it cannot live inside a sub-object whose own shape it explains. Named `schema_version` rather than `version` because a content hash sits beside it and only one of the two is a version. **`MAJOR.MINOR`, and a reader compares the major alone.** A matching major with any minor is read; a different major is refused whole; anything that is not two runs of ASCII digits separated by one dot is refused, a version a reader cannot parse being one it cannot claim to support. The minor is not compared because a minor bump adds a field, and an unrecognised root field is already read rather than refused — refusing the number that announces it would make adding an optional field a breaking change after all. The ASCII restriction is not pedantry: `str.isdigit` in Python is true of Arabic-Indic and fullwidth digits and `int` parses them, so a reader written that way accepts versions a Go or TypeScript implementation refuses.",
+      "description": "The shape of this document, so a reader can tell an unsupported bundle from a malformed one and refuse it whole rather than half-read it. At the root beside `content_hash` because it describes the document: a reader must find it before parsing, so it cannot live inside a sub-object whose own shape it explains. Named `schema_version` rather than `version` because a content hash sits beside it and only one of the two is a version. **`MAJOR.MINOR`, and a reader compares the major alone.** A matching major with any minor is read; a different major is refused whole; anything that is not two runs of ASCII digits separated by one dot is refused, a version a reader cannot parse being one it cannot claim to support. The minor is not compared because a minor bump adds a field, and an unrecognised root field is already read rather than refused — refusing the number that announces it would make adding an optional field a breaking change after all. The ASCII restriction is not pedantry: `str.isdigit` in Python is true of Arabic-Indic and fullwidth digits and `int` parses them, so a reader written that way accepts versions a Go or TypeScript implementation refuses. This reader understands majors `1` and `2`: the major picks the condition grammar, and a `1.x` bundle with no `ticket_fallback` is read as `pass`, its chain carrying the rule about a missing ticket itself.",
       "pattern": "^[0-9]+\\.[0-9]+$"
     },
     "content_hash": {
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "description": "A content hash of the `schema_version`, the `enforcement`, the `binding_fallback`, the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy; `binding_fallback` is covered because it decides every unmatched call; `schema_version` is covered because a reader that must refuse an unsupported shape has to discover the bump. **It is a hash and not a version**: two builds of the same inputs produce the same value, nothing stores it, and it orders nothing."
+      "description": "A content hash of the `schema_version`, the `enforcement`, the `binding_fallback`, the `ticket_fallback`, the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy; `binding_fallback` is covered because it decides every unmatched call; `schema_version` is covered because a reader that must refuse an unsupported shape has to discover the bump. **It is a hash and not a version**: two builds of the same inputs produce the same value, nothing stores it, and it orders nothing."
     },
     "generated_at": {
       "type": "string",
@@ -70,6 +70,14 @@
         "block"
       ],
       "description": "What happens to a call no binding key matches at all. A property of the binding set, which is why it sits beside `bindings` rather than inside `enforcement` or inside a binding — a posture says how much of a verdict is acted on, this says what the verdict *is* where nothing matched, and it cannot live in a binding because it is precisely what applies when there is none. `block` refuses without consulting the chain; `pass` means *not refused for being unbound* and hands the call to the whole chain. Absent is `block`. Evaluated wherever the chain is walked and acted on only at `enforce`, so an operator sees what it would refuse before it refuses anything."
+    },
+    "ticket_fallback": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "block"
+      ],
+      "description": "What happens to a call carrying no usable ticket — absent, undecodable, malformed or expired. Asked before `binding_fallback` and before the chain. `block` refuses without consulting the chain, and the refusal is reported with no `policy_id` and `metadata.fallback: \"ticket\"`; `pass` walks the chain with the `ticket` source absent, so every `ticket.*` path reads absent. Absent is `block`. Evaluated wherever the chain is walked and acted on only at `enforce`, as `binding_fallback` is."
     }
   },
   "$defs": {
@@ -89,7 +97,7 @@
           "description": "What an operator reads. A policy with no readable name is named by its id rather than refused: no decision turns on it, and refusing the bundle would take enforcement down for a cosmetic fault."
         },
         "condition": {
-          "description": "Left unconstrained on purpose. A condition that cannot be interpreted is refused *lazily*, where the walk reaches it, so that an earlier policy which already denied still gives that request a clean answer. Validating conditions here would make that refusal eager and change which requests get an answer."
+          "description": "Left unconstrained on purpose. A condition that cannot be interpreted is refused *lazily*, where the walk reaches it, so that an earlier policy which already denied still gives that request a clean answer. Validating conditions here would make that refusal eager and change which requests get an answer.\n\nIn a `2.x` bundle a condition is `{path, op, value}`. **`path` is data**: its first segment names a source — `ticket`, the decoded `x-rail` ticket, present only when it decoded and has not expired; or `request`, `{endpoint_key, headers}` with header names lowercased and every value split on commas, whitespace trimmed, so a header with one value is a string and one with several — on one line or many — is the list of them — and the rest is walked one key at a time. A missing, null or non-object step reads as absent, and no step is a list index. A reader holds no list of admitted paths: Rail Center checks each path against the shapes it publishes before a bundle goes out. `op` is one of `existing`, `not_existing` (no operand), `eq`, `ne` (a string or number), `lt`, `lte`, `gt`, `gte` (a number), `in` (a list), `contains` and `not_contains` (a string or number; hold only on a list), `matches` (a string glob whose one metacharacter is `*`). An unknown source, an unknown op or an operand of the wrong shape is uninterpretable. On a list, `eq` holds when every value equals the operand, `ne` when any value differs, and `in` and `matches` when any value does, so an allowlist — block on `ne`, block on `not_existing` — refuses a foreign value however it is repeated, and a denylist is one `matches` or `in` rule. Nothing is coerced, and every op but `not_existing` declines against an absent value. A `1.x` bundle's conditions are read in the earlier grammar, `{field, operator, value}` over a fixed field table (`x_rail_header`, `skill_match`, `endpoint_key`, the flat ticket claims), with `missing`/`present` for `not_existing`/`existing`; nothing else about a bundle differs between the two."
         },
         "action": {
           "description": "What a match does. Any action other than `alert` denies. Unconstrained for the same reason as `condition`."
@@ -201,7 +209,7 @@
   },
   "examples": [
     {
-      "schema_version": "1.0",
+      "schema_version": "2.0",
       "content_hash": "a3f1c09e7b2d4485",
       "generated_at": "2026-07-28T20:41:07.512247Z",
       "policies": [
@@ -210,8 +218,8 @@
           "name": "P1 — Deny critical-tier agents",
           "priority": 1,
           "condition": {
-            "field": "posture_score",
-            "operator": "lt",
+            "path": "ticket.posture.overall.score",
+            "op": "lt",
             "value": 40
           },
           "action": "block",
@@ -235,7 +243,8 @@
       "enforcement": {
         "mode": "enforce"
       },
-      "binding_fallback": "block"
+      "binding_fallback": "block",
+      "ticket_fallback": "block"
     }
   ]
 }

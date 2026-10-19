@@ -1,10 +1,8 @@
 """The one walk rule that is this gateway's own rather than the contract's.
 
-Everything else about the walk is pinned by `tests/vectors/decide.json`, which
-is transcribed from rail-center's `docs/policy-evaluation-contract.md`. This
-rule cannot be: the contract's `decide` is always handed an endpoint key, and
-`endpoint_key` is modelled there as an argument rather than a claim that may be
-absent. So no vector can express what happens when there is no key at all.
+Everything else about the walk is pinned by `tests/vectors/v1/decide.json`
+and `v2/decide.json`. This rule cannot be: every vector is handed an endpoint key, so no vector can express
+what happens when there is no key at all.
 
 MCP is why there is such a case. A call's identity lives in the message rather
 than the URL, and only `tools/call` names a tool — `resources/read` and
@@ -12,20 +10,17 @@ than the URL, and only `tools/call` names a tool — `resources/read` and
 resolves to no key either. (`initialize`, `tools/list` and the other session
 messages never reach this walk: `src/gateway/core/endpoint.py` resolves them to
 `discovery` and the enforcement layer forwards them.) The rule the rest land on:
-**no key is not a pass.** Both keyless outcomes are judged by the chain, because
-a message that can return content must not pass for lack of a name.
-
-What is deliberately *not* pinned here is what a `skill_match` rule should mean
-for a message naming no tool. A rule keyed on the endpoint declines to hold
-against an absence, which is settled; whether a rule about the skill covering
-an endpoint should fire on a message that names none is not, and it cannot be
-settled in one implementation — the contract has no position on it, and the two
-sides have to agree or they disagree exactly where it matters.
+**no key is not a pass.** In a `2.x` bundle the whole chain judges a keyless
+message, and a rule on `request.endpoint_key` reads the key as absent. In a
+`1.x` bundle the endpoint-derived fields leave a keyless chain, and stay in an
+unrecognised call's.
 """
 
 import base64
 import json
 from typing import Any
+
+import pytest
 
 from gateway.core.bundle.conditions import ConditionInput
 from gateway.core.bundle.decide import chain_for, decide
@@ -38,36 +33,37 @@ LOW_SCORE = "5c8f1e42-0000-4000-8000-0000000000d1"
 BY_KEY = "5c8f1e42-0000-4000-8000-0000000000a1"
 
 
-def bundle(bindings: list[dict[str, Any]] | None = None):
+def rule(pid: str, condition: dict[str, Any], priority: int = 1) -> dict[str, Any]:
+    return {
+        "id": pid,
+        "name": f"policy {pid[-2:]}",
+        "priority": priority,
+        "condition": condition,
+        "action": "block",
+        "enabled": True,
+    }
+
+
+def bundle(*policies: dict[str, Any], bindings: list[dict[str, Any]] | None = None):
     return validate_bundle(
         {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "content_hash": "v-keyless",
-            "policies": [
-                {
-                    "id": LOW_SCORE,
-                    "name": "deny a low-scoring agent",
-                    "priority": 1,
-                    "condition": {
-                        "field": "posture_score",
-                        "operator": "lt",
-                        "value": 40,
-                    },
-                    "action": "block",
-                    "enabled": True,
-                },
-                {
-                    "id": BY_KEY,
-                    "name": "deny this data source",
-                    "priority": 2,
-                    "condition": {
-                        "field": "endpoint_key",
-                        "operator": "matches",
+            "policies": list(policies)
+            or [
+                rule(
+                    LOW_SCORE,
+                    {"path": "ticket.posture.overall.score", "op": "lt", "value": 40},
+                ),
+                rule(
+                    BY_KEY,
+                    {
+                        "path": "request.endpoint_key",
+                        "op": "matches",
                         "value": "delivery.*",
                     },
-                    "action": "block",
-                    "enabled": True,
-                },
+                    priority=2,
+                ),
             ],
             "bindings": bindings or [],
         }
@@ -75,9 +71,11 @@ def bundle(bindings: list[dict[str, Any]] | None = None):
 
 
 def ticket(**claims: Any) -> str:
-    """An `x-rail` header carrying `claims`, unpadded as the mint emits it."""
-    claims.setdefault("agent_id", "agent-1")
+    """An `x-rail` header carrying `claims`, unpadded as the mint emits it.
+    `score` is `posture.overall.score`."""
     claims.setdefault("exp", 4102444800)  # 2100-01-01
+    if "score" in claims:
+        claims["posture"] = {"overall": {"score": claims.pop("score")}}
     raw = json.dumps(claims).encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -88,26 +86,17 @@ def request(endpoint_key: str | None, header: str | None = None) -> ConditionInp
     )
 
 
-def test_a_call_naming_no_endpoint_keeps_every_rule_that_can_ask_about_it():
+def test_a_call_naming_no_endpoint_faces_the_whole_chain():
     """No binding narrows a keyless message — there is no key to look one up
-    with — and only the rules *about the endpoint* leave the chain.
-
-    Returning an empty chain instead would allow every keyless message —
-    `resources/read` with no ticket at all. Returning the whole chain would deny
-    one for a conforming agent over a rule about an endpoint it did not name.
-    This is the line between the two, and both failures are one edit away in
-    opposite directions."""
-    assert [p.id for p in chain_for(bundle(), None)] == [LOW_SCORE]
+    with — and no rule leaves the chain for it either. Returning an empty chain
+    instead would allow every keyless message, `resources/read` with no ticket
+    at all."""
+    assert len(chain_for(bundle(), None)) == 2
     assert len(chain_for(bundle(), KEY)) == 2
 
 
 def test_a_keyless_call_is_denied_by_a_rule_about_the_ticket():
-    """Every rule that can meaningfully ask about a keyless message still does.
-
-    This is the half that must survive the narrowing: `deny unknown agents`
-    keys on the ticket, so a caller with no ticket is stopped at the first
-    keyless message that can return content."""
-    verdict = decide(bundle(), request(None, ticket(posture_score=10)))
+    verdict = decide(bundle(), request(None, ticket(score=10)))
 
     assert verdict.allowed is False
     assert verdict.denied_by is not None
@@ -117,87 +106,58 @@ def test_a_keyless_call_is_denied_by_a_rule_about_the_ticket():
 def test_a_keyless_call_is_not_narrowed_by_another_endpoints_binding():
     """A binding is looked up by key. With no key there is nothing to look up,
     and a reader that fell back to *some* endpoint's narrowing would judge the
-    handshake by whichever rules happened to be bound elsewhere.
+    message by whichever rules happened to be bound elsewhere."""
+    narrowed = bundle(
+        bindings=[{"endpoint_key": KEY, "mode": "gated", "policy_ids": [BY_KEY]}]
+    )
 
-    What is dropped from a keyless chain is dropped for being *about the
-    endpoint*, never for being bound to one — so the ticket rule survives here
-    and the `endpoint_key` rule does not, whatever the bindings say.
-    """
-    narrowed = bundle([{"endpoint_key": KEY, "mode": "gated", "policy_ids": [BY_KEY]}])
-
-    assert [p.id for p in chain_for(narrowed, None)] == [LOW_SCORE]
+    assert len(chain_for(narrowed, None)) == 2
     assert len(chain_for(narrowed, KEY)) == 1
 
 
-def test_an_endpoint_rule_is_dropped_from_a_keyless_chain():
-    """A rule about the endpoint asks a question with no subject when no
-    endpoint was named, so it leaves the chain rather than resolving to absent.
-
-    Absent is the answer that makes `skill_match missing` *hold*, which is why
-    letting these resolve rather than dropping them denied every handshake for
-    an agent whose declared skills were exactly right."""
-    only_by_key = validate_bundle(
-        {
-            "schema_version": "1.0",
-            "content_hash": "v-keyless",
-            "policies": [
-                {
-                    "id": BY_KEY,
-                    "name": "deny this data source",
-                    "priority": 2,
-                    "condition": {
-                        "field": "endpoint_key",
-                        "operator": "matches",
-                        "value": "delivery.*",
-                    },
-                    "action": "block",
-                    "enabled": True,
-                }
-            ],
-            "bindings": [],
-        }
-    )
-
-    assert chain_for(only_by_key, None) == ()
-    assert len(chain_for(only_by_key, KEY)) == 1
-    verdict = decide(only_by_key, request(None, ticket(posture_score=10)))
-    assert verdict.allowed is True
-
-
-def test_every_operator_endpoint_key_admits_declines_against_an_absence():
-    """All four of them, since it is the whole basis of the rule above.
-
-    The field admits `eq`, `ne`, `in` and `matches` and admits neither `missing`
-    nor `present` — so there is no operator through which a rule about an
-    endpoint can fire on a request naming none, and a keyless call being judged
-    by the whole chain is not a keyless call being denied by every rule in it.
-    """
-    for operator, operand in [
+@pytest.mark.parametrize(
+    ("op", "operand"),
+    [
         ("eq", KEY),
         ("ne", "delivery.other"),
         ("in", [KEY]),
         ("matches", "delivery.*"),
-    ]:
-        rule = validate_bundle(
-            {
-                "schema_version": "1.0",
-                "content_hash": "v-keyless",
-                "policies": [
-                    {
-                        "id": BY_KEY,
-                        "name": f"deny by {operator}",
-                        "priority": 1,
-                        "condition": {
-                            "field": "endpoint_key",
-                            "operator": operator,
-                            "value": operand,
-                        },
-                        "action": "block",
-                        "enabled": True,
-                    }
-                ],
-                "bindings": [],
-            }
-        )
-        verdict = decide(rule, request(None, ticket(posture_score=10)))
-        assert verdict.allowed is True, operator
+        ("existing", None),
+    ],
+)
+def test_a_comparison_on_the_key_does_not_fire_without_one(op, operand):
+    """Every operator but `not_existing` declines against an absence, so a rule
+    written for an endpoint does not deny a message that names none."""
+    condition = {"path": "request.endpoint_key", "op": op}
+    if operand is not None:
+        condition["value"] = operand
+    verdict = decide(bundle(rule(BY_KEY, condition)), request(None, ticket()))
+    assert verdict.allowed is True
+
+
+def test_not_existing_on_the_key_fires_without_one():
+    """The one operator that asks about the absence answers it: a rule meaning
+    "deny anything that named no tool" is written, and does what it says."""
+    held = bundle(rule(BY_KEY, {"path": "request.endpoint_key", "op": "not_existing"}))
+
+    assert decide(held, request(None, ticket())).allowed is False
+    assert decide(held, request(KEY, ticket())).allowed is True
+
+
+def test_a_v1_chain_drops_its_endpoint_rules_for_a_keyless_message_only():
+    """`skill_match missing` holds against an absent key, so in the `1.x`
+    grammar it leaves the chain of a message that names no tool by design —
+    and stays in that of a `tools/call` this gateway declined to key, which
+    did name one."""
+    held = validate_bundle(
+        {
+            "schema_version": "1.0",
+            "content_hash": "v-keyless-v1",
+            "policies": [rule(BY_KEY, {"field": "skill_match", "operator": "missing"})],
+            "bindings": [],
+        }
+    )
+
+    assert chain_for(held, None) == ()
+    assert decide(held, request(None, ticket())).allowed is True
+    assert decide(held, request(None, ticket()), keyless=False).allowed is False

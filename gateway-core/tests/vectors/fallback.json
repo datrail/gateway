@@ -208,8 +208,8 @@
           "name": "deny a low-scoring agent",
           "priority": 1,
           "condition": {
-            "field": "posture_score",
-            "operator": "lt",
+            "path": "ticket.posture.overall.score",
+            "op": "lt",
             "value": 40
           },
           "action": "block",
@@ -222,7 +222,11 @@
       "claims": {
         "agent_id": "5c8f1e42-0000-4000-8000-00000000a9e7",
         "exp": 4102444800,
-        "posture_score": 10
+        "posture": {
+          "overall": {
+            "score": 10
+          }
+        }
       },
       "now": 1700000000,
       "expect": {
@@ -244,8 +248,8 @@
           "name": "deny a low-scoring agent",
           "priority": 1,
           "condition": {
-            "field": "posture_score",
-            "operator": "lt",
+            "path": "ticket.posture.overall.score",
+            "op": "lt",
             "value": 40
           },
           "action": "block",
@@ -258,7 +262,11 @@
       "claims": {
         "agent_id": "5c8f1e42-0000-4000-8000-00000000a9e7",
         "exp": 4102444800,
-        "posture_score": 90
+        "posture": {
+          "overall": {
+            "score": 90
+          }
+        }
       },
       "now": 1700000000,
       "expect": {
@@ -280,8 +288,8 @@
           "name": "deny a low-scoring agent",
           "priority": 1,
           "condition": {
-            "field": "posture_score",
-            "operator": "lt",
+            "path": "ticket.posture.overall.score",
+            "op": "lt",
             "value": 40
           },
           "action": "block",
@@ -294,7 +302,11 @@
       "claims": {
         "agent_id": "5c8f1e42-0000-4000-8000-00000000a9e7",
         "exp": 4102444800,
-        "posture_score": 90
+        "posture": {
+          "overall": {
+            "score": 90
+          }
+        }
       },
       "now": 1700000000,
       "note": "The same request the case above allows. `block` refuses it without consulting the chain, which is what makes 'the chain is not consulted' observable: consult it and this call is allowed."

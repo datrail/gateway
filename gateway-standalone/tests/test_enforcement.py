@@ -44,7 +44,7 @@ import pytest
 from core_support import (
     BAD_ID,
     DENIES_EVERYTHING,
-    DENIES_UNMATCHED_SKILL,
+    DENIES_NO_KEY,
     DENY_ID,
     FULL_KEY,
     KEY,
@@ -258,13 +258,16 @@ async def settled(recorder: _Reports, *, expecting: int) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", get_enforcement_params("standalone"))
-async def test_the_answer_and_the_report_match_every_row_of_the_contract(case):
+async def test_the_answer_and_the_report_match_every_row_of_the_contract(case, caplog):
     """Each row through the layer: a refusal is answered here and never
     reaches the app below, and a forwarded call reaches it as sent."""
+    caplog.set_level(logging.WARNING, logger="gateway")
     enforcement, downstream, reports = layer(case.get_bundle())
-    headers = [(b"x-rail", v.encode("latin-1")) for v in case.x_rail] + [
-        (b"x-rail-status", v.encode("latin-1")) for v in case.x_rail_status
-    ]
+    headers = (
+        [(b"x-rail", v.encode("latin-1")) for v in case.x_rail]
+        + [(b"x-rail-status", v.encode("latin-1")) for v in case.x_rail_status]
+        + [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in case.headers]
+    )
 
     answer = await drive(
         enforcement, case.body, headers=headers, method=case.method, path=case.path
@@ -285,6 +288,10 @@ async def test_the_answer_and_the_report_match_every_row_of_the_contract(case):
         body = reports.only()
         body.pop("denied_at")
         assert body == case.report
+    if case.logged:
+        assert any(
+            all(part in r.getMessage() for part in case.logged) for r in caplog.records
+        )
 
 
 # --------------------------------------------------------------------------
@@ -774,9 +781,9 @@ async def test_a_call_aborted_mid_body_is_not_judged_and_reports_no_denial(caplo
     a body ends short only when the caller has already gone, and uvicorn drops
     whatever the layer composes after that: the forged row is the whole of the
     damage, and the log line is the whole of the operator's signal."""
-    held = build_bundle(DENIES_UNMATCHED_SKILL, bindings=EXEMPT)
+    held = build_bundle(DENIES_NO_KEY, bindings=EXEMPT)
     whole = build_call()
-    carrying = [(b"x-rail", encode_ticket(posture_score=90).encode())]
+    carrying = [(b"x-rail", encode_ticket(score=90).encode())]
 
     enforcement, _, reports = layer(held)
     complete = await drive(enforcement, whole, headers=carrying)
@@ -811,7 +818,7 @@ async def test_an_abort_before_a_single_body_byte_reports_nothing_either():
     """No body byte is needed to produce a forged row: headers and a
     `content-length` are enough, and the empty fragment resolves `unrecognised`
     exactly as a partial one does."""
-    enforcement, downstream, reports = layer(build_bundle(DENIES_UNMATCHED_SKILL))
+    enforcement, downstream, reports = layer(build_bundle(DENIES_NO_KEY))
 
     answer = await drive(
         enforcement,
