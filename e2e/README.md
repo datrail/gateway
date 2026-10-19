@@ -92,7 +92,7 @@ the time, then fails as if the gateway were at fault.
 ## Apigee callout
 
 The callout behind `apigee_standin.py`, a stand-in for an Apigee proxy running
-the [reference bundle](../gateway-apigee-grpc/apigee/README.md). **The
+the live harness's [bundle](apigee-grpc/live/README.md#the-proxy-bundle). **The
 stand-in is a model of Apigee, not Apigee:** it does only what the bundle,
 Apigee's docs and the [live harness](apigee-grpc/live/README.md)'s runs say
 Apigee does. The same Apigee cases run on both; they were written and passed

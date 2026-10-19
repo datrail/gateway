@@ -1,4 +1,4 @@
-"""Checks the callout through the reference bundle: live, on real Apigee;
+"""Checks the callout through the bundle in live/apiproxy: live, on real Apigee;
 locally, on the stand-in (apigee_standin.py), after the image's own checks.
 
 E2E_TARGET picks which: `local` (the default, in compose.yml) or `live`

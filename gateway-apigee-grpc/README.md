@@ -11,7 +11,7 @@ builds `ghcr.io/datrail/gateway-apigee-grpc`. See the
 ```mermaid
 flowchart LR
   agent["Agent (MCP client)"] -->|"MCP plus x-rail"| proxy
-  subgraph apigee["Apigee proxy, reference bundle"]
+  subgraph apigee["Apigee proxy"]
     proxy["EC-Rail"] -->|"refuse"| refuse["RF-Refuse"]
     proxy -->|"allow"| target["target endpoint"]
   end
@@ -35,11 +35,11 @@ and `rail.body`, which `RF-Refuse` answers with. Every other method is allowed.
 
 ### When the callout is down
 
-The proxy fails closed. Unreachable, past `TimeoutMs`, refused by Cloud
-Run's IAM, or a gRPC error: the bundle's `RF-CalloutFailed` answers 503
+The proxy should fail closed. Unreachable, past `TimeoutMs`, refused by
+Cloud Run's IAM, or a gRPC error: answer 503
 `{"error": "policy ruleset cannot be applied"}`, standalone's answer when it
-can't judge a call, and nothing reaches the upstream. So a callout outage is
-an MCP outage. Apigee's fault and analytics show the callout failed; the
+can't judge a call, and forward nothing to the upstream. So a callout outage
+is an MCP outage. Apigee's fault and analytics show the callout failed; the
 callout's own log shows nothing.
 
 An error inside a working callout is the other way round: it logs the
@@ -56,10 +56,20 @@ it holds one. With no bundle held, calls are allowed, and readiness is
 - **The image** is `ghcr.io/datrail/gateway-apigee-grpc`, released with the
   same versions as `ghcr.io/datrail/gateway`. It runs as uid 10001 and serves
   gRPC, in plaintext, on port 8080.
-- **The proxy:** the [reference bundle](apigee/README.md) and its
-  TargetServer, with their placeholders replaced. Keep request streaming off,
-  as the bundle has it: a streamed request reaches the callout with no
-  content, and an empty body may be refused.
+- **The proxy** needs, in its PreFlow:
+  - an ExternalCallout policy (`EC-Rail` above) calling the callout through a
+    TargetServer of protocol `EXTERNAL_CALLOUT`;
+  - a RaiseFault answering `rail.status` with `rail.body` when
+    `rail.decision = "refuse"`;
+  - the 503 above when `rail.decision = null`, and in a FaultRule on
+    `externalcallout.EC-Rail.failed = true`: only the callout's own fault,
+    so a policy of yours before it, an API key or a rate limit, keeps its
+    own error.
+
+  Keep request streaming off: a streamed request reaches the callout with no
+  content, and an empty body may be refused. The e2e suite's bundle,
+  [`e2e/apigee-grpc/live/apiproxy/`](../e2e/apigee-grpc/live/README.md#the-proxy-bundle),
+  is a proxy that does this.
 - **On Cloud Run**, as the [live harness](../e2e/apigee-grpc/live/README.md)
   runs it:
   - `--use-http2`: gRPC needs HTTP/2 end to end;
@@ -70,8 +80,8 @@ it holds one. With no bundle held, calls are allowed, and readiness is
   - `--min-instances=1`: a cold start longer than `TimeoutMs` is a 503;
   - a startup probe on gRPC service `datrail.gateway.Ready` holds traffic
     back until a bundle is held.
-- **Elsewhere**, nothing checks who calls the callout: see the bundle's
-  caveats.
+- **Elsewhere**, the ExternalCallout sends no ID token and nothing checks
+  who calls the callout: keep it reachable only from Apigee.
 
 Measured on the G2 prototype, `EC-Rail` takes 19–29 ms warm, against Cloud
 Run in the same region as the Apigee instance. Every request pays it, `GET`
@@ -116,8 +126,8 @@ isn't available.
   (2026-10-08); Apigee doesn't document it, and no setting was found to
   raise it. The answer carries the request body back (with no content in
   it, Apigee forwards an empty body), so a call whose body is over about
-  4 MiB fails at Apigee after the callout has answered. The
-  [reference bundle](apigee/README.md) then answers 503
+  4 MiB fails at Apigee after the callout has answered. A proxy failing
+  closed as above then answers 503
   `{"error": "policy ruleset cannot be applied"}`, as for an outage, while
   the callout's log shows an ordinary verdict. `RAIL_GATEWAY_GRPC_MAX_MESSAGE_MB`
   doesn't change this. The live e2e driver pins it: a 3.5 MiB call is

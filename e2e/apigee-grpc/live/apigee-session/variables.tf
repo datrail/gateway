@@ -26,7 +26,7 @@ variable "apigee_hostname" {
 }
 
 variable "apigee_env_type" {
-  description = "BASE, INTERMEDIATE or COMPREHENSIVE. The reference bundle needs only BASE."
+  description = "BASE, INTERMEDIATE or COMPREHENSIVE. apiproxy/ needs only BASE."
   type        = string
   default     = "BASE"
 }
