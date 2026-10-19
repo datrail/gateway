@@ -62,6 +62,11 @@ class RailCallout(ExternalCalloutServiceServicer):
             request.request.content.encode(),
             _read_header_values(request, "x-rail"),
             _read_header_values(request, "x-rail-status"),
+            [
+                (header, value)
+                for header, values in request.request.headers.items()
+                for value in values.strings
+            ],
         )
         if verdict.report is not None and self._reporter is not None:
             self._reporter.send(verdict.report)

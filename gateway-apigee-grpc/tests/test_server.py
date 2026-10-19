@@ -27,7 +27,7 @@ _SERVING = health_pb2.HealthCheckResponse.SERVING
 _NOT_SERVING = health_pb2.HealthCheckResponse.NOT_SERVING
 _MB = 1024 * 1024
 _BUNDLE = {
-    "schema_version": "1.0",
+    "schema_version": "2.0",
     "content_hash": "v1",
     "policies": [
         {"id": "5c8f1e42-0000-4000-8000-0000000000a1", "name": "P", "priority": 1}
@@ -207,7 +207,12 @@ async def _wait_until_live(port: int) -> None:
         # Before logging is configured.
         ({"RAIL_GATEWAY_LOG_LEVEL": "LOUD"}, "RAIL_GATEWAY_LOG_LEVEL must be one of"),
     ],
-    ids=["message limit", "port", "plugin on with no Rail Center", "log level"],
+    ids=[
+        "message limit",
+        "port",
+        "plugin on with no Rail Center",
+        "log level",
+    ],
 )
 def test_a_configuration_error_exits_2_before_serving(settings, named):
     callout = _start_callout(_create_environment(**settings))

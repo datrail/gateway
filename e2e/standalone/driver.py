@@ -6,6 +6,7 @@ import time
 import lib
 from lib import (
     await_denial,
+    await_last_denial,
     block,
     bundle_fetches,
     call_tool,
@@ -27,8 +28,8 @@ from lib import (
 
 GOOD = {"x-rail": os.environ["E2E_GOOD_TICKET"]}
 LOW_SCORE = {"x-rail": os.environ["E2E_LOW_SCORE_TICKET"]}
+LOW_SCORE_TICKET_ID = "5c8f1e42-0000-4000-8000-0000000000c2"
 
-P0 = "11111111-0000-4000-8000-000000000000"
 P1 = "11111111-0000-4000-8000-000000000001"
 P2 = "11111111-0000-4000-8000-000000000002"
 P3 = "11111111-0000-4000-8000-000000000003"
@@ -63,7 +64,16 @@ reset_journals()
 expect("initialize is not refused", 200, handshake_status(ENFORCE))
 expect("the call is refused 403", 403, status(ENFORCE, "track_package"))
 expect("no call reached the upstream", 0, forwarded_tool_calls())
-expect("it named P0, the rule that matched", 1, await_denial(1, P0))
+expect(
+    "the ticket fallback refused it, naming no policy",
+    1,
+    wait_for(denials_naming_no_policy, 1),
+)
+expect(
+    "and said which fallback",
+    "ticket",
+    (await_last_denial().get("metadata") or {}).get("fallback"),
+)
 # Catches a second report naming another rule, which the scoped count misses.
 settle()
 expect("exactly one denial was reported", 1, denials())
@@ -74,7 +84,11 @@ block(
 reset_journals()
 expect("initialize is not refused", 200, handshake_status(ENFORCE, LOW_SCORE))
 expect("the call is refused 403", 403, status(ENFORCE, "track_package", LOW_SCORE))
-expect("it named P1, not P0", 1, await_denial(1, P1))
+expect("it named P1", 1, await_denial(1, P1))
+# The ticket's id travels with the denial, and none of its claims do.
+low_denial = await_last_denial()
+expect("it carried the ticket's id", LOW_SCORE_TICKET_ID, low_denial.get("ticket_id"))
+expect("and no score", "<none>", low_denial.get("posture_score", "<none>"))
 
 block("enforce: a good ticket opens a session and its call is forwarded")
 reset_journals()
@@ -99,8 +113,7 @@ settle()
 expect("no denial was reported", 0, denials())
 
 block("enforce: an endpoint rule denies the call and not the handshake")
-# P2 (`endpoint_key`) and P3 (`skill_match`) are dropped from a keyless chain.
-# P3 holds against an absent key, so keeping it would refuse the handshake.
+# The handshake is a session message: forwarded unjudged, whatever P2 says.
 reset_journals()
 sid = open_session(ENFORCE, GOOD) or "none"
 expect("the handshake still succeeds", 1, 1 if sid != "none" else 0)
@@ -110,22 +123,14 @@ expect(
     status(ENFORCE, "forbidden_tool", {"Mcp-Session-Id": sid, **GOOD}),
 )
 expect("it named P2, the endpoint rule", 1, await_denial(1, P2))
-# A control character composes no key but keeps the full chain: only a rule that
-# holds against an absent key, like P3, can refuse it. Pins what P3 is.
+# A control character composes no key, so the call faces the whole chain with
+# `request.endpoint_key` absent: P3 is the rule that asks about that absence.
 expect(
     "a tool name that composes no key is refused 403",
     403,
     status(ENFORCE, "track_package\n", GOOD),
 )
-expect("it named P3, which holds against an absent key", 1, await_denial(1, P3))
-
-block("enforce: a call the ticket declares no skill for is denied by P3")
-# Any tool but `track_package` (declared) and `forbidden_tool` (P2's).
-reset_journals()
-expect(
-    "the unskilled call is refused 403", 403, status(ENFORCE, "undeclared_tool", GOOD)
-)
-expect("it named P3, the skill rule", 1, await_denial(1, P3))
+expect("it named P3, which holds on an absent key", 1, await_denial(1, P3))
 
 block("observe: the same verdict, acted on in no way")
 reset_journals()

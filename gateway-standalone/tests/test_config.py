@@ -591,16 +591,16 @@ def test_the_disabled_line_says_there_is_no_control_plane():
 
 @pytest.mark.parametrize("enforcement", ENFORCEMENTS)
 def test_each_posture_line_names_the_enforcement_it_describes(enforcement):
-    assert describe_enforcement(enforcement, "block", told=True).startswith(
-        f"enforcement={enforcement} — "
-    )
+    assert describe_enforcement(
+        enforcement, "block", ticket_fallback="pass", told=True
+    ).startswith(f"enforcement={enforcement} — ")
 
 
 def test_the_enforce_line_says_the_traffic_it_refuses():
     """Both refusals named, and the claim this line used to carry — that
     enforcement is not implemented and the mode behaves as observe — may not
     come back."""
-    line = describe_enforcement("enforce", "block", told=True)
+    line = describe_enforcement("enforce", "block", ticket_fallback="pass", told=True)
 
     assert "403" in line and "503" in line
     assert "reported to Rail Center" in line
@@ -609,7 +609,7 @@ def test_the_enforce_line_says_the_traffic_it_refuses():
 
 
 def test_the_observe_line_says_nothing_is_blocked():
-    line = describe_enforcement("observe", "block", told=True)
+    line = describe_enforcement("observe", "block", ticket_fallback="pass", told=True)
 
     assert "nothing is blocked" in line
     assert "403" not in line and "503" not in line
@@ -620,7 +620,7 @@ def test_the_none_posture_line_says_it_keeps_polling():
     """The half that is easy to leave out and is the whole of RC-312 on this
     side: a gateway told `none` is still listening, so an operator can move it
     back without a redeploy."""
-    line = describe_enforcement("none", "block", told=True)
+    line = describe_enforcement("none", "block", ticket_fallback="pass", told=True)
 
     assert "forwarded" in line
     assert "keeps polling" in line
@@ -631,7 +631,9 @@ def test_the_none_posture_line_says_it_keeps_polling():
 def test_the_fallback_is_named_only_where_it_decides_something(enforcement):
     """It is consulted at `enforce` and nowhere else, so a line mentioning it
     anywhere else invites an operator to think it applies there."""
-    assert "fallback" not in describe_enforcement(enforcement, "pass", told=True)
+    assert "fallback" not in describe_enforcement(
+        enforcement, "pass", ticket_fallback="pass", told=True
+    )
 
 
 def test_an_untold_posture_says_rail_center_named_none_rather_than_chose_none():
@@ -644,7 +646,7 @@ def test_an_untold_posture_says_rail_center_named_none_rather_than_chose_none():
     control plane that said nothing at all — and the operator it misleads is
     the one whose gateway has just stopped judging anything.
     """
-    line = describe_enforcement("none", "block", told=False)
+    line = describe_enforcement("none", "block", ticket_fallback="pass", told=False)
 
     assert line.startswith("enforcement=none — ")
     assert "Rail Center says" not in line
@@ -663,24 +665,48 @@ def test_the_told_and_untold_none_lines_are_not_each_other():
     downstream could act on; `_refresh_once` dedupes on the rendered line, so
     equal text here is a Rail Center upgrade that never reports itself.
     """
-    assert describe_enforcement("none", "block", told=False) != describe_enforcement(
-        "none", "block", told=True
-    )
+    assert describe_enforcement(
+        "none", "block", ticket_fallback="pass", told=False
+    ) != describe_enforcement("none", "block", ticket_fallback="pass", told=True)
 
 
 def test_an_untold_posture_reads_the_same_whatever_fallback_it_resolved_to():
     """The fallback is not consulted at `none`, told or untold."""
-    assert describe_enforcement("none", "block", told=False) == describe_enforcement(
-        "none", "pass", told=False
-    )
+    assert describe_enforcement(
+        "none", "block", ticket_fallback="pass", told=False
+    ) == describe_enforcement("none", "pass", ticket_fallback="pass", told=False)
 
 
 def test_the_enforce_line_says_what_each_fallback_does_to_an_unbound_endpoint():
     """The pair whose meaning RC-312 corrected, so the two lines must differ in
     the direction the correction went: `pass` is not "unjudged"."""
-    blocked = describe_enforcement("enforce", "block", told=True)
-    passed = describe_enforcement("enforce", "pass", told=True)
+    blocked = describe_enforcement(
+        "enforce", "block", ticket_fallback="pass", told=True
+    )
+    passed = describe_enforcement("enforce", "pass", ticket_fallback="pass", told=True)
 
     assert "fallback=block" in blocked and "without consulting the chain" in blocked
     assert "fallback=pass" in passed and "judged by the whole chain" in passed
     assert "unjudged" not in passed
+
+
+def test_the_enforce_line_says_what_each_ticket_fallback_does():
+    """`_refresh_once` logs only when this line changes, so a ticket fallback
+    the line leaves out is a move to `block` that refuses every unticketed call
+    and logs nothing."""
+    blocked = describe_enforcement(
+        "enforce", "pass", ticket_fallback="block", told=True
+    )
+    passed = describe_enforcement("enforce", "pass", ticket_fallback="pass", told=True)
+
+    assert "ticket_fallback=block" in blocked
+    assert "no usable ticket is refused" in blocked
+    assert "ticket_fallback=pass" in passed
+    assert "no usable ticket is judged by the chain" in passed
+
+
+@pytest.mark.parametrize("enforcement", ["none", "observe"])
+def test_the_ticket_fallback_is_named_only_where_it_decides_something(enforcement):
+    assert "ticket_fallback" not in describe_enforcement(
+        enforcement, "pass", ticket_fallback="block", told=True
+    )

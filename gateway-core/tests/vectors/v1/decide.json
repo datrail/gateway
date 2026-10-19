@@ -590,11 +590,12 @@
       "endpoint_key": "/mcp#tools/call#track_package",
       "now": 1700000000,
       "claims": {
-        "exp": 4102444800
+        "agent_id": "agent-1",
+        "exp": "4102444800"
       },
       "holds": true,
       "ticket_state": "malformed",
-      "note": "No string agent_id, so the payload is readable and is not a ticket."
+      "note": "An `exp` that is not a number: the payload is readable and is not a ticket. (The reader no longer requires `agent_id`, in either grammar.)"
     },
     {
       "name": "x_rail_header is present for a valid ticket",

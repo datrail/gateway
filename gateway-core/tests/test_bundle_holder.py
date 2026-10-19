@@ -42,7 +42,7 @@ TWO = "5c8f1e42-0000-4000-8000-0000000000a2"
 
 
 def bundle(
-    content_hash: str = "v1", *, policies: Any = None, schema_version: str = "1.0"
+    content_hash: str = "v1", *, policies: Any = None, schema_version: str = "2.0"
 ) -> dict:
     return {
         "schema_version": schema_version,
@@ -209,7 +209,7 @@ async def test_a_bundle_in_a_shape_this_reader_does_not_know_keeps_the_one_held(
     """
     h = holder(
         httpx.Response(200, json=bundle("v1")),
-        httpx.Response(200, json=bundle("v2", schema_version="2.0")),
+        httpx.Response(200, json=bundle("v2", schema_version="3.0")),
     )
     await h.refresh()
 
@@ -218,8 +218,8 @@ async def test_a_bundle_in_a_shape_this_reader_does_not_know_keeps_the_one_held(
     assert outcome.kind == "unusable"
     assert outcome.held == "v1"
     assert h.current().content_hash == "v1"
-    assert "2.0" in outcome.reason
-    assert "1.x" in outcome.reason
+    assert "3.0" in outcome.reason
+    assert "2.x" in outcome.reason
 
 
 @pytest.mark.asyncio
@@ -231,7 +231,7 @@ async def test_an_unknown_shape_on_a_first_fetch_holds_nothing() -> None:
     the same state as a control plane that is down — and the log line is what
     tells the two apart.
     """
-    h = holder(httpx.Response(200, json=bundle("v1", schema_version="2.0")))
+    h = holder(httpx.Response(200, json=bundle("v1", schema_version="3.0")))
 
     outcome = await h.refresh()
 
@@ -249,12 +249,12 @@ async def test_a_higher_minor_is_held_like_any_other_bundle() -> None:
     number that announces the field would put every component on a lockstep
     upgrade with its control plane for no gain.
     """
-    h = holder(httpx.Response(200, json=bundle("v9", schema_version="1.7")))
+    h = holder(httpx.Response(200, json=bundle("v9", schema_version="2.7")))
 
     outcome = await h.refresh()
 
     assert outcome.kind == "replaced"
-    assert h.current().schema_version == "1.7"
+    assert h.current().schema_version == "2.7"
 
 
 @pytest.mark.asyncio
@@ -442,7 +442,7 @@ async def test_a_body_past_the_bound_is_refused_even_when_it_lies_about_its_leng
     h = holder(
         httpx.Response(
             200,
-            content=b'{"schema_version":"1.0","content_hash":"v2",'
+            content=b'{"schema_version":"2.0","content_hash":"v2",'
             b'"policies":[],"bindings":[]}' + b" " * 4000,
             headers={"content-length": "10"},
         ),
@@ -917,11 +917,11 @@ async def test_the_holding_line_names_the_content_hash_and_the_schema_version(
     Both values are named, and neither is the other: the hash says *which*
     bundle, the schema version says *which contract it was read against*.
 
-    `1.4` rather than a version from nowhere: the minor is what varies without
+    `2.4` rather than a version from nowhere: the minor is what varies without
     being refused, so it is the only part that can carry a distinctive value
     here and still reach the line this test is about.
     """
-    body = {**bundle("hash-7f3a"), "schema_version": "1.4"}
+    body = {**bundle("hash-7f3a"), "schema_version": "2.4"}
     h = holder(httpx.Response(200, json=body))
 
     with caplog.at_level(logging.INFO, logger="gateway"):
@@ -929,7 +929,7 @@ async def test_the_holding_line_names_the_content_hash_and_the_schema_version(
 
     said = "\n".join(r.getMessage() for r in caplog.records)
     assert "holding policy bundle hash-7f3a" in said
-    assert "schema 1.4" in said
+    assert "schema 2.4" in said
 
 
 @pytest.mark.asyncio
@@ -1023,6 +1023,42 @@ async def test_a_fallback_that_moves_under_one_mode_is_logged(
 
     said = "\n".join(r.getMessage() for r in caplog.records)
     assert "fallback=pass" in said
+
+
+@pytest.mark.asyncio
+async def test_a_ticket_fallback_that_moves_under_enforce_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """At `enforce` a `block` ticket fallback refuses every call carrying no
+    usable ticket, so moving to it is a posture change an operator must be
+    told about — the one line that explains a wall of 403s."""
+    h = holder(
+        httpx.Response(
+            200,
+            json={
+                **bundle("v1"),
+                "enforcement": {"mode": "enforce"},
+                "binding_fallback": "pass",
+                "ticket_fallback": "pass",
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                **bundle("v2"),
+                "enforcement": {"mode": "enforce"},
+                "binding_fallback": "pass",
+                "ticket_fallback": "block",
+            },
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="gateway"):
+        await h.refresh()
+        caplog.clear()
+        await h.refresh()
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "ticket_fallback=block" in said
 
 
 @pytest.mark.asyncio

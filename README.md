@@ -35,11 +35,13 @@ ticket, the gateway parses it and makes an enforcement decision. They share no
 runtime library, and their only shared boundary is the `x-rail` wire contract,
 which keeps the proxy from learning claims it must treat as opaque.
 
-The gateway targets `x-rail` `v1.0`, at `datrail/x-rail-spec` commit
-`1282f71495d9b585b6562255f5194f0754e3d586`. A wire change lands in
-x-rail-spec first, under a new version; the proxy and the gateway then update
-this pin and their conformance tests. The gateway's release versions do not
-version the wire contract.
+The gateway reads the `x-rail` header as `v1.0` encodes it, at
+`datrail/x-rail-spec` commit `1282f71495d9b585b6562255f5194f0754e3d586`. The
+payload it reads is the nested ticket in
+[`schemas/x-rail-ticket.schema.json`](schemas/x-rail-ticket.schema.json) —
+`id`, `posture` and `alignment` in place of `v1.0`'s flat `posture_score`,
+`tier` and `scored_at` — which that pin does not yet describe. The gateway's
+release versions do not version the wire contract.
 
 The schemas in [`schemas/`](schemas/) define the ticket, bundle, and
 denial-event wire shapes.

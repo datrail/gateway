@@ -166,7 +166,7 @@ async def test_a_bundle_that_will_not_validate_leaves_the_gateway_unready():
     which is a different fault from an unreachable one and the same report."""
 
     def missing_its_policies() -> httpx.Response:
-        return httpx.Response(200, json={"schema_version": "1.0", "content_hash": "v1"})
+        return httpx.Response(200, json={"schema_version": "2.0", "content_hash": "v1"})
 
     app = build_app(
         [one_route(UPSTREAM)],

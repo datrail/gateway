@@ -6,7 +6,12 @@ import httpx
 import pytest
 
 from gateway.core.errors import ConfigError
-from gateway.core.settings import DEFAULT_PORT, _safe_to_log, build_holder, port
+from gateway.core.settings import (
+    DEFAULT_PORT,
+    _safe_to_log,
+    build_holder,
+    port,
+)
 
 
 def test_port_defaults(monkeypatch):

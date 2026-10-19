@@ -1,10 +1,10 @@
 {
-  "_comment": "Conformance vectors for the policy bundle validator, written as data so a reimplementation in another language is answerable to the same cases. They come from rail-center's docs/policy-evaluation-contract.md, which specifies what makes a bundle unusable and what a usable one resolves to.\n\nEach case carries `bundle` and `usable`. A usable case also carries the `chain` it resolves to, as canonical ids in evaluation order, and the `bindings` it indexes, keyed by endpoint with policy_ids as a sorted list. An unusable case carries none of those — the refusal is the whole assertion, and the message that comes with it is an operator's text rather than a contract.\n\nA usable case also carries `chain_priorities`, the priorities the chain orders by; `chain_conditions` and `chain_actions`, the two values this module carries unread and the walk decides on; and `chain_names`: what an operator would read for each policy, which is the policy's name where it has a readable one and its id where it does not. A denial report carries neither — it names the policy id and Rail Center resolves the rest.\n\n`note` says why a case exists where its name does not.\n\nWhat these do NOT cover. Whether a condition is evaluable: that refusal is lazy by design, taken where the walk reaches it, so an earlier policy which already denied still answers cleanly. Conditions travel through this validator unread.",
+  "_comment": "Conformance vectors for the policy bundle validator, written as data so a reimplementation in another language is answerable to the same cases. They come from rail-center's docs/policy-evaluation-contract.md, which specifies what makes a bundle unusable and what a usable one resolves to.\n\nEach case carries `bundle` and `usable`. A usable case also carries the `chain` it resolves to, as canonical ids in evaluation order, and the `bindings` it indexes, keyed by endpoint with policy_ids as a sorted list. An unusable case carries none of those — the refusal is the whole assertion, and the message that comes with it is an operator's text rather than a contract.\n\nA usable case also carries `chain_priorities`, the priorities the chain orders by; `chain_conditions` and `chain_actions`, the two values this module carries unread and the walk decides on; and `chain_names`: what an operator would read for each policy, which is the policy's name where it has a readable one and its id where it does not. A denial report carries neither — it names the policy id and Rail Center resolves the rest.\n\nA usable case may carry `ticket_fallback`, what a call with no usable ticket meets; where it is absent the case says nothing about it.\n\n`note` says why a case exists where its name does not.\n\nWhat these do NOT cover. Whether a condition is evaluable: that refusal is lazy by design, taken where the walk reaches it, so an earlier policy which already denied still answers cleanly. Conditions travel through this validator unread.",
   "cases": [
     {
       "name": "the contract's worked example",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -13,8 +13,8 @@
             "name": "P1 — Deny critical-tier agents",
             "priority": 1,
             "condition": {
-              "field": "posture_score",
-              "operator": "lt",
+              "path": "ticket.posture.overall.score",
+              "op": "lt",
               "value": 40
             },
             "action": "block",
@@ -45,8 +45,8 @@
       ],
       "chain_conditions": [
         {
-          "field": "posture_score",
-          "operator": "lt",
+          "path": "ticket.posture.overall.score",
+          "op": "lt",
           "value": 40
         }
       ],
@@ -73,7 +73,7 @@
     {
       "name": "an empty bindings list narrows nothing, so the whole chain applies",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -117,7 +117,7 @@
     {
       "name": "a disabled policy is not in the chain",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -156,7 +156,7 @@
     {
       "name": "switching one of two policies sharing an id off is a working remedy",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -196,7 +196,7 @@
     {
       "name": "a policy carrying no enabled key is enabled",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -230,7 +230,7 @@
     {
       "name": "enabled is settled before anything is validated",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -269,7 +269,7 @@
     {
       "name": "the chain orders by priority ascending, not as listed",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -323,7 +323,7 @@
     {
       "name": "a tie breaks by the canonical id, not by the spelling that arrived",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -367,7 +367,7 @@
     {
       "name": "a tie breaks by canonical id, not by position",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -421,7 +421,7 @@
     {
       "name": "a priority written as a whole float is that integer",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -455,7 +455,7 @@
     {
       "name": "a negative priority orders ahead of a positive one",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -498,7 +498,7 @@
     {
       "name": "every accepted id spelling normalises to the same policy",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -591,7 +591,7 @@
     {
       "name": "a bound id naming no policy binds nothing, and is not an error",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -640,7 +640,7 @@
     {
       "name": "a bound id naming a disabled policy binds nothing either",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -694,7 +694,7 @@
     {
       "name": "a policy with no readable name is named by its id",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -728,7 +728,7 @@
     {
       "name": "a policy with no name key is named by its id",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -761,7 +761,7 @@
     {
       "name": "a policy named with the empty string keeps that name",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -795,7 +795,7 @@
     {
       "name": "a policy whose name is a number is named by its id too",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -828,7 +828,7 @@
     {
       "name": "a policy enabled with a value that is falsy in one language only",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -874,7 +874,7 @@
     {
       "name": "hyphens are counted nowhere, so an oddly grouped id still names its policy",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -908,7 +908,7 @@
     {
       "name": "a policy enabled with zero is still enabled",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -943,7 +943,7 @@
     {
       "name": "a priority at the largest value a double separates",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -987,7 +987,7 @@
     {
       "name": "an endpoint key is carried exactly as it arrived",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1032,7 +1032,7 @@
     {
       "name": "an endpoint key is not normalised either",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1077,7 +1077,7 @@
     {
       "name": "an endpoint key may carry what a content hash may not",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1136,7 +1136,7 @@
     {
       "name": "a content hash is carried exactly as it arrived",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": " A3F1c09E⁵b2D4485 ",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1170,7 +1170,7 @@
     {
       "name": "a content hash of exactly the length an endpoint key may be",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1203,7 +1203,7 @@
     {
       "name": "the URN prefix is matched whatever its case",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1237,7 +1237,7 @@
     {
       "name": "a braced URN is both spellings at once",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1271,7 +1271,7 @@
     {
       "name": "an upper-case URN prefix on an undashed id",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1305,7 +1305,7 @@
     {
       "name": "a minus in front of a whole id is stripped like any other hyphen",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1339,7 +1339,7 @@
     {
       "name": "unrecognised keys are accepted rather than refused",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1387,7 +1387,7 @@
     {
       "name": "a bundle with no policies at all is usable and allows",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [],
@@ -1410,7 +1410,7 @@
     {
       "name": "no policies key at all",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "bindings": []
@@ -1421,7 +1421,7 @@
     {
       "name": "no bindings key at all",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": []
@@ -1446,7 +1446,7 @@
     {
       "name": "an empty content hash",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [],
@@ -1457,7 +1457,7 @@
     {
       "name": "a content hash that is not a string",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": 17,
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [],
@@ -1468,7 +1468,7 @@
     {
       "name": "a content hash carrying a newline",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1\nc09e",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [],
@@ -1480,7 +1480,7 @@
     {
       "name": "a content hash carrying a zero-width space",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1​c09e",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [],
@@ -1491,7 +1491,7 @@
     {
       "name": "a content hash carrying a line separator",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1 c09e",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [],
@@ -1503,7 +1503,7 @@
     {
       "name": "a content hash carrying a paragraph separator",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1 c09e",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [],
@@ -1514,7 +1514,7 @@
     {
       "name": "a content hash past the length an endpoint key may be",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [],
@@ -1525,7 +1525,7 @@
     {
       "name": "two bindings for one endpoint whose key carries a newline",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1554,7 +1554,7 @@
     {
       "name": "a binding whose key carries a newline and whose id cannot be compared",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -1579,7 +1579,7 @@
     {
       "name": "an endpoint_key that is a long list",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2104,7 +2104,7 @@
     {
       "name": "an endpoint_key that is a list carrying a newline",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2130,7 +2130,7 @@
     {
       "name": "a refusal naming an endpoint_key that carries an escape sequence",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2154,7 +2154,7 @@
     {
       "name": "a refusal naming an endpoint_key that carries a newline",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2178,7 +2178,7 @@
     {
       "name": "a refusal naming both an unreadable mode and an unreadable key",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2202,7 +2202,7 @@
     {
       "name": "a binding whose mode carries a bidi override",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2225,7 +2225,7 @@
     {
       "name": "a binding naming an id that carries a null byte",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2250,7 +2250,7 @@
     {
       "name": "a policy id carrying an escape sequence",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2267,7 +2267,7 @@
     {
       "name": "policies is not a list",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": {},
@@ -2278,7 +2278,7 @@
     {
       "name": "bindings is not a list",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [],
@@ -2289,7 +2289,7 @@
     {
       "name": "a policy that is not an object",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2302,7 +2302,7 @@
     {
       "name": "a refusal naming a policy entry that is a string with a newline",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2316,7 +2316,7 @@
     {
       "name": "a refusal naming a priority that carries a newline",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2334,7 +2334,7 @@
     {
       "name": "a refusal naming a priority four thousand digits long",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2352,7 +2352,7 @@
     {
       "name": "a policy id that cannot be compared",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2369,7 +2369,7 @@
     {
       "name": "a policy with no id at all",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2385,7 +2385,7 @@
     {
       "name": "a policy whose id is null",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2402,7 +2402,7 @@
     {
       "name": "a policy id that is not a string",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2419,7 +2419,7 @@
     {
       "name": "a policy id that is thirty-two digits and not a string",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2437,7 +2437,7 @@
     {
       "name": "a policy id one hex digit short",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2455,7 +2455,7 @@
     {
       "name": "a policy id one hex digit long",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2473,7 +2473,7 @@
     {
       "name": "a policy id padded with spaces",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2491,7 +2491,7 @@
     {
       "name": "a policy id padded with a tab and a newline",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2509,7 +2509,7 @@
     {
       "name": "a policy id padded on the left only",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2527,7 +2527,7 @@
     {
       "name": "a policy id padded on the right only",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2544,7 +2544,7 @@
     {
       "name": "a braced id padded inside its braces",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2562,7 +2562,7 @@
     {
       "name": "a binding naming an id padded with spaces",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2588,7 +2588,7 @@
     {
       "name": "an id opened with a brace and not closed",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2606,7 +2606,7 @@
     {
       "name": "an id closed with a brace and not opened",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2624,7 +2624,7 @@
     {
       "name": "doubled braces around an id",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2642,7 +2642,7 @@
     {
       "name": "an id carrying an interior urn:uuid: prefix",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2660,7 +2660,7 @@
     {
       "name": "an id carrying an interior uuid: prefix",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2678,7 +2678,7 @@
     {
       "name": "an id of thirty-three characters carrying an underscore",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2696,7 +2696,7 @@
     {
       "name": "an id carrying an underscore in place of a digit",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2714,7 +2714,7 @@
     {
       "name": "an id carrying a leading plus",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2732,7 +2732,7 @@
     {
       "name": "an id written in Arabic-Indic digits",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2750,7 +2750,7 @@
     {
       "name": "an id padded after its URN prefix",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2768,7 +2768,7 @@
     {
       "name": "a leading minus in place of a digit",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2786,7 +2786,7 @@
     {
       "name": "an opening brace in front of thirty-three hex digits",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2804,7 +2804,7 @@
     {
       "name": "thirty-three hex digits with a closing brace behind them",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2822,7 +2822,7 @@
     {
       "name": "an undashed id closed with a brace but not opened",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2840,7 +2840,7 @@
     {
       "name": "a policy id of the right length that is not hex",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2858,7 +2858,7 @@
     {
       "name": "a policy id whose last digit is not hex",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2876,7 +2876,7 @@
     {
       "name": "one policy id appearing twice",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2899,7 +2899,7 @@
     {
       "name": "one policy id appearing twice in different spellings",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2922,7 +2922,7 @@
     {
       "name": "a policy with no priority",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2939,7 +2939,7 @@
     {
       "name": "a fractional priority",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2956,7 +2956,7 @@
     {
       "name": "a boolean priority",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2974,7 +2974,7 @@
     {
       "name": "a priority past what a double separates",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -2991,7 +2991,7 @@
     {
       "name": "a priority past the negative end of what a double separates",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3009,7 +3009,7 @@
     {
       "name": "a priority written as a string",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3026,7 +3026,7 @@
     {
       "name": "a binding that is not an object",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3045,7 +3045,7 @@
     {
       "name": "a binding that is a list",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3064,7 +3064,7 @@
     {
       "name": "a refusal naming a binding entry that is a string with a newline",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3084,7 +3084,7 @@
     {
       "name": "a binding whose endpoint_key is not a string",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3108,7 +3108,7 @@
     {
       "name": "two bindings for one endpoint",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3138,7 +3138,7 @@
     {
       "name": "a mode in the wrong case",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3164,7 +3164,7 @@
     {
       "name": "a mode with surrounding whitespace",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3189,7 +3189,7 @@
     {
       "name": "a mode outside gated and open",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3213,7 +3213,7 @@
     {
       "name": "a missing mode",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3235,7 +3235,7 @@
     {
       "name": "a refusal naming a key with a newline whose policy_ids is not a list",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3259,7 +3259,7 @@
     {
       "name": "a refusal naming a key with a newline on an open binding that names policies",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3285,7 +3285,7 @@
     {
       "name": "an open binding whose policy_ids is an empty string",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3309,7 +3309,7 @@
     {
       "name": "policy_ids given as an object",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3335,7 +3335,7 @@
     {
       "name": "policy_ids given as a string",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3359,7 +3359,7 @@
     {
       "name": "an open binding that still names policies",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3384,7 +3384,7 @@
     {
       "name": "a gated binding naming no policy",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3408,7 +3408,7 @@
     {
       "name": "a binding naming an id that cannot be compared",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3433,7 +3433,7 @@
     {
       "name": "a binding naming a null id",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3458,7 +3458,7 @@
     {
       "name": "a bad binding is refused even when an earlier one is fine",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3487,7 +3487,7 @@
     {
       "name": "a bundle whose ninth policy cannot be ordered is refused whole",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "generated_at": "2026-07-28T20:41:07.512247Z",
         "policies": [
@@ -3497,8 +3497,8 @@
             "priority": 1,
             "action": "block",
             "condition": {
-              "field": "x_rail_header",
-              "operator": "present"
+              "path": "ticket",
+              "op": "existing"
             }
           },
           {
@@ -3550,7 +3550,7 @@
     {
       "name": "a higher minor of the supported major is read",
       "bundle": {
-        "schema_version": "1.1",
+        "schema_version": "2.1",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3567,7 +3567,7 @@
     {
       "name": "a minor far ahead of this reader is still read",
       "bundle": {
-        "schema_version": "1.99",
+        "schema_version": "2.99",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3584,7 +3584,7 @@
     {
       "name": "a minor behind this reader is read",
       "bundle": {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3601,7 +3601,7 @@
     {
       "name": "a leading zero in the major is read",
       "bundle": {
-        "schema_version": "01.0",
+        "schema_version": "02.0",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3618,7 +3618,7 @@
     {
       "name": "a different major is refused",
       "bundle": {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3640,7 +3640,7 @@
     {
       "name": "a version with no minor is refused",
       "bundle": {
-        "schema_version": "1",
+        "schema_version": "2",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3651,7 +3651,7 @@
     {
       "name": "a three-part version is refused",
       "bundle": {
-        "schema_version": "1.0.0",
+        "schema_version": "2.0.0",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3662,7 +3662,7 @@
     {
       "name": "a pre-release suffix is refused",
       "bundle": {
-        "schema_version": "1.0-rc1",
+        "schema_version": "2.0-rc1",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3673,7 +3673,7 @@
     {
       "name": "non-ASCII digits are refused",
       "bundle": {
-        "schema_version": "١.٠",
+        "schema_version": "٢.٠",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3684,7 +3684,7 @@
     {
       "name": "fullwidth digits are refused",
       "bundle": {
-        "schema_version": "１.０",
+        "schema_version": "２.０",
         "content_hash": "a3f1c09e7b2d4485",
         "policies": [],
         "bindings": []
@@ -3702,6 +3702,51 @@
       },
       "usable": false,
       "note": "The grammar is the whole of what leaves a run of digits for the reader to convert, so a part made of something else is refused by the grammar rather than by the conversion."
+    },
+    {
+      "name": "a 1.x bundle that names a ticket fallback is held to it",
+      "bundle": {
+        "schema_version": "1.0",
+        "content_hash": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "ticket_fallback": "block"
+      },
+      "usable": true,
+      "chain": [],
+      "chain_priorities": [],
+      "chain_conditions": [],
+      "chain_actions": [],
+      "chain_names": [],
+      "bindings": {},
+      "ticket_fallback": "block",
+      "note": "A 1.x bundle predates the field and reads its absence as `pass`, but one that states it means it. Read as `pass` here, every call without a usable ticket is judged by a chain Rail Center said should never see it."
+    },
+    {
+      "name": "a ticket fallback in the wrong case refuses the bundle",
+      "bundle": {
+        "schema_version": "2.0",
+        "content_hash": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "ticket_fallback": "BLOCK"
+      },
+      "usable": false,
+      "note": "The vocabulary is `block` and `pass`, exactly. A reader that tests only for `block` reads this as `pass` and admits every unticketed call Rail Center meant to refuse."
+    },
+    {
+      "name": "a ticket fallback outside the vocabulary refuses the bundle",
+      "bundle": {
+        "schema_version": "2.0",
+        "content_hash": "a3f1c09e7b2d4485",
+        "generated_at": "2026-07-28T20:41:07.512247Z",
+        "policies": [],
+        "bindings": [],
+        "ticket_fallback": "allow"
+      },
+      "usable": false
     }
   ]
 }

@@ -42,7 +42,8 @@ says it happened.
 - `rc-mappings/` serves the policy bundle and accepts denials. Each bundle
   matches one credential's `Authorization`; the table below gives its posture.
 - `mcp-mappings/` answers as an MCP server.
-- `tickets.env` holds two `x-rail` tickets: unsigned base64url JSON.
+- `tickets.env` holds two `x-rail` tickets: unsigned base64url JSON, in the
+  nested shape Rail Center stores — an `id`, `posture.overall` and `alignment`.
 - `lib.py` holds the driver's helpers, standard library only.
 
 A stub whose body uses handlebars must declare
@@ -66,12 +67,15 @@ pass-through is not the same as a bundle saying `mode: none`, which still polls.
 
 What the driver asserts:
 - exactly three gateways fetch a bundle at startup;
-- without a ticket, and with a low-posture one, the handshake passes, the call
-  is refused, and the denial names the rule that matched (P0, P1);
+- without a ticket the handshake passes and the call is refused by the
+  bundle's `ticket_fallback`, reported with no `policy_id` and
+  `metadata.fallback: "ticket"`; with a low-posture one the call is refused by
+  P1, `ticket.posture.overall.score lt 40`, and the denial carries the ticket's
+  `id` as `ticket_id` and no score;
 - a good ticket's call is forwarded, with no denial;
-- an endpoint rule (P2) refuses the call but not the handshake; a tool name that
-  composes no key is refused by P3, the rule that holds against an absent key;
-- an undeclared skill is refused by P3;
+- an endpoint rule (P2, on `request.endpoint_key`) refuses the call but not the
+  handshake; a tool name that composes no key is refused by P3,
+  `request.endpoint_key not_existing`;
 - `observe` and the pass-through refuse and report nothing;
 - `fallback: block` forwards the bound call and refuses an unbound one, reporting
   a denial with no `policy_id`;

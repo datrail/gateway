@@ -14,7 +14,11 @@ from typing import Any
 import httpx
 
 from gateway.core.bundle.client import BundleHolder
-from gateway.core.bundle.conditions import ConditionInput, UninterpretableCondition
+from gateway.core.bundle.conditions import (
+    ConditionInput,
+    UninterpretableCondition,
+    request_headers,
+)
 from gateway.core.bundle.decide import decide, refuses_unbound
 from gateway.core.bundle.validate import Policy, UsableBundle
 from gateway.core.denial import build_report, report
@@ -55,6 +59,9 @@ class Denial:
     bundle: UsableBundle
     #: Every `x-rail-status` value the caller sent, unread.
     claimed_status: list[str] | None
+    #: Which fallback refused the call — `ticket` or `binding` — or None where
+    #: a policy did.
+    fallback: str | None = None
 
 
 @dataclass(frozen=True)
@@ -76,9 +83,12 @@ def judge(
     body: bytes,
     x_rail: list[str] | None,
     claimed_status: list[str] | None,
+    headers: list[tuple[str, str]] | None = None,
 ) -> Verdict:
     """What to do with one call: `body` as received, `path` as the upstream
-    serves it, and every `x-rail` and `x-rail-status` value the caller sent.
+    serves it, every `x-rail` and `x-rail-status` value the caller sent, and
+    every header as a `(name, value)` pair — what a condition's
+    `request.headers` reads.
 
     Never raises. A defect in the walk must not take the forward path down:
     an unforeseen exception is logged with its traceback and the request
@@ -142,6 +152,32 @@ def judge(
     # two spellings of it that can drift apart.
     keyless = resolution.status == "keyless"
 
+    # **No usable ticket is the bundle's `ticket_fallback` to decide**, asked
+    # before the binding fallback and the chain and acted on the same way: at
+    # `enforce` only, logged at `observe`. `pass` walks the chain with every
+    # `ticket.*` path absent.
+    if ticket.state != "valid" and bundle.ticket_fallback == "block":
+        if not blocking:
+            log.warning(
+                "would deny %s (ticket %s, ticket_fallback=block) — this mode "
+                "enforces nothing, so it was forwarded",
+                named,
+                ticket.state,
+            )
+        else:
+            log.warning(
+                "denied %s (ticket %s, ticket_fallback=block); no policy judged it",
+                named,
+                ticket.state,
+            )
+            # Told what any denied caller is told, for the reason the binding
+            # fallback below gives.
+            return Verdict(
+                403,
+                "denied by policy",
+                Denial(resolution, ticket, None, bundle, claimed_status, "ticket"),
+            )
+
     unbound = refuses_unbound(bundle, resolution.key, keyless=keyless)
     if unbound and not blocking:
         # **Said, and then not acted on — which is the whole distinction.**
@@ -179,13 +215,17 @@ def judge(
         return Verdict(
             403,
             "denied by policy",
-            Denial(resolution, ticket, None, bundle, claimed_status),
+            Denial(resolution, ticket, None, bundle, claimed_status, "binding"),
         )
 
     try:
         decision = decide(
             bundle,
-            ConditionInput(ticket=ticket, endpoint_key=resolution.key),
+            ConditionInput(
+                ticket=ticket,
+                endpoint_key=resolution.key,
+                headers=request_headers(headers or []),
+            ),
             keyless=keyless,
         )
     except UninterpretableCondition as refusal:
@@ -326,9 +366,9 @@ class DenialReporter:
             endpoint_key=_reportable_key(denial.bundle, denial.resolution.key),
             endpoint_status=denial.resolution.status,
             ticket_state=denial.ticket.state,
-            agent_id=claims.get("agent_id"),
-            posture_score=claims.get("posture_score"),
+            ticket_id=claims.get("id"),
             claimed_status=_claimed_status(denial.claimed_status),
+            fallback=denial.fallback,
         )
         task = asyncio.create_task(
             report(self._rail_center_url, body, self._auth, transport=self._transport)

@@ -58,8 +58,7 @@ from dataclasses import dataclass, field
 from gateway.core.bundle.conditions import (
     ConditionInput,
     UninterpretableCondition,
-    holds,
-    keys_on_endpoint,
+    grammar,
 )
 from gateway.core.bundle.validate import Policy, UsableBundle
 
@@ -114,53 +113,28 @@ def chain_for(
     the bundle is written. Copying that here makes the two sides disagree —
     deny there, allow here — on a bundle Rail Center did not produce.
 
-    **A call naming no endpoint is judged by every rule that can meaningfully
-    ask about it, and by no others.** There is no key to look up, so no binding
-    narrows — but the two endpoint-derived fields are dropped from the chain,
-    because a rule keyed on one of them asks a question with no subject.
-
-    That is not the same as letting them resolve to absent. Absent is the answer
-    that makes ``skill_match missing`` **hold**, so a chain carrying the seeded
-    "deny an agent without a matching skill" would deny `initialize`,
-    `notifications/initialized` and `tools/list` — every message a session opens
-    with — for an agent whose declared skills are exactly right. The rule is
-    about whether this agent may call *this* endpoint, and there is no endpoint.
-
-    Everything else still applies, which is the half worth keeping: ``deny
-    unknown agents`` keys on the ticket rather than the endpoint, so a caller
-    with no ticket is still stopped at the first keyless message that can
-    return content — ``resources/read``, ``prompts/get``. The session messages
-    themselves (``initialize``, ``tools/list`` and the rest of
-    `core.endpoint.DISCOVERY_METHODS`) never reach this walk: the
-    enforcement layer forwards them unjudged, because a binding cannot narrow a
-    message that names no endpoint, and judging one would let a rule bound to a
-    single endpoint close the whole session.
-
-    **Rail Center's evaluator needs this rule too.** The contract takes no
-    position on a call that names no endpoint, so until both sides carry it the
-    two disagree on exactly the messages a session opens with.
-
-    **`keyless` is what earns the narrowing, not the absent key.** Two very
-    different messages arrive here with `endpoint_key=None`: one that names no
-    tool *by design* — `initialize`, `tools/list` — and a `tools/call` that
-    named a tool this gateway declined to compose a key for, because the name
-    was missing, unsafe or too long. Only the first has no subject for an
-    endpoint-derived rule to ask about; the second named an endpoint and is
-    evidence of drift or garbage, so it faces the whole chain and
-    ``skill_match missing`` holds against it. Narrowing for both would drop the
-    guard on precisely the inputs this gateway understands least, and let a
-    caller shed every endpoint-derived rule by appending a newline to a tool
-    name.
+    **A call naming no endpoint faces the whole chain** — less, in a `1.x`
+    bundle, the rules its grammar says ask about the endpoint. There is no key
+    to look a binding up by. In `2.x` no rule is dropped: a condition on
+    ``request.endpoint_key`` reads absent there, which is what its operator says
+    about an absence. In `1.x` the endpoint-derived fields leave the chain for
+    a message that names no tool *by design* (`keyless`), because absent is the
+    answer that makes ``skill_match missing`` hold, and a chain carrying the
+    seeded "deny an agent without a matching skill" would otherwise deny every
+    such message for an agent whose skills are exactly right. An `unrecognised`
+    call named a tool this gateway declined to key, and faces the whole chain
+    in both. The session messages themselves (``initialize``, ``tools/list``
+    and the rest of `core.endpoint.DISCOVERY_METHODS`) never reach this walk:
+    the enforcement layer forwards them unjudged.
     """
     if endpoint_key is None:
         if not keyless:
             return bundle.chain
-        return tuple(p for p in bundle.chain if not keys_on_endpoint(p.condition))
+        drops = grammar(bundle.major).drops_when_keyless
+        return tuple(p for p in bundle.chain if not drops(p.condition))
     binding = bundle.bindings.get(endpoint_key)
     if binding is None:
         return bundle.chain
-    # `policy_ids` is empty for mode `open`, which narrows to nothing and lets
-    # the loop below allow at the end of the walk rather than before it.
     return tuple(p for p in bundle.chain if p.id in binding.policy_ids)
 
 
@@ -175,7 +149,8 @@ def refuses_unbound(
     branch. Reading `bundle.enforcement` here would put it in two places and
     let them disagree.
 
-    `keyless` carries the distinction `chain_for` draws, and it decides the one
+    `keyless` separates the two outcomes that reach here without a key, and it
+    decides the one
     case the contract is silent on. A message that names no tool **by design**
     has no endpoint for a fallback about endpoints to refuse, so it is judged.
     An `unrecognised` `tools/call` **named** one — this gateway declined to
@@ -199,12 +174,11 @@ def decide(
     *,
     keyless: bool = True,
 ) -> Decision:
-    """Walk this endpoint's chain and return the first denial, if any.
+    """Walk this endpoint's chain and return the first denial, if any, reading
+    each condition in the grammar the bundle's major names.
 
     `keyless` says which kind of absent key this is, and is read only when
-    `request.endpoint_key` is None — see `chain_for`. It defaults to the
-    message that names no tool by design, which is the case every vector and
-    every contract statement is about.
+    `request.endpoint_key` is None — see `chain_for`.
 
     Raises `UninterpretableCondition` where the walk reaches a rule outside the
     grammar, **carrying the id of the policy it reached it on**. The caller
@@ -216,6 +190,7 @@ def decide(
     condition and this is the only place that knows whose it is.
     """
     alerts: list[Policy] = []
+    holds = grammar(bundle.major).holds
 
     for policy in chain_for(bundle, request.endpoint_key, keyless=keyless):
         try:

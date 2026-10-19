@@ -20,7 +20,11 @@ from gateway.core.errors import ConfigError
 from gateway.core.lifecycle import is_ready, running
 from gateway.core.logs import configure_logging
 from gateway.core.mode import describe_plugin, plugin_enabled
-from gateway.core.settings import build_holder, port, rail_center_from_environment
+from gateway.core.settings import (
+    build_holder,
+    port,
+    rail_center_from_environment,
+)
 
 _log = logging.getLogger(__name__)
 

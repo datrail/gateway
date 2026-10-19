@@ -251,13 +251,20 @@ def describe_plugin(enabled: bool) -> str:
 
 
 def describe_enforcement(
-    enforcement: Enforcement, fallback: Fallback, *, told: bool
+    enforcement: Enforcement,
+    fallback: Fallback,
+    *,
+    ticket_fallback: Fallback,
+    told: bool,
 ) -> str:
     """The line logged when a poll changes the posture.
 
     Says what traffic will experience, because that is what an operator is
-    checking it against — and names the fallback only where it is consulted, so
-    a line mentioning it is a line where it decides something.
+    checking it against — and names the fallbacks only where they are acted
+    on, so a line mentioning one is a line where it decides something. Both
+    are named at `enforce`: `_refresh_once` logs only when this line changes,
+    so a fallback left out of it is a move from `pass` to `block` that starts
+    refusing traffic and logs nothing.
 
     **`told` is not a default, and that is the point of it.** A bundle naming no
     `enforcement` resolves to the same `none` as one naming `none`, so the
@@ -294,9 +301,16 @@ def describe_enforcement(
         if fallback == "block"
         else "an endpoint no binding matches is judged by the whole chain rather than refused"
     )
+    unticketed = (
+        "a call carrying no usable ticket is refused without consulting the chain"
+        if ticket_fallback == "block"
+        else "a call carrying no usable ticket is judged by the chain with every "
+        "ticket path absent"
+    )
     return (
         "enforcement=enforce — every request is evaluated and every verdict "
         "logged; a denied request is refused with 403 and reported to Rail "
         f"Center, and one that cannot be judged is refused with 503. "
-        f"fallback={fallback}: {unbound}"
+        f"fallback={fallback}: {unbound}. "
+        f"ticket_fallback={ticket_fallback}: {unticketed}"
     )

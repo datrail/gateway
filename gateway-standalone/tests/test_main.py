@@ -3,8 +3,11 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
+
+ROUTES = Path(__file__).resolve().parents[2] / "e2e" / "standalone" / "routes.yaml"
 
 
 def _run_gateway(**settings: str) -> subprocess.CompletedProcess:

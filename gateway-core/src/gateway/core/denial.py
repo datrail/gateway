@@ -28,7 +28,9 @@ errored. What a failed report costs is a missing row, which the log line names.
 
 **What the report carries, and what it must not.** `endpoint_key` — the resolved
 key, the same value the walk took, never a raw path. The ticket does not travel:
-the claims a condition read are not among the fields a report sends, so the
+beyond its `id`, no claim a condition read is among the fields a report sends
+— Rail Center resolves the agent and its posture from the ticket it stored
+under that id — so the
 endpoint a call was refused against is on the record without the verdict being
 reconstructable from it. And `metadata["x-rail-status"]` holds **this gateway's**
 reading of the ticket under the exact key Rail Center reads. Anyone can set a
@@ -37,7 +39,6 @@ says `claimed` and never into the field an operator reads as the decision.
 """
 
 import logging
-import math
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -132,37 +133,8 @@ def _reads_as_uuid(value: Any) -> bool:
     already, on braces around undashed hex, so sharing them would make a wire
     check move with an ordering tiebreak.
 
-    Not shared with `posture_score`'s check either: that field is a number, and
-    the two only look alike because both are claims off an unsigned ticket.
     """
     return isinstance(value, str) and _READ_BY_RAIL_CENTER.fullmatch(value) is not None
-
-
-def _reads_as_number(value: Any) -> bool:
-    """Whether Rail Center will read `value` as the `float` it declares.
-
-    A bool before the numeric check, because `isinstance(True, int)` is true and
-    a `posture_score` of `true` would otherwise be recorded as a score of 1.
-
-    **Finite, and that is the whole of what this adds over a type check.** The
-    ticket parser reads numbers with `parse_int=float` deliberately — its own
-    comment has a long literal saturating "to infinity exactly as it does in the
-    reference" — so `1e400`, `-1e400` and a 400-digit integer all arrive here as
-    `inf`. httpx serialises the body with ``json.dumps(..., allow_nan=False)``,
-    which raises on one, and `report` catches everything: the whole denial is
-    lost rather than the one field. An integer too large to be a float is the
-    same answer from the other side, `math.isfinite` raising where
-    `DenialEventRequest` 422s, so it is refused here rather than crashing.
-
-    The saturation itself stays where it is. The evaluation contract fixes what
-    the parser does with a long literal, so the bound belongs on what this sends.
-    """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    try:
-        return math.isfinite(value)
-    except OverflowError:
-        return False
 
 
 def build_report(
@@ -171,9 +143,9 @@ def build_report(
     endpoint_key: str | None,
     endpoint_status: str,
     ticket_state: str,
-    agent_id: Any = None,
-    posture_score: Any = None,
+    ticket_id: Any = None,
     claimed_status: str | None = None,
+    fallback: str | None = None,
 ) -> dict[str, Any]:
     """The body of one denial report.
 
@@ -186,12 +158,16 @@ def build_report(
     refusal the chain produced and none of the ones the fallback did — a gap on
     Rail Center's side of the wire, not something this function can close.
 
-    `agent_id` and `posture_score` are passed through only when they are the
-    shape Rail Center's schema declares — a UUID string and a finite number. The
-    ticket is unsigned, so both are attacker-chosen: a claim of the wrong shape
-    would be a 422 on the report, and on this route a 422 means the denial is
-    not recorded at all. Dropping a malformed claim costs a column; sending it
-    costs the row.
+    `ticket_id` is the ticket's own `id`, which is what links a denial to the
+    ticket and through it to the agent, its posture and the run that produced
+    it. It is passed through only when it is the shape Rail Center's schema
+    declares, a UUID string: the ticket is unsigned, so the claim is
+    attacker-chosen, a claim of the wrong shape would be a 422 on the report,
+    and on this route a 422 means the denial is not recorded at all. Dropping a
+    malformed claim costs a column; sending it costs the row.
+
+    `fallback` names the fallback that refused a call no policy judged —
+    `ticket` or `binding` — under `metadata.fallback`.
     """
     metadata: dict[str, Any] = {
         # Reported beside the key and never inside it, so a call that resolved
@@ -205,6 +181,8 @@ def build_report(
     }
     if claimed_status is not None:
         metadata[CLAIMED_STATUS_KEY] = claimed_status
+    if fallback is not None:
+        metadata["fallback"] = fallback
 
     report: dict[str, Any] = {
         # **Absent rather than null for a fallback refusal.** The one verdict
@@ -221,10 +199,8 @@ def build_report(
         "denied_at": _utc_now(),
         "metadata": metadata,
     }
-    if _reads_as_uuid(agent_id):
-        report["agent_id"] = agent_id
-    if _reads_as_number(posture_score):
-        report["posture_score"] = posture_score
+    if _reads_as_uuid(ticket_id):
+        report["ticket_id"] = ticket_id
     return report
 
 

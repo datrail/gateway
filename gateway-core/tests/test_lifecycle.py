@@ -14,7 +14,7 @@ from gateway.core.lifecycle import STARTUP_FETCH_GRACE_SECONDS, running
 GATEWAY_SLUG = "edge"
 
 POLICY_BUNDLE = {
-    "schema_version": "1.0",
+    "schema_version": "2.0",
     "content_hash": "v1",
     "policies": [
         {"id": "5c8f1e42-0000-4000-8000-0000000000a1", "name": "P", "priority": 1}

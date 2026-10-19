@@ -19,6 +19,7 @@ from gateway.core.denial import build_report
 AGENT = "550e8400-e29b-41d4-a716-446655440000"
 POLICY = "11111111-0000-4000-8000-000000000001"
 DATASOURCE = "22222222-0000-4000-8000-000000000002"
+TICKET = "0d9b6f3c-8a52-4e1f-9c7a-2b3e4f5a6b7c"
 
 SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"
 VECTORS = Path(__file__).parent / "vectors"
@@ -79,7 +80,7 @@ def test_the_bundle_schema_refuses_what_it_says_it_refuses() -> None:
     """
     validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
     base = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "v1",
         "policies": [],
         "bindings": [],
@@ -113,7 +114,7 @@ def test_the_bundle_schema_carries_the_binding_arity_rules() -> None:
     carrying no entry at all.
     """
     validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
-    base = {"schema_version": "1.0", "content_hash": "v1", "policies": []}
+    base = {"schema_version": "2.0", "content_hash": "v1", "policies": []}
     one = "5c8f1e42-0000-4000-8000-0000000000a1"
 
     def binding(mode: str, ids: list[str]) -> dict[str, Any]:
@@ -136,7 +137,7 @@ def test_the_bundle_schema_requires_what_it_says_is_required() -> None:
     """
     validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
     base = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "v1",
         "policies": [],
         "bindings": [],
@@ -201,7 +202,7 @@ def test_the_bundle_schema_keeps_the_remedy_it_promises() -> None:
     disabled policy would refuse exactly the bundle that remedy produces.
     """
     validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
-    base = {"schema_version": "1.0", "content_hash": "v1", "bindings": []}
+    base = {"schema_version": "2.0", "content_hash": "v1", "bindings": []}
     one = "5c8f1e42-0000-4000-8000-0000000000a1"
 
     assert validator.is_valid(
@@ -236,12 +237,15 @@ def test_the_schemas_state_the_types_they_document() -> None:
     # 19 → 18 with the reshaped root: `rejected` leaves with its `items`, the
     # fallback leaves `enforcement` and returns at the root as
     # `binding_fallback`, and `schema_version` arrives beside `content_hash`.
-    assert types(_schema("policy-bundle.schema.json")) == 18
-    assert types(_schema("x-rail-ticket.schema.json")) == 12
+    # 18 → 19 with RC-434's `ticket_fallback`.
+    assert types(_schema("policy-bundle.schema.json")) == 19
+    # 12 → 23 with RC-434's nested ticket: `id`, and the objects, arrays and
+    # members of `posture` and `alignment`, less the three flat claims.
+    assert types(_schema("x-rail-ticket.schema.json")) == 23
 
     bundle = Draft202012Validator(_schema("policy-bundle.schema.json"))
     base = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "v1",
         "policies": [],
         "bindings": [],
@@ -283,14 +287,40 @@ def test_the_schemas_state_the_types_they_document() -> None:
     # fallback outside the pair decides nothing this component can do.
     assert not bundle.is_valid({**base, "enforcement": {"mode": "halt"}})
     assert not bundle.is_valid({**base, "binding_fallback": "allow"})
+    assert not bundle.is_valid({**base, "ticket_fallback": "allow"})
+    assert not bundle.is_valid({**base, "ticket_fallback": True})
+    assert bundle.is_valid({**base, "ticket_fallback": "block"})
     assert bundle.is_valid({**base, "enforcement": {"mode": "observe"}})
     assert bundle.is_valid({**base, "binding_fallback": "pass"})
 
     ticket = Draft202012Validator(_schema("x-rail-ticket.schema.json"))
     good = _schema("x-rail-ticket.schema.json")["examples"][0]
     assert not ticket.is_valid([good])
-    for field in ("sandbox_id", "environment_fingerprint", "sandbox_type", "scored_at"):
+    for field in ("id", "sandbox_id", "environment_fingerprint", "sandbox_type"):
         assert not ticket.is_valid({**good, field: 42}), field
+    posture, alignment = good["posture"], good["alignment"]
+    for bad_posture in (
+        "low",
+        {**posture, "overall": 72.5},
+        {**posture, "overall": {"score": "72.5", "level": "medium"}},
+        {**posture, "categories": []},
+        {**posture, "categories": {"secrets": 64}},
+        {**posture, "categories": {"secrets": {"score": "64", "capped": True}}},
+        {**posture, "categories": {"secrets": {"score": 6.4, "capped": "yes"}}},
+        # A category is on the Profiler's 0–10 scale, not the overall 0–100.
+        {**posture, "categories": {"secrets": {"score": 64, "capped": True}}},
+        {**posture, "categories": {"secrets": {"score": -1, "capped": True}}},
+    ):
+        assert not ticket.is_valid({**good, "posture": bad_posture}), bad_posture
+    for bad_alignment in (
+        [],
+        {**alignment, "baseline": "prod"},
+        {**alignment, "baseline": {"id": 7, "label": "prod"}},
+        {**alignment, "baseline": {"id": alignment["baseline"]["id"], "label": 7}},
+        {**alignment, "drifted": "llm_model"},
+        {**alignment, "drifted": [7]},
+    ):
+        assert not ticket.is_valid({**good, "alignment": bad_alignment}), bad_alignment
 
 
 def test_the_safe_integer_bounds_admit_the_bound_itself() -> None:
@@ -302,7 +332,7 @@ def test_the_safe_integer_bounds_admit_the_bound_itself() -> None:
     """
     bundle = Draft202012Validator(_schema("policy-bundle.schema.json"))
     base = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "content_hash": "v1",
         "policies": [],
         "bindings": [],
@@ -335,20 +365,49 @@ def test_the_ticket_schema_refuses_what_its_descriptions_state() -> None:
     assert validator.is_valid({**good, "exp": 1785529162.0})
     for bad_exp in (1785529162.5, 2**53, -(2**53), "1785529162", True, None):
         assert not validator.is_valid({**good, "exp": bad_exp}), bad_exp
-    # Every field the mint writes is required; null means "not yet known".
+    # Every field a stored ticket carries is required.
     for field in good:
         assert not validator.is_valid({k: v for k, v in good.items() if k != field}), (
             field
         )
-    assert validator.is_valid({**good, "posture_score": None, "tier": None})
-    # "A number here is a score, never a string."
-    assert not validator.is_valid({**good, "posture_score": "100"})
+    overall = good["posture"]["overall"]
+
+    def with_overall(**over: Any) -> dict[str, Any]:
+        return {**good, "posture": {**good["posture"], "overall": {**overall, **over}}}
+
+    # "A number, never a string", from 0 to 100.
+    assert not validator.is_valid(with_overall(score="72.5"))
+    assert validator.is_valid(with_overall(score=0)) and validator.is_valid(
+        with_overall(score=100)
+    )
+    assert not validator.is_valid(with_overall(score=100.5))
+    assert not validator.is_valid(with_overall(score=-1))
+    # The level is one of the four bands, and both halves of overall are there.
+    for level in ("critical", "high", "medium", "low"):
+        assert validator.is_valid(with_overall(level=level)), level
+    assert not validator.is_valid(with_overall(level="trusted"))
+    for member in ("score", "level"):
+        partial = {k: v for k, v in overall.items() if k != member}
+        assert not validator.is_valid(
+            {**good, "posture": {**good["posture"], "overall": partial}}
+        ), member
+    # An unscored category is null, and a sandbox type nobody recorded is too.
+    unscored = {"secrets": {"score": None, "capped": False}}
+    assert validator.is_valid(
+        {**good, "posture": {**good["posture"], "categories": unscored}}
+    )
+    assert validator.is_valid({**good, "sandbox_type": None})
+    # A baseline is absent when there is none, and `drifted` is still there.
+    no_baseline = {"drifted": []}
+    assert validator.is_valid({**good, "alignment": no_baseline})
+    assert not validator.is_valid({**good, "alignment": {}})
+    # The flat claims are gone; carrying one is an unrecognised key, not a rule.
+    assert validator.is_valid({**good, "posture_score": 10, "tier": "critical"})
     assert not validator.is_valid({**good, "skills": "package-tracking"})
     assert not validator.is_valid({**good, "skills": [1]})
     assert not validator.is_valid({**good, "agent_id": 42})
-    # `iat` is whole seconds like `exp`, and `tier` is a band name or null.
+    # `iat` is whole seconds like `exp`.
     assert not validator.is_valid({**good, "iat": 1785528262.5})
-    assert not validator.is_valid({**good, "tier": 80})
     # Unrecognised keys travel through, so adding one is not a flag day.
     assert validator.is_valid({**good, "signed_by": "wave-2"})
 
@@ -368,10 +427,11 @@ def test_the_denial_schema_describes_what_this_gateway_actually_sends() -> None:
         (
             "/mcp#tools/call#track_package",
             "resolved",
-            {"agent_id": AGENT, "posture_score": 12},
+            {"ticket_id": TICKET},
         ),
         (None, "keyless", {}),
-        (None, "unrecognised", {"posture_score": 0}),
+        (None, "unrecognised", {"fallback": "binding"}),
+        (None, "keyless", {"fallback": "ticket"}),
     ]:
         validator.validate(
             build_report(
@@ -426,15 +486,18 @@ def test_the_denial_schema_refuses_a_status_this_gateway_cannot_report() -> None
         validator.validate(body)
 
 
-def _denial(**claims: Any) -> dict[str, Any]:
-    """One report this gateway would actually send, to mutate field by field."""
-    return build_report(
-        policy_id=POLICY,
-        endpoint_key="/mcp#tools/call#track_package",
-        endpoint_status="resolved",
-        ticket_state="valid",
-        **claims,
-    )
+def _denial(**fields: Any) -> dict[str, Any]:
+    """One report this gateway would actually send, with `fields` set on it
+    as another reporter might, to mutate field by field."""
+    return {
+        **build_report(
+            policy_id=POLICY,
+            endpoint_key="/mcp#tools/call#track_package",
+            endpoint_status="resolved",
+            ticket_state="valid",
+        ),
+        **fields,
+    }
 
 
 def test_the_denial_schema_refuses_two_data_sources_and_admits_none() -> None:
@@ -483,6 +546,11 @@ def test_the_denial_schema_refuses_a_uuid_spelling_the_receiver_refuses() -> Non
         assert not validator.is_valid({**body, "agent_id": claimed}), claimed
     # Omitting the claim is how a malformed one is dropped; null is the same.
     assert validator.is_valid({**body, "agent_id": None})
+    # `ticket_id` is the other claim off the ticket, under the same rule.
+    assert validator.is_valid({**body, "ticket_id": TICKET})
+    assert validator.is_valid({**body, "ticket_id": None})
+    for claimed in ("ticket-7", 7, TICKET + "X"):
+        assert not validator.is_valid({**body, "ticket_id": claimed}), claimed
     # The same `$defs/uuid` holds the two fields that are not claims.
     assert not validator.is_valid({**body, "policy_id": "policy-1"})
     assert not validator.is_valid({**_denial(), "datasource_id": "delivery"})
