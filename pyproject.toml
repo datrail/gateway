@@ -19,7 +19,8 @@ dev = [
     "ruff==0.16.1",
     "pytest==9.1.1",  # >=8.4: earlier versions skip, not fail, an unmarked async test
     "pytest-asyncio==1.4.0",
-    "jsonschema==4.26.0",  # validates the published schemas in schemas/
+    # Validates schemas/; [format] makes `date-time` an assertion, not an annotation.
+    "jsonschema[format]==4.26.0",
     "pytest-timeout==2.3.1",
     "grpcio-tools==1.84.0",  # generates gateway-apigee-grpc's code from its proto
 ]

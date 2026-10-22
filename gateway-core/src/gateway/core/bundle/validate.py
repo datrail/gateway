@@ -74,10 +74,7 @@ _SUPPORTED_NAMED: Final[str] = " and ".join(f"{m}.x" for m in SUPPORTED_SCHEMA_M
 #: grammar has to be the narrow one.
 _SCHEMA_VERSION = re.compile(r"\A[0-9]+\.[0-9]+\Z")
 
-#: The holder's logger, shared so that everything an operator reads about one
-#: bundle — the fetch, the refusal, the posture, and the warnings below —
-#: arrives under one name.
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 def _q(value: object) -> str:
@@ -353,7 +350,7 @@ def _index(bindings: list[Any]) -> dict[str, Binding]:
             # A collision is not like that: it is two bindings an operator has
             # to choose between, and serving either would be this gateway
             # choosing for them.
-            logger.warning(
+            log.warning(
                 "policy bundle carries a binding this gateway cannot read as a "
                 "key (%s); it narrows nothing and every other binding stands",
                 _safe(key),
@@ -608,7 +605,7 @@ def validate_bundle(body: object) -> UsableBundle:
     # naming the fallback that "applies" would name neither this bundle's nor
     # the held one still deciding traffic.
     if isinstance(told_enforcement, Mapping) and "fallback" in told_enforcement:
-        logger.warning(
+        log.warning(
             "policy bundle states %s inside `enforcement`; the fallback is read "
             "from `binding_fallback` at the bundle root, so %s applies and the "
             "stated one decides nothing",

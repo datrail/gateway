@@ -237,7 +237,7 @@ def test_an_unreadable_refresh_interval_is_refused_at_startup(monkeypatch):
     The auth variables are cleared because `build_holder` reaches
     `auth_headers()` first: either of them set in the shell running the suite
     raises before the interval is ever read, and this case then fails on
-    correct code with a message about a credential. `.env.example` documents
+    correct code with a message about a credential. `.env.example` lists
     both, so a contributor's shell is exactly where they turn up.
     """
     monkeypatch.setenv("RAIL_CENTER_URL", "http://rail-center.invalid")

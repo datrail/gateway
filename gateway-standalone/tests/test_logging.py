@@ -2,9 +2,9 @@
 
 import logging
 
-from gateway.core.bundle.client import logger as bundle_client_logger
-from gateway.core.bundle.validate import logger as bundle_validation_logger
-from gateway.core.denial import logger as denial_logger
+from gateway.core.bundle.client import log as bundle_client_logger
+from gateway.core.bundle.validate import log as bundle_validation_logger
+from gateway.core.denial import log as denial_logger
 from gateway.core.enforcement import log as enforcement_logger
 from gateway.core.lifecycle import log as lifecycle_logger
 from gateway.standalone.routes import Route

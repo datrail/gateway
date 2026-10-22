@@ -47,7 +47,7 @@ import httpx
 
 from gateway.core.key_safety import safe_for_log
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 #: The route is the OpenAPI specification's, as `/v1/policy-bundle` is.
 DENIALS_PATH = "/v1/denials"
@@ -237,7 +237,7 @@ async def report(
         ) as client:
             response = await client.post(url, json=body, headers=headers)
     except Exception as exc:  # noqa: BLE001 - a report may not break a refusal
-        logger.warning(
+        log.warning(
             "denial report for %s (policy %s) could not be sent: %s: %s",
             safe_for_log(body.get("endpoint_key")),
             safe_for_log(body.get("policy_id")),
@@ -249,7 +249,7 @@ async def report(
     if response.status_code != 202:
         # Named rather than swallowed: a 422 here means this gateway and Rail
         # Center disagree about the shape of a denial, and the row is missing.
-        logger.warning(
+        log.warning(
             "denial report for %s (policy %s) was refused: HTTP %d",
             safe_for_log(body.get("endpoint_key")),
             safe_for_log(body.get("policy_id")),

@@ -2,8 +2,8 @@
 #
 # `git tag v0.1.0 && git push --tags` publishes :0.1.0, :0.1 and :latest of
 # every image in `publish`, multi-arch, each with an SBOM and a signed
-# build-provenance attestation. Each image is a matrix entry. Standalone
-# publishes as the repository's name, which deployments pull.
+# build-provenance attestation. Standalone publishes as the repository's name,
+# which deployments pull.
 name: Release Container Images
 
 on:
@@ -88,7 +88,6 @@ jobs:
           - stack: apigee-grpc
             image: ghcr.io/${{ github.repository }}-apigee-grpc
     steps:
-      # No submodules, so no recursive fetch or cross-repo token.
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.tag }}
@@ -134,8 +133,8 @@ jobs:
           # Off: the signed attestation below replaces buildx's unsigned provenance.
           provenance: false
           # Shared with ci.yml's e2e job, so a release reuses its amd64 layers:
-          # keep the names in step. Not `github.workflow`, which is `CI` when
-          # ci.yml runs on master, so a release would never see those caches.
+          # keep the scope names in step. Not `github.workflow`, which is `CI`
+          # when ci.yml runs on master, so a release would never see those caches.
           cache-from: type=gha,scope=image-${{ matrix.stack }}
           cache-to: type=gha,mode=max,scope=image-${{ matrix.stack }}
 
@@ -158,7 +157,7 @@ jobs:
       - if: steps.attest.outcome == 'failure'
         env:
           IMAGE: ${{ matrix.image }}
-        run: echo "::warning::$IMAGE published without a provenance attestation — attestations need a public repository, or GitHub Enterprise Cloud (private until DR-25)."
+        run: echo "::warning::$IMAGE published without a provenance attestation — attestations need a public repository, or GitHub Enterprise Cloud."
 
       - name: Summary
         env:

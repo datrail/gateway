@@ -20,7 +20,7 @@ from gateway.apigee_grpc._proto.external_callout_pb2_grpc import (
 from gateway.core.bundle.client import BundleHolder
 from gateway.core.enforcement import PASS, DenialReporter, Verdict, judge, refusal_body
 
-_log = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 # The flow variables the Apigee proxy reads.
 DECISION = "rail.decision"
@@ -46,7 +46,7 @@ class RailCallout(ExternalCalloutServiceServicer):
             return _build_answer(request, self._judge_request(request))
         except Exception as exc:  # noqa: BLE001 - logged below, without its message
             # The type and the frames only: the message could quote a header.
-            _log.error(
+            log.error(
                 "the callout failed (%s); allowing the request:\n%s",
                 type(exc).__name__,
                 "".join(traceback.format_tb(exc.__traceback__)).rstrip(),

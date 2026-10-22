@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError
 
 from gateway.core.denial import build_report
@@ -30,9 +30,16 @@ NAMES = [
     "denial-event.schema.json",
 ]
 
+# Without it, `format` is an annotation and `date-time` and `uuid` go unchecked.
+_FORMATS = FormatChecker()
+
 
 def _schema(name: str) -> dict[str, Any]:
     return json.loads((SCHEMAS / name).read_text(encoding="utf-8"))
+
+
+def _build_validator(name: str) -> Draft202012Validator:
+    return Draft202012Validator(_schema(name), format_checker=_FORMATS)
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -49,10 +56,27 @@ def test_the_schema_satisfies_its_own_examples(name: str) -> None:
     who follows the file is wrong in the same way.
     """
     schema = _schema(name)
-    validator = Draft202012Validator(schema)
+    validator = _build_validator(name)
     assert schema["examples"], name
     for example in schema["examples"]:
         validator.validate(example)
+
+
+@pytest.mark.parametrize(
+    ("name", "field", "bad"),
+    [
+        ("policy-bundle.schema.json", "generated_at", "yesterday"),
+        ("denial-event.schema.json", "denied_at", "2026-13-01T00:00:00Z"),
+        ("x-rail-ticket.schema.json", "id", "ticket-7"),
+    ],
+)
+def test_the_schema_checks_the_formats_it_declares(
+    name: str, field: str, bad: str
+) -> None:
+    """Without a format checker, any string passes as a `date-time` or `uuid`."""
+    schema = _schema(name)
+    validator = _build_validator(name)
+    assert not validator.is_valid({**schema["examples"][0], field: bad})
 
 
 def test_the_bundle_schema_accepts_what_rail_center_emits() -> None:
@@ -64,7 +88,7 @@ def test_the_bundle_schema_accepts_what_rail_center_emits() -> None:
     `enabled` with an empty list, is a bundle no control plane produces and one
     this gateway still has to resolve rather than refuse.
     """
-    validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
+    validator = _build_validator("policy-bundle.schema.json")
     cases = json.loads((VECTORS / "bundle.json").read_text(encoding="utf-8"))["cases"]
     worked = next(c for c in cases if c["name"] == "the contract's worked example")
     validator.validate(worked["bundle"])
@@ -78,7 +102,7 @@ def test_the_bundle_schema_refuses_what_it_says_it_refuses() -> None:
     rather than a shape. The file says as much; this pins the part it does
     carry, the arity rules below included.
     """
-    validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
+    validator = _build_validator("policy-bundle.schema.json")
     base = {
         "schema_version": "2.0",
         "content_hash": "v1",
@@ -113,7 +137,7 @@ def test_the_bundle_schema_carries_the_binding_arity_rules() -> None:
     nothing" is spelled `open`, and "subject to everything" is spelled by
     carrying no entry at all.
     """
-    validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
+    validator = _build_validator("policy-bundle.schema.json")
     base = {"schema_version": "2.0", "content_hash": "v1", "policies": []}
     one = "5c8f1e42-0000-4000-8000-0000000000a1"
 
@@ -135,7 +159,7 @@ def test_the_bundle_schema_requires_what_it_says_is_required() -> None:
     A schema whose `required` list can be emptied without a test failing is a
     schema that documents a rule and enforces nothing.
     """
-    validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
+    validator = _build_validator("policy-bundle.schema.json")
     base = {
         "schema_version": "2.0",
         "content_hash": "v1",
@@ -201,7 +225,7 @@ def test_the_bundle_schema_keeps_the_remedy_it_promises() -> None:
     cannot parse. A schema that still demanded a readable priority from a
     disabled policy would refuse exactly the bundle that remedy produces.
     """
-    validator = Draft202012Validator(_schema("policy-bundle.schema.json"))
+    validator = _build_validator("policy-bundle.schema.json")
     base = {"schema_version": "2.0", "content_hash": "v1", "bindings": []}
     one = "5c8f1e42-0000-4000-8000-0000000000a1"
 
@@ -243,7 +267,7 @@ def test_the_schemas_state_the_types_they_document() -> None:
     # members of `posture` and `alignment`, less the three flat claims.
     assert types(_schema("x-rail-ticket.schema.json")) == 23
 
-    bundle = Draft202012Validator(_schema("policy-bundle.schema.json"))
+    bundle = _build_validator("policy-bundle.schema.json")
     base = {
         "schema_version": "2.0",
         "content_hash": "v1",
@@ -293,7 +317,7 @@ def test_the_schemas_state_the_types_they_document() -> None:
     assert bundle.is_valid({**base, "enforcement": {"mode": "observe"}})
     assert bundle.is_valid({**base, "binding_fallback": "pass"})
 
-    ticket = Draft202012Validator(_schema("x-rail-ticket.schema.json"))
+    ticket = _build_validator("x-rail-ticket.schema.json")
     good = _schema("x-rail-ticket.schema.json")["examples"][0]
     assert not ticket.is_valid([good])
     for field in ("id", "sandbox_id", "environment_fingerprint", "sandbox_type"):
@@ -330,7 +354,7 @@ def test_the_safe_integer_bounds_admit_the_bound_itself() -> None:
     move inward, which refuses a priority and an expiry that every conformant
     reader accepts.
     """
-    bundle = Draft202012Validator(_schema("policy-bundle.schema.json"))
+    bundle = _build_validator("policy-bundle.schema.json")
     base = {
         "schema_version": "2.0",
         "content_hash": "v1",
@@ -344,7 +368,7 @@ def test_the_safe_integer_bounds_admit_the_bound_itself() -> None:
     assert bundle.is_valid({**base, "policies": [{"id": one, "priority": -safe}]})
     assert bundle.is_valid({**base, "content_hash": "v"})
 
-    ticket = Draft202012Validator(_schema("x-rail-ticket.schema.json"))
+    ticket = _build_validator("x-rail-ticket.schema.json")
     good = _schema("x-rail-ticket.schema.json")["examples"][0]
     assert ticket.is_valid({**good, "exp": safe})
     assert ticket.is_valid({**good, "exp": -safe})
@@ -357,7 +381,7 @@ def test_the_ticket_schema_refuses_what_its_descriptions_state() -> None:
     whatever its author last typed. These are the claims its own field
     descriptions make.
     """
-    validator = Draft202012Validator(_schema("x-rail-ticket.schema.json"))
+    validator = _build_validator("x-rail-ticket.schema.json")
     good = _schema("x-rail-ticket.schema.json")["examples"][0]
 
     assert validator.is_valid(good)
@@ -422,7 +446,7 @@ def test_the_denial_schema_describes_what_this_gateway_actually_sends() -> None:
     endpoint key is carried because a null there is the shape a keyless refusal
     takes, which is the one an operator sees on a handshake.
     """
-    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    validator = _build_validator("denial-event.schema.json")
     for endpoint_key, status, claims in [
         (
             "/mcp#tools/call#track_package",
@@ -454,7 +478,7 @@ def test_the_denial_schema_admits_a_report_naming_no_policy() -> None:
     let a reporter that had a policy and lost it look like one that never had
     one, and the two are not the same event.
     """
-    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    validator = _build_validator("denial-event.schema.json")
     body = build_report(
         policy_id=None,
         endpoint_key="/mcp#tools/call#track_package",
@@ -474,7 +498,7 @@ def test_the_denial_schema_refuses_a_status_this_gateway_cannot_report() -> None
     vocabulary — `not-found`, `issuer-unreachable` — belongs in the `claimed`
     key, and putting it here would be forgeable text where an operator reads
     the decision."""
-    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    validator = _build_validator("denial-event.schema.json")
     body = build_report(
         policy_id=POLICY,
         endpoint_key="/mcp#tools/call#track_package",
@@ -509,7 +533,7 @@ def test_the_denial_schema_refuses_two_data_sources_and_admits_none() -> None:
     datasource_id`, so a schema admitting either would publish a body the route
     422s — and on this route a 422 is a denial not recorded at all.
     """
-    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    validator = _build_validator("denial-event.schema.json")
     neither = _denial()
     # **What this gateway sends.** It fronts several data sources and composes a
     # key with no slug in it, so naming one would assert a value it does not
@@ -532,7 +556,7 @@ def test_the_denial_schema_refuses_a_uuid_spelling_the_receiver_refuses() -> Non
     `agent_id` off an unsigned ticket is caller-chosen, so a schema whose uuid
     pattern admitted `agent-42` would publish the shape that costs the row.
     """
-    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    validator = _build_validator("denial-event.schema.json")
     body = _denial(agent_id=AGENT)
     assert validator.is_valid(body)
     for spelling in (
@@ -562,7 +586,7 @@ def test_the_denial_schema_requires_the_instant_the_receiver_requires() -> None:
     The receiver 422s a body that carries no timestamp, and a denial's time is
     what an operator correlates everything else against.
     """
-    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    validator = _build_validator("denial-event.schema.json")
     body = _denial()
     assert validator.is_valid(body)
     assert not validator.is_valid({k: v for k, v in body.items() if k != "denied_at"})
@@ -577,7 +601,7 @@ def test_the_denial_schema_keeps_posture_score_a_number() -> None:
     file states, so it is a decision worth a test — describing the coercion
     would document a latitude rather than the contract.
     """
-    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    validator = _build_validator("denial-event.schema.json")
     body = _denial(posture_score=12)
     assert validator.is_valid(body)
     assert validator.is_valid({**body, "posture_score": None})
@@ -591,7 +615,7 @@ def test_the_denial_schema_holds_the_slug_shape_the_receiver_enforces() -> None:
     The receiver refuses the empty string, anything past 64 characters, and
     anything outside the slug alphabet, each with the whole body.
     """
-    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    validator = _build_validator("denial-event.schema.json")
     body = _denial()
     assert validator.is_valid({**body, "datasource_slug": "d" * 64})
     for slug in ("", "d" * 65, "deliv ery", "delivery.eu", 42):
@@ -608,7 +632,7 @@ def test_the_denial_schema_bounds_the_idempotency_key_the_receiver_bounds() -> N
     the bound has to be published here: this file is the only place it is
     stated, and the only place its absence would show.
     """
-    validator = Draft202012Validator(_schema("denial-event.schema.json"))
+    validator = _build_validator("denial-event.schema.json")
     body = _denial()
     assert validator.is_valid({**body, "idempotency_key": "k" * 255})
     # Omitting it is the ordinary case, and a null says the same thing.

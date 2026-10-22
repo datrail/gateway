@@ -39,7 +39,7 @@ from gateway.core.errors import ConfigError
 from gateway.core.key_safety import safe_for_log
 from gateway.core.mode import describe_enforcement
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 def _posture_line(bundle: UsableBundle) -> str:
@@ -228,7 +228,7 @@ def refresh_seconds() -> int:
             f"got: {safe_for_log(raw)}"
         ) from None
     if value < MIN_REFRESH_SECONDS:
-        logger.warning(
+        log.warning(
             "RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS is %d, below the floor of %d; "
             "using %d",
             value,
@@ -405,7 +405,7 @@ class BundleHolder:
                 # continuing is right either way: a loop that dies leaves the
                 # gateway enforcing whatever it last held, for ever, with
                 # nothing after the traceback saying so.
-                logger.exception("policy bundle refresh raised; the loop continues")
+                log.exception("policy bundle refresh raised; the loop continues")
 
     async def _refresh_once(self) -> RefreshOutcome:
         held = self._held.content_hash if self._held else None
@@ -433,7 +433,7 @@ class BundleHolder:
             # A fault to surface, not to route around: Rail Center and this
             # gateway have drifted, and the message naming the offending policy
             # is the only thing that fixes it.
-            logger.error(
+            log.error(
                 "refusing the fetched policy bundle — %s; %s",
                 refusal.reason,
                 f"keeping bundle {safe_for_log(held)}" if held else "no bundle held",
@@ -442,7 +442,7 @@ class BundleHolder:
 
         posture_line = _posture_line(bundle)
         self._held = bundle
-        logger.info(
+        log.info(
             "holding policy bundle %s (schema %s) — %d enabled policies, "
             "%d bound endpoints",
             safe_for_log(bundle.content_hash),
@@ -471,7 +471,7 @@ class BundleHolder:
         # the mode reaches `enforce`, which is where the line can express it
         # and where the fallback decides anything.
         if posture_line != previous_line:
-            logger.info("%s", posture_line)
+            log.info("%s", posture_line)
         return RefreshOutcome("replaced", bundle.content_hash)
 
     async def _fetch(self) -> Any:
@@ -632,13 +632,13 @@ class BundleHolder:
         # is the default half.
         safe = safe_for_log(reason)
         if held:
-            logger.warning(
+            log.warning(
                 "policy bundle fetch failed — %s; keeping bundle %s",
                 safe,
                 safe_for_log(held),
             )
         else:
-            logger.error(
+            log.error(
                 "policy bundle fetch failed — %s; no bundle held",
                 safe,
             )
