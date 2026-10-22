@@ -29,7 +29,8 @@ dump-enforcement-cases:
 proto proto-check:
 	$(MAKE) -C gateway-apigee-grpc $@
 
-# Every e2e stack in turn. Leaves the containers up; `make e2e-down` removes them.
+# Every e2e stack in turn. Leaves the stopped containers and volumes;
+# `make e2e-down` removes them.
 e2e: e2e-standalone e2e-apigee-grpc
 
 e2e-standalone:
