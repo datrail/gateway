@@ -74,9 +74,6 @@ _SUPPORTED_NAMED: Final[str] = " and ".join(f"{m}.x" for m in SUPPORTED_SCHEMA_M
 #: grammar has to be the narrow one.
 _SCHEMA_VERSION = re.compile(r"\A[0-9]+\.[0-9]+\Z")
 
-#: The holder's logger, shared so that everything an operator reads about one
-#: bundle — the fetch, the refusal, the posture, and the warnings below —
-#: arrives under one name.
 log = logging.getLogger(__name__)
 
 
