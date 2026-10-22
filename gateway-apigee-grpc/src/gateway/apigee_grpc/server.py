@@ -26,7 +26,7 @@ from gateway.core.settings import (
     rail_center_from_environment,
 )
 
-_log = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 # The gRPC health service that reports readiness. The empty name is liveness.
 READY_SERVICE = "datrail.gateway.Ready"
@@ -113,9 +113,9 @@ async def _serve_until_stopped(
     async with serving(
         holder, reporter, listen_port=listen_port, max_message_bytes=max_message_bytes
     ) as bound:
-        _log.info("serving the ExternalCallout service on port %d", bound)
+        log.info("serving the ExternalCallout service on port %d", bound)
         await stop.wait()
-        _log.info("stopping")
+        log.info("stopping")
 
 
 def main() -> int:
@@ -124,20 +124,20 @@ def main() -> int:
     try:
         configure_logging()
         enabled = plugin_enabled()
-        _log.info("%s", describe_plugin(enabled))
+        log.info("%s", describe_plugin(enabled))
         holder = build_holder() if enabled else None
         reporter = DenialReporter(*rail_center_from_environment()) if enabled else None
         listen_port = port()
         max_message_bytes = get_max_message_bytes()
     except ConfigError as exc:
-        _log.error("%s", exc)
+        log.error("%s", exc)
         return 2
-    _log.info("gRPC messages are limited to %d bytes", max_message_bytes)
+    log.info("gRPC messages are limited to %d bytes", max_message_bytes)
     try:
         asyncio.run(
             _serve_until_stopped(holder, reporter, listen_port, max_message_bytes)
         )
     except ConfigError as exc:
-        _log.error("%s", exc)
+        log.error("%s", exc)
         return 2
     return 0
