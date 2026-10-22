@@ -56,7 +56,7 @@ def test_the_schema_satisfies_its_own_examples(name: str) -> None:
     who follows the file is wrong in the same way.
     """
     schema = _schema(name)
-    validator = Draft202012Validator(schema, format_checker=_FORMATS)
+    validator = _build_validator(name)
     assert schema["examples"], name
     for example in schema["examples"]:
         validator.validate(example)
@@ -75,7 +75,7 @@ def test_the_schema_checks_the_formats_it_declares(
 ) -> None:
     """Without a format checker, any string passes as a `date-time` or `uuid`."""
     schema = _schema(name)
-    validator = Draft202012Validator(schema, format_checker=_FORMATS)
+    validator = _build_validator(name)
     assert not validator.is_valid({**schema["examples"][0], field: bad})
 
 
