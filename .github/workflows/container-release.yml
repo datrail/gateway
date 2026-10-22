@@ -2,15 +2,13 @@
 #
 # `git tag v0.1.0 && git push --tags` publishes :0.1.0, :0.1 and :latest of
 # every image in `publish`, multi-arch, each with an SBOM and a signed
-# build-provenance attestation. Each image is a matrix entry. Standalone
-# publishes as the repository's name, which deployments pull.
+# build-provenance attestation. Standalone publishes as the repository's name,
+# which deployments pull.
 name: Release Container Images
 
 on:
   push:
-    # Narrower than `v*`, which also matches `v1` and `vfoo`; `version` is the
-    # real check, since a filter can't anchor the end and still allow suffixes.
-    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
@@ -44,8 +42,9 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       latest: ${{ steps.resolve.outputs.latest }}
     steps:
-      # Refuse anything but vMAJOR.MINOR.PATCH: a manual run would otherwise tag
-      # the branch it was launched from, moving `latest` either way.
+      # Refuse anything but vMAJOR.MINOR.PATCH: the `v*` glob also matches `v1`
+      # and `vfoo`, and a manual run would otherwise tag the branch it was
+      # launched from, moving `latest` either way.
       - id: resolve
         env:
           RAW_REF: ${{ github.event.inputs.tag || github.ref_name }}
@@ -88,7 +87,6 @@ jobs:
           - stack: apigee-grpc
             image: ghcr.io/${{ github.repository }}-apigee-grpc
     steps:
-      # No submodules, so no recursive fetch or cross-repo token.
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.tag }}
@@ -158,7 +156,7 @@ jobs:
       - if: steps.attest.outcome == 'failure'
         env:
           IMAGE: ${{ matrix.image }}
-        run: echo "::warning::$IMAGE published without a provenance attestation — attestations need a public repository, or GitHub Enterprise Cloud (private until DR-25)."
+        run: echo "::warning::$IMAGE published without a provenance attestation — attestations need a public repository, or GitHub Enterprise Cloud."
 
       - name: Summary
         env:
