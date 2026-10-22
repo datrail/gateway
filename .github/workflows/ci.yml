@@ -57,12 +57,7 @@ jobs:
 
       - run: make init
 
-      # Unbuffered, and one line per test, so a hang shows which test it is in.
-      # `-vv` because ADDOPTS is prepended: `-v` would cancel the Makefile's `-q`.
       - run: make test
-        env:
-          PYTHONUNBUFFERED: "1"
-          PYTEST_ADDOPTS: "-vv"
 
   # The vendored proto is still the upstream one, and the committed code is
   # what `make proto` writes.
