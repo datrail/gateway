@@ -138,7 +138,9 @@ Whether RailXia is installed on this deployment: `true` or `false`, case
 folded. Blank or unset is `false`, so a plain gateway needs no variable at
 all. Off, it fetches no bundle and reads no Rail Center variable; on, it polls
 Rail Center and takes its posture from the bundle. It does not say how much of
-a decision is acted on: that is the bundle's `enforcement` posture.
+a decision is acted on: that is the bundle's `enforcement` posture, so changing
+it needs no redeploy. The proxy reads the same variable, so one value
+configures a whole zone.
 
 Off beside Rail Center configuration — `RAIL_CENTER_URL`, `RAIL_AUTH_TOKEN`,
 or `RAIL_AUTH_MODE` other than `none` — is refused, naming each one found, so
@@ -147,9 +149,10 @@ the default can't silently unenrol a gateway that was enforcing.
 #### `RAIL_CENTER_URL`
 
 Where the policy bundle comes from, as an origin (e.g.
-`https://rail-center.example.com`). Required when the plugin is on. It must
-name a host. A `user:password@` in it is sent as Basic authentication, and is
-refused beside `RAIL_AUTH_MODE=bearer`. Error messages never carry it.
+`https://rail-center.example.com`): the path beneath it is the API's. Required
+when the plugin is on. It must name a host. A `user:password@` in it is sent as
+Basic authentication, and is refused beside `RAIL_AUTH_MODE=bearer`. Error
+messages never carry it.
 
 #### `RAIL_GATEWAY_SLUG`
 
@@ -171,7 +174,8 @@ token.
 #### `RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS`
 
 How often to fetch the bundle again, in seconds. Defaults to `60`. Not an
-integer is refused; below `5` is raised to `5` with a warning.
+integer is refused; below `5` is raised to `5` with a warning, since an eager
+interval isn't worth refusing to start over.
 
 #### `RAIL_GATEWAY_PORT`
 
