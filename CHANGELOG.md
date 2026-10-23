@@ -48,3 +48,4 @@ Released versions correspond to published images at `ghcr.io/datrail/gateway` an
 
 - **The `x-rail` ticket is unsigned.** `agent_id`, `id` and the posture are chosen by whoever sent the request; they are evaluated and reported as claims, never as established identity.
 - A caller's claimed ticket status is recorded under `claimed-x-rail-status`, never under the key an operator reads as the decision.
+- Both images ship certifi 2026.10.19, which drops the "emSign ECC Root CA - G3" root, an issuer of intermediates whose keys were compromised. `ghcr.io/datrail/gateway` ships opentelemetry-api 1.45.1, which bounds how much of a `tracestate` header it parses; `gateway-apigee-grpc` doesn't include it.
