@@ -17,11 +17,13 @@ from gateway.apigee_grpc.settings import get_max_message_bytes
 from gateway.core.bundle.client import BundleHolder
 from gateway.core.enforcement import DenialReporter
 from gateway.core.errors import ConfigError
+from gateway.core.keyset import KeySetHolder
 from gateway.core.lifecycle import is_ready, running
 from gateway.core.logs import configure_logging
 from gateway.core.mode import describe_plugin, plugin_enabled
 from gateway.core.settings import (
     build_holder,
+    build_keyset,
     port,
     rail_center_from_environment,
 )
@@ -43,9 +45,12 @@ _NOT_SERVING = health_pb2.HealthCheckResponse.NOT_SERVING
 class _Health(health.aio.HealthServicer):
     """gRPC health, with readiness read from the holder on every check."""
 
-    def __init__(self, holder: BundleHolder | None) -> None:
+    def __init__(
+        self, holder: BundleHolder | None, keyset: KeySetHolder | None = None
+    ) -> None:
         super().__init__()
         self._holder = holder
+        self._keyset = keyset
 
     async def Check(self, request, context):
         if request.service == READY_SERVICE:
@@ -55,7 +60,8 @@ class _Health(health.aio.HealthServicer):
     async def _update_readiness(self) -> None:
         # `set` also tells anyone watching.
         await self.set(
-            READY_SERVICE, _SERVING if is_ready(self._holder) else _NOT_SERVING
+            READY_SERVICE,
+            _SERVING if is_ready(self._holder, self._keyset) else _NOT_SERVING,
         )
 
 
@@ -66,10 +72,12 @@ async def serving(
     *,
     listen_port: int,
     max_message_bytes: int,
+    keyset: KeySetHolder | None = None,
 ) -> AsyncIterator[int]:
     """Serve the callout on `listen_port` (0: any free port) for the life of the
-    block, yielding the bound port. `holder` is None with the plugin off."""
-    async with running(holder):
+    block, yielding the bound port. `holder` and `keyset` are None with the
+    plugin off."""
+    async with running(holder, keyset):
         server = grpc.aio.server(
             options=[
                 ("grpc.max_receive_message_length", max_message_bytes),
@@ -80,9 +88,9 @@ async def serving(
             ]
         )
         add_ExternalCalloutServiceServicer_to_server(
-            RailCallout(holder, reporter), server
+            RailCallout(holder, reporter, keyset), server
         )
-        health = _Health(holder)
+        health = _Health(holder, keyset)
         health_pb2_grpc.add_HealthServicer_to_server(health, server)
         try:
             bound = server.add_insecure_port(f"0.0.0.0:{listen_port}")
@@ -105,13 +113,18 @@ async def _serve_until_stopped(
     reporter: DenialReporter | None,
     listen_port: int,
     max_message_bytes: int,
+    keyset: KeySetHolder | None = None,
 ) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(signum, stop.set)
     async with serving(
-        holder, reporter, listen_port=listen_port, max_message_bytes=max_message_bytes
+        holder,
+        reporter,
+        listen_port=listen_port,
+        max_message_bytes=max_message_bytes,
+        keyset=keyset,
     ) as bound:
         log.info("serving the ExternalCallout service on port %d", bound)
         await stop.wait()
@@ -126,7 +139,9 @@ def main() -> int:
         enabled = plugin_enabled()
         log.info("%s", describe_plugin(enabled))
         holder = build_holder() if enabled else None
-        reporter = DenialReporter(*rail_center_from_environment()) if enabled else None
+        rail_center = rail_center_from_environment() if enabled else None
+        reporter = DenialReporter(*rail_center) if rail_center else None
+        keyset = build_keyset(*rail_center) if rail_center else None
         listen_port = port()
         max_message_bytes = get_max_message_bytes()
     except ConfigError as exc:
@@ -135,7 +150,9 @@ def main() -> int:
     log.info("gRPC messages are limited to %d bytes", max_message_bytes)
     try:
         asyncio.run(
-            _serve_until_stopped(holder, reporter, listen_port, max_message_bytes)
+            _serve_until_stopped(
+                holder, reporter, listen_port, max_message_bytes, keyset
+            )
         )
     except ConfigError as exc:
         log.error("%s", exc)

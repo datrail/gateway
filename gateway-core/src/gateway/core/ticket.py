@@ -486,6 +486,31 @@ def _json_of(raw: bytes) -> Any:
         return _UNDECODABLE
 
 
+def signed_kid(value: str | list[str] | tuple[str, ...] | None) -> str | None:
+    """The `kid` a signed header names, or None for anything that is not a
+    readable signed header with a string `kid`.
+
+    Reads the JOSE header and nothing else, so the key-set holder can tell
+    whether a request names a key it does not hold before the ticket is read.
+    The answer decides only whether to refetch: the reading itself is
+    `parse_rail_header`'s, against whatever set is then held.
+    """
+    if isinstance(value, (list, tuple)):
+        if len(value) != 1:
+            return None
+        value = value[0]
+    if not isinstance(value, str) or value.count(".") != 2:
+        return None
+    raw = _decoded_part(value.split(".", 1)[0])
+    if raw is None:
+        return None
+    header = _json_of(raw)
+    if not isinstance(header, dict):
+        return None
+    kid = header.get("kid")
+    return kid if isinstance(kid, str) else None
+
+
 def _read_signed(value: str, now: int, verifier: TicketVerifier | None) -> ParseResult:
     """A header containing `.`, read in the contract's order: structure,
     header, signature, payload, shape, then `nbf`/`iss`/`aud`, then expiry."""

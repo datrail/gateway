@@ -6,14 +6,28 @@ whichever interface reads it. What an interface serves stays in that interface.
 """
 
 import base64
+import logging
 import os
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from gateway.core.auth import auth_headers
 from gateway.core.bundle.client import BundleHolder, refresh_seconds
 from gateway.core.errors import ConfigError
+from gateway.core.keyset import KeySetHolder, boottime_clock
 
 DEFAULT_PORT = 8080
+
+log = logging.getLogger(__name__)
+
+#: The issuer and audience a signed ticket must name: its tenant's issuer
+#: (Rail Center's `RAIL_CENTER_BASE_URL` followed by `/tenants/<tenant id>`) and
+#: the tenant id. Never derived from `RAIL_CENTER_URL`, which may be an internal
+#: address, and compared exactly.
+TICKET_ISSUER: str = "RAIL_GATEWAY_TICKET_ISSUER"
+TICKET_AUDIENCE: str = "RAIL_GATEWAY_TICKET_AUDIENCE"
+
+#: Whether an unsigned ticket is refused as `bad_signature`.
+REQUIRE_SIGNED_TICKETS: str = "RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS"
 
 
 def _required(name: str) -> str:
@@ -112,6 +126,73 @@ def build_holder() -> BundleHolder:
     return BundleHolder(
         url, headers, gateway_slug(), interval_seconds=refresh_seconds()
     )
+
+
+def _optional(name: str) -> str | None:
+    """A variable that may be left unset; blank is unset.
+
+    Blank is read as unset rather than as the empty string, because the reader
+    takes a configured issuer or audience to be one it compares against: an
+    empty one would match a ticket carrying `iss: ""`.
+    """
+    return (os.environ.get(name) or "").strip() or None
+
+
+def require_signed_tickets() -> bool:
+    """`RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS`: `true` or `false`, default `false`.
+
+    Turned on once every agent this gateway fronts is served signed tickets,
+    and not before: until then it refuses all of their tickets. Until it is on,
+    an attacker refused on a signed ticket can send an unsigned one instead, so
+    signing protects nothing at a gateway still accepting both. Anything but the
+    two spellings is refused, case folded, as `RAIL_PLUGIN_ENABLED` is.
+    """
+    raw = (os.environ.get(REQUIRE_SIGNED_TICKETS) or "").strip()
+    if not raw:
+        return False
+    folded = raw.lower()
+    if folded not in ("true", "false"):
+        raise ConfigError(
+            f"{REQUIRE_SIGNED_TICKETS} must be true or false, got: {safe_value(raw)}"
+        )
+    return folded == "true"
+
+
+def build_keyset(url: str, headers: dict[str, str]) -> KeySetHolder:
+    """The key-set holder, from the same Rail Center and credential the bundle
+    holder uses, and the settings above.
+
+    **Requiring signatures over a Rail Center that is not `https://` is
+    refused**: no key set is ever fetched over anything else, so that gateway
+    would refuse every call while starting cleanly.
+    """
+    requires = require_signed_tickets()
+    if requires and urlsplit(url).scheme != "https":
+        raise ConfigError(
+            f"{REQUIRE_SIGNED_TICKETS} is true, but RAIL_CENTER_URL is not "
+            "https:// and no signing key set is fetched over anything else, so "
+            "every call would be refused"
+        )
+    clock, counts_suspend = boottime_clock()
+    if not counts_suspend:
+        log.warning(
+            "this host has no CLOCK_BOOTTIME; the signing key set's maximum age "
+            "is counted on a clock that stops while the host is suspended"
+        )
+    return KeySetHolder(
+        url,
+        headers,
+        issuer=_optional(TICKET_ISSUER),
+        audience=_optional(TICKET_AUDIENCE),
+        requires_signatures=requires,
+        clock=clock,
+    )
+
+
+def safe_value(raw: str) -> str:
+    """`raw` for an error message: these variables carry no secret, but a
+    value pasted with a control character in it should not write one to a log."""
+    return raw.encode("unicode_escape").decode("ascii")
 
 
 def gateway_slug() -> str:

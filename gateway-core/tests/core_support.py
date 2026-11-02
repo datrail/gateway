@@ -5,13 +5,16 @@ import base64
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from gateway.core.bundle.validate import UsableBundle, validate_bundle
 from gateway.core.endpoint import MAX_BODY_NESTING_DEPTH
 from gateway.core.key_safety import MAX_LOGGED_LENGTH
+from gateway.core.ticket import TicketVerifier, usable_keys
 
 SLUG = "delivery"
 KEY = "/mcp#tools/call#track_package"
@@ -135,6 +138,65 @@ def encode_ticket(**claims: Any) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
+#: Rail Center's published test signing key, from the vectors this suite runs.
+_SIGNING = json.loads(
+    (Path(__file__).parent / "vectors" / "signed_tickets.json").read_text(
+        encoding="utf-8"
+    )
+)["signing"]
+_TEST_KEY = Ed25519PrivateKey.from_private_bytes(
+    bytes.fromhex(_SIGNING["test_key_seed_hex"])
+)
+
+TENANT = "00000000-0000-4000-8000-0000000000aa"
+ISSUER = f"https://rail-center.example/tenants/{TENANT}"
+
+#: The published key set those tickets verify against.
+TENANT_JWKS = _SIGNING["jwks"]
+
+#: A gateway enforcing for `TENANT`, holding the key the test key signs with.
+TENANT_VERIFIER = TicketVerifier(
+    keys=usable_keys(_SIGNING["jwks"]), issuer=ISSUER, audience=TENANT
+)
+
+
+def encode_signed_ticket(**claims: Any) -> str:
+    """A signed `x-rail` header, signed with the published test key: for
+    `TENANT` unless `aud` or `iss` says otherwise."""
+    claims.setdefault("agent_id", AGENT)
+    claims.setdefault("exp", 4102444800)
+    claims.setdefault("nbf", 1700000000)
+    claims.setdefault("iss", ISSUER)
+    claims.setdefault("aud", TENANT)
+
+    def part(value: Any) -> str:
+        raw = json.dumps(value).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    kid = _SIGNING["jwks"]["keys"][0]["kid"]
+    signing_input = f"{part({'alg': 'EdDSA', 'typ': 'JWT', 'kid': kid})}.{part(claims)}"
+    signature = base64.urlsafe_b64encode(_TEST_KEY.sign(signing_input.encode()))
+    return f"{signing_input}.{signature.decode().rstrip('=')}"
+
+
+class FixedKeys:
+    """A key-set holder that holds `verifier` and never fetches: the table is
+    about what a reading leads to, and fetching has its own tests."""
+
+    def __init__(self, verifier: TicketVerifier) -> None:
+        self._verifier = verifier
+        self.requires_signatures = verifier.requires_signatures
+
+    def verifier(self) -> TicketVerifier:
+        return self._verifier
+
+    def holds_keys(self) -> bool:
+        return self._verifier.keys is not None
+
+    async def ensure(self, _value: Any) -> None:
+        return None
+
+
 def encode_signed_shape() -> str:
     """A header in the signed form — a JOSE header, a payload and a signature
     part — signed by nobody. Without a key set to check it against, the
@@ -225,6 +287,12 @@ class EnforcementCase:
     # Where a row's whole effect is a warning, the warning is the row.
     logged: tuple[str, ...] = ()
     not_for: Mapping[str, str] = field(default_factory=dict)
+    # What signed tickets are checked against; None is a gateway holding no
+    # key set, configured with no issuer or audience.
+    verifier: TicketVerifier | None = None
+
+    def get_keyset(self) -> FixedKeys | None:
+        return FixedKeys(self.verifier) if self.verifier is not None else None
 
     def get_bundle(self) -> UsableBundle | None:
         if self.enforcement is None:
@@ -536,6 +604,23 @@ ENFORCEMENT_CASES = [
         "no usable ticket, block, a valid ticket is judged",
         ticket_fallback="block",
         x_rail=(encode_ticket(),),
+    ),
+    EnforcementCase(
+        "no usable ticket, block, a signed ticket for this tenant is judged",
+        ticket_fallback="block",
+        x_rail=(encode_signed_ticket(),),
+        verifier=TENANT_VERIFIER,
+    ),
+    # Genuine — Rail Center signed it — but for another tenant's gateway.
+    EnforcementCase(
+        "no usable ticket, block (wrong_audience)",
+        ticket_fallback="block",
+        x_rail=(encode_signed_ticket(aud="00000000-0000-4000-8000-0000000000bb"),),
+        verifier=TENANT_VERIFIER,
+        status=403,
+        report=build_report(
+            policy_id=None, ticket_state="wrong_audience", fallback="ticket"
+        ),
     ),
     EnforcementCase(
         "no usable ticket, the fallback is block when the bundle names none",

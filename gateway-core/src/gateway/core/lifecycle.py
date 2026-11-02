@@ -1,4 +1,5 @@
-"""Start and stop the bundle holder with the process, and report readiness."""
+"""Start and stop the bundle holder and the key-set holder with the process,
+and report readiness."""
 
 import asyncio
 import logging
@@ -6,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from gateway.core.bundle.client import BundleHolder
+from gateway.core.keyset import KeySetHolder
 
 log = logging.getLogger(__name__)
 
@@ -17,8 +19,20 @@ STARTUP_FETCH_GRACE_SECONDS = 5.0
 
 
 @asynccontextmanager
-async def running(holder: BundleHolder | None) -> AsyncIterator[None]:
-    """Run `holder` for the life of the block, and stop it after.
+async def running(
+    holder: BundleHolder | None, keyset: KeySetHolder | None = None
+) -> AsyncIterator[None]:
+    """Run `holder`, and `keyset` beside it, for the life of the block, and
+    stop both after.
+
+    The key set's first fetch starts beside the bundle's. It is waited on, in
+    the same grace and never past it, only where signatures are required:
+    there readiness waits on it too, and elsewhere it decides nothing a first
+    request needs, so waiting would only keep `/health` refusing connections. A
+    gateway holding no key set still serves, and reads every signed ticket as
+    `bad_signature` until one arrives. A first fetch that has raised by the
+    time the wait ends refuses the start, whether it was waited on or simply
+    finished first, and both holders are stopped before the raise goes on.
 
     A None holder has nothing to start, and the block is entered at once.
 
@@ -56,50 +70,94 @@ async def running(holder: BundleHolder | None) -> AsyncIterator[None]:
     # was waiting on, and cancelling this one would take the refresh loop
     # with it — `start()` creates the loop after the first fetch returns.
     first = asyncio.create_task(holder.start())
-    done, _ = await asyncio.wait({first}, timeout=STARTUP_FETCH_GRACE_SECONDS)
-    if first in done:
-        # `.result()` and not a `try`: **nothing here catches**, per above.
-        outcome = first.result()
-        if outcome.held is None:
-            # Not fatal, and worth a line at this level: it is the whole
-            # difference between a gateway that is starting and one that is
-            # stuck, and `/ready` reports only the bit.
-            log.warning(
-                "started holding no policy bundle: %s — /ready reports not ready "
-                "until one arrives",
-                outcome.reason or outcome.kind,
-            )
-    else:
-        log.warning(
-            "started holding no policy bundle: the first fetch has run for "
-            "%ss and is still going — /ready reports not ready until one "
-            "arrives",
-            STARTUP_FETCH_GRACE_SECONDS,
-        )
+    keys_first = asyncio.create_task(keyset.start()) if keyset is not None else None
+    awaited = {first}
+    if keys_first is not None and keyset is not None and keyset.requires_signatures:
+        awaited.add(keys_first)
+    await asyncio.wait(awaited, timeout=STARTUP_FETCH_GRACE_SECONDS)
+    # Every task done by now is read below rather than cancelled at teardown.
+    # A raise from one read is what refuses the start, and the read after it
+    # is then never reached: teardown says that second raise, if there is one.
+    read = {task for task in (first, keys_first) if task is not None and task.done()}
     try:
+        # Inside the `try`: a raise read here refuses the start, and the
+        # `finally` is what still stops the other holder and its first fetch.
+        if keys_first in read:
+            # Read for the reason the bundle's is: **nothing here catches**. A
+            # raise here is a defect, and `start()` creates the refresh loop
+            # only after the first fetch returns, so a key set that raised
+            # would never be refreshed while the gateway served on.
+            keys_first.result()
+        if first in read:
+            # `.result()` and not a `try`: **nothing here catches**, per above.
+            outcome = first.result()
+            if outcome.held is None:
+                # Not fatal, and worth a line at this level: it is the whole
+                # difference between a gateway that is starting and one that is
+                # stuck, and `/ready` reports only the bit.
+                log.warning(
+                    "started holding no policy bundle: %s — /ready reports not "
+                    "ready until one arrives",
+                    outcome.reason or outcome.kind,
+                )
+        else:
+            log.warning(
+                "started holding no policy bundle: the first fetch has run for "
+                "%ss and is still going — /ready reports not ready until one "
+                "arrives",
+                STARTUP_FETCH_GRACE_SECONDS,
+            )
         yield
     finally:
         # In a `finally` so a failure anywhere in the served life of the
-        # app still retires the refresh loop. Left running, it holds the
-        # event loop open and uvicorn's shutdown waits on it.
+        # app, or a start refused above, still retires the refresh loops. Left
+        # running, one holds the event loop open and uvicorn's shutdown waits
+        # on it.
         #
         # `stop()` first: it retires the epoch a first fetch still in flight
         # captured, so that fetch returns without creating a loop nothing
         # would then hold a handle to.
         await holder.stop()
-        first.cancel()
-        try:
-            await first
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            # Only reachable past the grace, where the raise this function
-            # does not catch can no longer refuse the start. It is still a
-            # defect, so it is still said out loud.
-            log.exception("the first policy bundle fetch raised")
+        if keyset is not None:
+            await keyset.stop()
+        labels = {first: "policy bundle", keys_first: "signing key set"}
+        raised = [
+            task
+            for task in (keys_first, first)
+            if task in read and not task.cancelled() and task.exception() is not None
+        ]
+        # In the order read above, so the first is the raise refusing the start
+        # and is not said twice; any after it went unread.
+        for task in raised[1:]:
+            log.error(
+                "the first %s fetch raised", labels[task], exc_info=task.exception()
+            )
+        for task, what in ((first, "policy bundle"), (keys_first, "signing key set")):
+            if task is None or task in read:
+                continue
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # Only reachable for a fetch still running when the wait ended
+                # — a bundle fetch past the grace, or a key-set fetch that had
+                # not finished, waited on or not — where the raise this
+                # function does not catch can no longer refuse the start. It is
+                # still a defect, so it is still said out loud.
+                log.exception("the first %s fetch raised", what)
 
 
-def is_ready(holder: BundleHolder | None) -> bool:
-    """Whether there is a ruleset to decide with: always without a holder,
-    and once a bundle is held with one."""
-    return holder is None or holder.current() is not None
+def is_ready(holder: BundleHolder | None, keyset: KeySetHolder | None = None) -> bool:
+    """Whether there is a ruleset to decide with — a bundle held, or no holder
+    to hold one — and, where signed tickets are required, a key set.
+
+    A gateway that requires signed tickets also needs a key set, because without
+    one it refuses every call; one that does not require them reads an unsigned
+    ticket as it always has, so its readiness is the bundle's alone.
+    """
+    bundle_ready = holder is None or holder.current() is not None
+    if keyset is None or not keyset.requires_signatures:
+        return bundle_ready
+    return bundle_ready and keyset.holds_keys()

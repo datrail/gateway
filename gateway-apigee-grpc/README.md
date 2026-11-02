@@ -42,6 +42,11 @@ can't judge a call, and forward nothing to the upstream. So a callout outage
 is an MCP outage. Apigee's fault and analytics show the callout failed; the
 callout's own log shows nothing.
 
+A signed ticket naming a key the callout doesn't hold waits for one refetch of
+Rail Center's key set: up to 10 s, or about 20 s behind a refresh already
+running. Past `TimeoutMs` that call is this 503, not a `bad_signature` denial,
+and no denial is reported.
+
 An error inside a working callout is the other way round: it logs the
 traceback and allows the request, as standalone does when its walk raises.
 
@@ -49,7 +54,9 @@ traceback and allows the request, as standalone does when its walk raises.
 
 The callout waits up to 5 s for the first bundle, then serves whether or not
 it holds one. With no bundle held, calls are allowed, and readiness is
-`NOT_SERVING` until one arrives. A failed fetch doesn't stop it.
+`NOT_SERVING` until one arrives. Where `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=true`
+it waits on the first signing key set in the same 5 s, and readiness is also
+`NOT_SERVING` until a key set is held. A failed fetch doesn't stop it.
 
 ## Run it beside Apigee
 
@@ -79,7 +86,7 @@ it holds one. With no bundle held, calls are allowed, and readiness is
     apply, and until then the proxy answers 503;
   - `--min-instances=1`: a cold start longer than `TimeoutMs` is a 503;
   - a startup probe on gRPC service `datrail.gateway.Ready` holds traffic
-    back until a bundle is held.
+    back until a bundle is held, and a key set where signatures are required.
 - **Elsewhere**, the ExternalCallout sends no ID token and nothing checks
   who calls the callout: keep it reachable only from Apigee.
 
@@ -114,7 +121,7 @@ gRPC health (`grpc.health.v1`), on the serving port:
 
 - the empty service name is liveness: `SERVING` once the port is bound;
 - `datrail.gateway.Ready` is readiness: `NOT_SERVING` until a bundle is held,
-  and `SERVING` with the plugin off.
+  and a key set where signatures are required; `SERVING` with the plugin off.
 
 `python -m gateway.apigee_grpc.probe_health [--ready]` asks either on this
 host, and exits 0 on `SERVING`: use it as an exec probe where a gRPC probe

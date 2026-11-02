@@ -47,14 +47,18 @@ from core_support import (
     DENIES_NO_KEY,
     DENY_ID,
     FULL_KEY,
+    ISSUER,
     KEY,
     REASONS,
     SKILL_ID,
+    TENANT,
+    TENANT_JWKS,
     UNREADABLE,
     Holder,
     build_bundle,
     build_call,
     build_policy,
+    encode_signed_ticket,
     encode_ticket,
     get_enforcement_params,
 )
@@ -63,6 +67,7 @@ from gateway.core.enforcement import (
     MAX_REPORTS_IN_FLIGHT,
 )
 from gateway.core.key_safety import MAX_LOGGED_LENGTH
+from gateway.core.keyset import KeySetHolder
 from gateway.standalone.server import _Enforcement
 
 RAIL_CENTER_URL = "http://rail-center.test"
@@ -129,6 +134,7 @@ def layer(
     blocking: bool = True,
     reports: _Reports | None = None,
     app: _Downstream | None = None,
+    keyset=None,
 ) -> tuple[_Enforcement, _Downstream, _Reports]:
     """The enforcement layer over a held bundle.
 
@@ -150,6 +156,7 @@ def layer(
             rail_center_url=RAIL_CENTER_URL,
             auth={"Authorization": "Bearer t"},
             transport=recorder.transport,
+            keyset=keyset,
         ),
         downstream,
         recorder,
@@ -262,7 +269,9 @@ async def test_the_answer_and_the_report_match_every_row_of_the_contract(case, c
     """Each row through the layer: a refusal is answered here and never
     reaches the app below, and a forwarded call reaches it as sent."""
     caplog.set_level(logging.WARNING, logger="gateway")
-    enforcement, downstream, reports = layer(case.get_bundle())
+    enforcement, downstream, reports = layer(
+        case.get_bundle(), keyset=case.get_keyset()
+    )
     headers = (
         [(b"x-rail", v.encode("latin-1")) for v in case.x_rail]
         + [(b"x-rail-status", v.encode("latin-1")) for v in case.x_rail_status]
@@ -899,3 +908,35 @@ async def test_observe_says_what_block_would_refuse_and_still_walks(caplog) -> N
     )
     await settled(reports, expecting=0)
     assert reports.bodies == [], "a report is an action, and observe takes none"
+
+
+@pytest.mark.asyncio
+async def test_a_key_published_a_moment_ago_admits_its_first_ticket():
+    """The layer asks the key set for its `kid` before reading the ticket. A
+    key that signs at once — a compromise withdrawal's replacement — reaches a
+    gateway holding only the key before it, and the call waits for one refetch
+    rather than being refused for a key Rail Center has already published."""
+    jwks = TENANT_JWKS
+    stale = {"keys": [{**jwks["keys"][0], "kid": "vector-key-2"}]}
+    answers = [httpx.Response(200, json=stale), httpx.Response(200, json=jwks)]
+    keyset = KeySetHolder(
+        "https://rail-center.example",
+        {},
+        issuer=ISSUER,
+        audience=TENANT,
+        transport=httpx.MockTransport(lambda _request: answers.pop(0)),
+    )
+    await keyset.refresh()
+    enforcement, downstream, _ = layer(
+        build_bundle(DENIES_EVERYTHING, ticket_fallback="block"), keyset=keyset
+    )
+
+    answer = await drive(
+        enforcement,
+        build_call(),
+        headers=[(b"x-rail", encode_signed_ticket().encode("latin-1"))],
+    )
+
+    assert answer.status == 200
+    assert downstream.calls == 1
+    assert answers == []

@@ -29,9 +29,11 @@ forwards it through its own MCP client:
   where the route's URL carries `user:password@`.
 - **`X-Forwarded-Prefix`** goes to the gateway's own sub-app for that route,
   not to the upstream. One sent by the agent is removed.
-- **Startup waits up to 5 s for the first bundle**, before the port is bound.
-  A failed fetch doesn't stop it.
-- **With no bundle held, calls are forwarded**, and `/ready` answers `503`.
+- **Startup waits up to 5 s for the first bundle**, before the port is bound,
+  and for the first signing key set in the same 5 s where
+  `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=true`. A failed fetch doesn't stop it.
+- **With no bundle held, calls are forwarded**, and `/ready` answers `503` —
+  as it does, where signatures are required, until a key set is held.
 
 ## Run
 
@@ -108,8 +110,9 @@ places on which upstreams can share one gateway, is in
 - `POST <prefix>/mcp`: the proxied MCP endpoint, one per route.
 - `GET /health`: liveness, `200` once the process is up and its configuration
   parsed. It says nothing about the bundle.
-- `GET /ready`: `200` once a policy bundle is held, `503` until then. With the
-  plugin off, always `200`. Both stay at the root whatever the prefixes.
+- `GET /ready`: `200` once a policy bundle is held — and, where
+  `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=true`, a signing key set — `503` until
+  then. With the plugin off, always `200`. Both stay at the root whatever the prefixes.
 
 ## From source
 

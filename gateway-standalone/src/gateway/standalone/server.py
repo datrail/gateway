@@ -131,6 +131,7 @@ from gateway.core.bundle.client import BundleHolder
 from gateway.core.enforcement import DenialReporter, judge, refusal_body
 from gateway.core.errors import ConfigError
 from gateway.core.key_safety import safe_for_log
+from gateway.core.keyset import KeySetHolder
 from gateway.core.lifecycle import is_ready, running
 from gateway.core.logs import configure_logging
 from gateway.core.mode import describe_plugin, plugin_enabled
@@ -139,6 +140,7 @@ from gateway.core.settings import (
     _safe_to_log,
     _split_credential,
     build_holder,
+    build_keyset,
     port,
     rail_center_from_environment,
 )
@@ -153,6 +155,7 @@ def build_gateway(
     plugin: bool | None = None,
     *,
     polls: bool = True,
+    keyset: KeySetHolder | None = None,
 ) -> FastMCP:
     """The proxy that forwards to the upstream, plus liveness and readiness.
 
@@ -219,7 +222,10 @@ def build_gateway(
         name="datrail-gateway",
         # Read by `/ready` whether or not this proxy polls; started only where
         # it does, since the loop is what `polls` decides.
-        lifespan=_bundle_lifespan(bundle_holder if polls else None),
+        lifespan=_bundle_lifespan(
+            bundle_holder if polls else None,
+            keyset if polls and bundle_holder is not None else None,
+        ),
     )
     gateway.add_middleware(_UpstreamErrorBoundary())
 
@@ -245,7 +251,9 @@ def build_gateway(
 
     @gateway.custom_route("/ready", methods=["GET"])
     async def ready(_request):  # pragma: no cover - exercised over HTTP
-        """Whether a policy bundle is held. Asked fresh, answered honestly.
+        """Whether there is a ruleset to decide with: a policy bundle held, and
+        a signing key set where signatures are required. Asked fresh, answered
+        honestly.
 
         `None` from `current()` is *no ruleset*, never *an empty one* — an
         empty chain allows — so the only thing this can truthfully report while
@@ -258,7 +266,8 @@ def build_gateway(
         component with no control plane has no bundle to wait for and never will
         have, so waiting would leave it permanently unready.
 
-        **Under `plugin` it is 503 until a bundle arrives, at every posture.**
+        **Under `plugin` it is 503 until a bundle arrives — and, where
+        signatures are required, a key set — at every posture.**
         Not only the ones that act: a gateway holding a bundle has a ruleset to
         decide with whatever posture that bundle names, while a gateway holding
         nothing has none, and those are different states even though both
@@ -283,7 +292,7 @@ def build_gateway(
         for an operator convenience the `holding policy bundle …` log line
         already covers.
         """
-        if not is_ready(bundle_holder):
+        if not is_ready(bundle_holder, keyset if bundle_holder is not None else None):
             return JSONResponse({"status": "not ready"}, status_code=503)
         return JSONResponse({"status": "ready"})
 
@@ -291,7 +300,7 @@ def build_gateway(
     return gateway
 
 
-def _bundle_lifespan(holder: BundleHolder | None):
+def _bundle_lifespan(holder: BundleHolder | None, keyset: KeySetHolder | None = None):
     """Start the holder with the application and stop it with the application.
 
     `holder` is None where the plugin is disabled and where this proxy is not
@@ -301,12 +310,13 @@ def _bundle_lifespan(holder: BundleHolder | None):
     non-polling proxy reads a holder another proxy in the same process fills,
     and starting it again would be a second loop for one bundle.
 
-    `running` says how the start and the stop go.
+    `running` says how the start and the stop go. `keyset` travels with the
+    holder: it is started where the bundle is polled, and nowhere else.
     """
 
     @asynccontextmanager
     async def lifespan(_server) -> AsyncIterator[None]:
-        async with running(holder):
+        async with running(holder, keyset):
             yield
 
     return lifespan
@@ -319,6 +329,7 @@ def build_app(
     *,
     rail_center: tuple[str, dict[str, str]] | None = None,
     report_transport: httpx.AsyncBaseTransport | None = None,
+    keyset: KeySetHolder | None = None,
 ) -> ASGIApp:
     """The ASGI application uvicorn serves.
 
@@ -358,6 +369,10 @@ def build_app(
     url, auth = (
         rail_center if rail_center is not None else rail_center_from_environment()
     )
+    # From the same Rail Center and credential as the denial reporter (and,
+    # read from the environment, the holder), for the reason this function's
+    # docstring gives for resolving them once.
+    resolved_keyset = keyset if keyset is not None else build_keyset(url, auth)
 
     # **The holder is the gateway's, not a route's**: every proxy is built with
     # it and exactly one polls it. The poll is started by a lifespan, so polling
@@ -377,6 +392,7 @@ def build_app(
             resolved_holder,
             resolved_plugin,
             polls=polls,
+            keyset=resolved_keyset,
         )
         served = gateway.http_app(transport="streamable-http")
         app = _Enforcement(
@@ -385,6 +401,7 @@ def build_app(
             rail_center_url=url,
             auth=auth,
             transport=report_transport,
+            keyset=resolved_keyset,
         )
         if polls:
             primary = app
@@ -606,9 +623,11 @@ class _Enforcement:
         rail_center_url: str,
         auth: dict[str, str],
         transport: httpx.AsyncBaseTransport | None = None,
+        keyset: KeySetHolder | None = None,
     ) -> None:
         self._app = app
         self._holder = holder
+        self._keyset = keyset
         self._reporter = DenialReporter(rail_center_url, auth, transport=transport)
 
     async def __call__(self, scope, receive, send) -> None:
@@ -639,16 +658,23 @@ class _Enforcement:
             )
             await self._app(scope, replay, send)
             return
+        x_rail = _x_rail_values(scope)
+        if self._keyset is not None:
+            # Before the ticket is read: a `kid` not held is worth one refetch,
+            # and the call waits for it rather than being refused for a key that
+            # was published a moment ago.
+            await self._keyset.ensure(x_rail)
         verdict = judge(
             self._holder,
             scope.get("path") or "/",
             body,
-            _x_rail_values(scope),
+            x_rail,
             _x_rail_status_values(scope),
             [
                 (k.decode("latin-1"), v.decode("latin-1"))
                 for k, v in scope.get("headers", ())
             ],
+            verifier=self._keyset.verifier() if self._keyset is not None else None,
         )
         if verdict.report is not None:
             self._reporter.send(verdict.report)

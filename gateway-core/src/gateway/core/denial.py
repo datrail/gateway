@@ -161,8 +161,9 @@ def build_report(
     `ticket_id` is the ticket's own `id`, which is what links a denial to the
     ticket and through it to the agent, its posture and the run that produced
     it. It is passed through only when it is the shape Rail Center's schema
-    declares, a UUID string: the ticket is unsigned, so the claim is
-    attacker-chosen, a claim of the wrong shape would be a 422 on the report,
+    declares, a UUID string: an unsigned ticket's claim is attacker-chosen,
+    and even a verified one is checked here, because a claim of the wrong shape
+    would be a 422 on the report,
     and on this route a 422 means the denial is not recorded at all. Dropping a
     malformed claim costs a column; sending it costs the row.
 

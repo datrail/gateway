@@ -25,7 +25,7 @@ from gateway.core.denial import build_report, report
 from gateway.core.endpoint import EndpointResolution, resolve_from_body
 from gateway.core.key_safety import safe_for_log
 from gateway.core.mode import blocks, judges
-from gateway.core.ticket import ParseResult, parse_rail_header
+from gateway.core.ticket import ParseResult, TicketVerifier, parse_rail_header
 
 log = logging.getLogger(__name__)
 
@@ -84,11 +84,13 @@ def judge(
     x_rail: list[str] | None,
     claimed_status: list[str] | None,
     headers: list[tuple[str, str]] | None = None,
+    verifier: TicketVerifier | None = None,
 ) -> Verdict:
     """What to do with one call: `body` as received, `path` as the upstream
     serves it, every `x-rail` and `x-rail-status` value the caller sent, and
     every header as a `(name, value)` pair — what a condition's
-    `request.headers` reads.
+    `request.headers` reads. `verifier` is what a signed ticket is checked
+    against; without one every well-formed signed ticket is `bad_signature`.
 
     Never raises. A defect in the walk must not take the forward path down:
     an unforeseen exception is logged with its traceback and the request
@@ -107,7 +109,7 @@ def judge(
         # window was.
         log.info("pass %s (session message, not judged)", named)
         return PASS
-    ticket = parse_rail_header(x_rail)
+    ticket = parse_rail_header(x_rail, verifier=verifier)
 
     bundle = holder.current()
     if bundle is None:
@@ -276,13 +278,14 @@ def judge(
         safe_for_log(policy.id),
         ticket.state,
     )
-    # **The policy id does not go back to the caller.** The `x-rail` ticket
-    # is unsigned and this gateway is the only thing in front of the
-    # upstream, so a caller that reads which id stopped each attempt can
-    # vary its claims and binary-search the tenant's chain and its
-    # thresholds. The operator's side of that trade is paid twice already —
-    # the log line above names the policy, and so does the report to Rail
-    # Center — both on the trusted side of the boundary.
+    # **The policy id does not go back to the caller.** An unsigned ticket's
+    # claims are the caller's to choose, and a gateway that does not require
+    # signatures still reads one, so any caller can present one; and this
+    # gateway is the only thing in front of the upstream, so a caller that reads
+    # which id stopped each attempt can vary its claims and binary-search the
+    # tenant's chain and its thresholds. The operator's side of that trade is
+    # paid twice already — the log line above names the policy, and so does the
+    # report to Rail Center — both on the trusted side of the boundary.
     return Verdict(
         403,
         "denied by policy",
