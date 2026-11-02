@@ -135,6 +135,19 @@ def encode_ticket(**claims: Any) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
+def encode_signed_shape() -> str:
+    """A header in the signed form — a JOSE header, a payload and a signature
+    part — signed by nobody. Without a key set to check it against, the
+    signature is never the question: the reading is `bad_signature`."""
+
+    def part(value: Any) -> str:
+        raw = value if isinstance(value, bytes) else json.dumps(value).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    header = part({"alg": "EdDSA", "typ": "JWT", "kid": "unheld"})
+    return f"{header}.{encode_ticket()}.{part(bytes(64))}"
+
+
 def build_call(tool: str = "track_package") -> bytes:
     return json.dumps({"method": "tools/call", "params": {"name": tool}}).encode()
 
@@ -514,6 +527,9 @@ ENFORCEMENT_CASES = [
             ("undecodable", ("!!!",)),
             ("malformed", (encode_ticket(exp="soon"),)),
             ("expired", (encode_ticket(exp=1),)),
+            # Signed, at a gateway holding no key set: refused for the
+            # signature before anything in it is read.
+            ("bad_signature", (encode_signed_shape(),)),
         )
     ],
     EnforcementCase(

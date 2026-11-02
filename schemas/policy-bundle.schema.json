@@ -77,7 +77,7 @@
         "pass",
         "block"
       ],
-      "description": "What happens to a call carrying no usable ticket — absent, undecodable, malformed or expired. Asked before `binding_fallback` and before the chain. `block` refuses without consulting the chain, and the refusal is reported with no `policy_id` and `metadata.fallback: \"ticket\"`; `pass` walks the chain with the `ticket` source absent, so every `ticket.*` path reads absent. Absent is `block`. Evaluated wherever the chain is walked and acted on only at `enforce`, as `binding_fallback` is."
+      "description": "What happens to a call carrying no usable ticket — absent, undecodable, malformed, bad_signature, wrong_audience or expired. Asked before `binding_fallback` and before the chain. `block` refuses without consulting the chain, and the refusal is reported with no `policy_id` and `metadata.fallback: \"ticket\"`; `pass` walks the chain with the `ticket` source absent, so every `ticket.*` path reads absent. Absent is `block`. Evaluated wherever the chain is walked and acted on only at `enforce`, as `binding_fallback` is."
     }
   },
   "$defs": {

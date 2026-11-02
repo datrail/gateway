@@ -60,9 +60,9 @@ does fix is the operators: `existing`, `not_existing`, `eq`, `ne`, `lt`,
 tool beside any other value. An unknown source, an unknown
 op or a wrong operand is uninterpretable and answered `503`.
 
-A call carrying no usable ticket — absent, undecodable, malformed, expired — is
-decided by the bundle's `ticket_fallback` before the binding fallback and the
-chain: `block` (the default in `2.x`; a `1.x` bundle without the field reads it as `pass`) refuses it at `enforce` and reports a denial with
+A call carrying no usable ticket — absent, undecodable, malformed, bad_signature,
+wrong_audience, expired — is decided by the bundle's `ticket_fallback` before
+the binding fallback and the chain: `block` (the default in `2.x`; a `1.x` bundle without the field reads it as `pass`) refuses it at `enforce` and reports a denial with
 no `policy_id` and `metadata.fallback: "ticket"`; `pass` walks the chain with
 the `ticket` source absent.
 

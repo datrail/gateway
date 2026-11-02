@@ -15,11 +15,13 @@ import dataclasses
 import json
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from core_support import build_bundle
 from gateway.core.bundle.conditions import (
     ConditionInput,
     UninterpretableCondition,
@@ -35,7 +37,7 @@ from gateway.core.bundle.validate import (
 )
 from gateway.core.key_safety import has_unsafe_key_characters
 from gateway.core.mode import ENFORCEMENTS, FALLBACKS, blocks
-from gateway.core.ticket import parse_rail_header
+from gateway.core.ticket import TicketVerifier, parse_rail_header, usable_keys
 
 VECTORS = Path(__file__).parent / "vectors"
 SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"
@@ -101,6 +103,82 @@ def test_the_file_is_worth_running() -> None:
     """
     assert len(TICKET_CASES) >= 70
     assert len({case["name"] for case in TICKET_CASES}) == len(TICKET_CASES)
+
+
+#: Rail Center's signed-ticket vectors, copied byte for byte from rail-center's
+#: `api/tests/vectors/signed_tickets.json` so that a resync is a copy and a
+#: diff, never an edit. Their case shape is Rail Center's, not `ticket.json`'s:
+#: each names the reader it runs at and the decision its policy set reaches.
+SIGNED = json.loads((VECTORS / "signed_tickets.json").read_text(encoding="utf-8"))
+SIGNED_CASES = SIGNED["cases"]
+
+
+def _signed_reader(case: dict[str, Any]) -> TicketVerifier:
+    reader = case["reader"]
+    return TicketVerifier(
+        keys=usable_keys(SIGNED["signing"]["jwks"]) if reader["holds_keys"] else None,
+        issuer=reader["issuer"],
+        audience=reader["audience"],
+        requires_signatures=reader["requires_signatures"],
+    )
+
+
+def _epoch(instant: str) -> int:
+    return int(datetime.fromisoformat(instant).timestamp())
+
+
+@pytest.mark.parametrize(
+    "case", SIGNED_CASES, ids=[case["name"] for case in SIGNED_CASES]
+)
+def test_signed_ticket_vector(case: dict[str, Any]) -> None:
+    ticket = parse_rail_header(
+        case["raw_header"], _epoch(case["now"]), _signed_reader(case)
+    )
+    expect = case["expect"]
+
+    assert ticket.state == expect["ticket_state"]
+
+    # The decision too, because the vectors pin it: a state is only half of
+    # the reading if an unusable ticket's claims still reached the walk.
+    bundle = build_bundle(*SIGNED["policy_sets"][case["policy_set"]])
+    decision = decide(
+        bundle,
+        ConditionInput(
+            ticket=ticket,
+            endpoint_key=case["endpoint_key"],
+            headers=request_headers([]),
+        ),
+    )
+    assert decision.allowed is expect["allowed"]
+    assert (decision.denied_by.name if decision.denied_by else None) == expect[
+        "denied_by"
+    ]
+    assert [policy.name for policy in decision.alerts] == expect["alerts"]
+
+
+def test_every_signed_ticket_that_is_not_valid_surrenders_its_claims() -> None:
+    """`bad_signature` above all: its payload was never decoded, so nothing in
+    it — its `id` included — can reach a rule or a denial report."""
+    for case in SIGNED_CASES:
+        ticket = parse_rail_header(
+            case["raw_header"], _epoch(case["now"]), _signed_reader(case)
+        )
+        if ticket.state != "valid":
+            assert ticket.token is None, case["name"]
+
+
+def test_the_signed_file_is_worth_running() -> None:
+    """Every state a signed reading can reach is exercised, and the file has
+    not been truncated to a few cases that all pass."""
+    assert len(SIGNED_CASES) >= 36
+    assert {case["expect"]["ticket_state"] for case in SIGNED_CASES} >= {
+        "valid",
+        "bad_signature",
+        "wrong_audience",
+        "malformed",
+        "undecodable",
+        "expired",
+    }
 
 
 BUNDLE_CASES = _load("bundle.json")
