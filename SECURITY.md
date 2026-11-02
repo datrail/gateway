@@ -34,7 +34,8 @@ quiet.
 Anything that gets a request past the gateway that should have been refused:
 
 - a **ticket that should not validate** but does — expired, malformed,
-  undecodable, absent, or carrying a posture the policy should reject;
+  undecodable, absent, signed with a key Rail Center did not publish, issued
+  for another tenant, or carrying a posture the policy should reject;
 - a **parser disagreement**, where the gateway reads a ticket differently from
   the component that issued it, so the identity enforced is not the identity
   intended;

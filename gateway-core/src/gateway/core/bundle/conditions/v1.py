@@ -114,12 +114,13 @@ def _resolve(field: str, request: ConditionInput) -> Any:
     A claim is absent in three cases, and all three are load-bearing:
 
       1. **The ticket is not usable.** Every claim of an ``absent``,
-         ``undecodable``, ``malformed`` or ``expired`` ticket resolves to absent,
-         whatever the payload says — which is what stops an expired ticket's
-         ``posture_score: 95`` outliving the ticket that carried it.
-      2. **The key is not in the payload.** The ticket is unsigned, so deleting
-         a key is free: a rule that only catches a null is one walked past by
-         removing a line.
+         ``undecodable``, ``malformed``, ``bad_signature``, ``wrong_audience``
+         or ``expired`` ticket resolves to absent, whatever the payload says —
+         which is what stops an expired ticket's ``posture_score: 95``
+         outliving the ticket that carried it.
+      2. **The key is not in the payload.** An unsigned ticket's keys can be
+         deleted for free: a rule that only catches a null is one walked past
+         by removing a line.
       3. **The key is present and null** — ``posture_score`` until scoring runs.
 
     A claim that is ``0``, ``""`` or ``[]`` is **present**. Testing the value's
@@ -129,7 +130,7 @@ def _resolve(field: str, request: ConditionInput) -> Any:
     claims = request.ticket.token  # populated only for a `valid` ticket
 
     if field == "x_rail_header":
-        # Folds all four unusable states into one answer, which is what makes
+        # Folds every unusable state into one answer, which is what makes
         # the seeded P0 a rule about trustworthy identity rather than about
         # whether a header was physically transmitted.
         return ABSENT if claims is None else "present"

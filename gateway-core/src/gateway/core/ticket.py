@@ -5,10 +5,18 @@ specifies what an enforcement point must implement so that both sides reach the
 same verdict on the same ticket. The state names are its names deliberately — a
 local vocabulary would be one more thing to translate when the two disagree.
 
-Wave 1 tickets are unsigned base64(JSON): anyone able to construct JSON can
-forge one, so this is a compatibility format and not an authentication
-credential. Reading it is still worth doing — an honest holder is bounded by
-what it says, and the shape rules below close the cheapest forgeries.
+A ticket comes in two forms. **Unsigned** is base64(JSON): anyone able to
+construct JSON can forge one, so it is a compatibility format and not an
+authentication credential. Reading it is still worth doing — an honest holder
+is bounded by what it says, and the shape rules below close the cheapest
+forgeries. **Signed** is a compact JWS — header, payload and Ed25519 signature —
+checked against the tenant's keys in a `TicketVerifier`, and only a ticket that
+verifies has its payload read at all. Which form a header is in is told by a
+`.`, which no unsigned header can contain.
+
+The signed reading is pinned by Rail Center's own vectors, copied into
+`tests/vectors/signed_tickets.json`; the cases they cannot express are in
+`tests/test_signed_ticket.py`.
 
 **Four known divergences from the TypeScript implementation, each decided in
 favour of the contract and each carried in the vectors.** Two are about bytes
@@ -39,8 +47,12 @@ import binascii
 import json
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from gateway.core.json_wire import MAX_SAFE_INTEGER
 
@@ -51,15 +63,48 @@ from gateway.core.json_wire import MAX_SAFE_INTEGER
 #: - ``undecodable`` the header arrived more than once; or is not decodable as
 #:                   base64; or the bytes are not strictly valid UTF-8; or are
 #:                   not JSON; or nest past ``MAX_NESTING_DEPTH``; or the value
-#:                   handed over was not text at all
+#:                   handed over was not text at all; or, signed, not exactly
+#:                   three non-empty parts, a part failing these rules, or a
+#:                   header that is not a JSON object
 #: - ``malformed``   not a JSON object; or an ``exp``
 #:                   that is missing, fractional, non-numeric or outside
-#:                   ±(2^53 − 1)
+#:                   ±(2^53 − 1); or, signed, an ``nbf`` failing the same rules
 #: - ``expired``     ``now >= exp``. A correctly-formed credential that is
 #:                   simply too old — reported distinctly from ``undecodable``
 #:                   for exactly that reason
+#: - ``bad_signature`` signed, and the header claims another algorithm, names
+#:                   no string ``kid`` or carries ``crit``; or no key set is
+#:                   held, or none for its ``kid``; or the signature does not
+#:                   verify. Also any unsigned ticket at a reader requiring
+#:                   signatures
+#: - ``wrong_audience`` signed and verified — Rail Center issued it — but not
+#:                   for this reader: an ``iss`` or ``aud`` other than the ones
+#:                   configured, none configured, or an ``nbf`` more than
+#:                   ``NBF_ALLOWANCE_SEC`` ahead
 #: - ``valid``       everything else
-TicketState = Literal["absent", "undecodable", "malformed", "expired", "valid"]
+TicketState = Literal[
+    "absent",
+    "undecodable",
+    "malformed",
+    "bad_signature",
+    "wrong_audience",
+    "expired",
+    "valid",
+]
+
+#: The one algorithm a signed ticket is issued and accepted with. Fixed by the
+#: contract, and compared exactly: `eddsa` is not it.
+JWS_ALG = "EdDSA"
+
+#: How far ahead of this gateway's clock a signed ticket's `nbf` may be and
+#: still be read, in seconds.
+#:
+#: **One-sided, unlike the `exp` comparison.** Rail Center stamps `nbf` with the
+#: instant it serves the ticket and compensates for no one's clock, so a gateway
+#: whose clock lags would refuse a fresh ticket for as long as it lags. `exp`
+#: keeps `CLOCK_SKEW_TOLERANCE_SEC`, which is zero, so this never lengthens a
+#: ticket's life; it only stops a new one being refused.
+NBF_ALLOWANCE_SEC = 60
 
 #: Clock-skew tolerance, in seconds, applied when comparing ``now`` to ``exp``.
 #:
@@ -124,6 +169,74 @@ class ParseResult:
     token: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class TicketVerifier:
+    """What a signed ticket is checked against: the key set held, and the
+    issuer and audience of the tenant this gateway enforces for.
+
+    `keys` maps each `kid` to its key, as `usable_keys` builds it from a
+    fetched JWKS, and is None while no key set is held — never fetched, or past
+    its maximum age. Fetching and ageing are the holder's I/O and clock, kept
+    out of here so that a reading stays a function of the header, the time and
+    these values.
+
+    No verifier at all is a reader that holds no keys, is configured with no
+    issuer or audience, and still accepts unsigned tickets: every reader before
+    signing existed.
+    """
+
+    keys: Mapping[str, Ed25519PublicKey] | None = None
+    issuer: str | None = None
+    audience: str | None = None
+    #: Read an unsigned ticket as `bad_signature`. Turned on once every agent
+    #: this gateway fronts is served signed tickets, and not before: until then
+    #: it refuses all of them.
+    requires_signatures: bool = False
+
+
+def usable_keys(jwks: Any) -> dict[str, Ed25519PublicKey] | None:
+    """A fetched JWKS as the key set to hold, or None where the fetch counts as
+    failed and replaces nothing.
+
+    It counts only as an object whose `keys` hold at least one usable key —
+    `kty` `OKP`, `crv` `Ed25519`, a string `kid` and an `x` decoding to exactly
+    32 bytes — and in which no two entries share a `kid`. An entry that is not
+    usable, or whose `use`, `key_ops` or `alg` says it is for something else,
+    is skipped rather than refusing the set: a later Rail Center may publish
+    entries for other purposes, and that must not stop verification.
+    """
+    if not isinstance(jwks, dict) or not isinstance(jwks.get("keys"), list):
+        return None
+    entries = jwks["keys"]
+    # Counted over every entry, usable or not: two entries claiming one `kid`
+    # leave no way to know which a ticket naming it meant.
+    kids = [entry.get("kid") for entry in entries if isinstance(entry, dict)]
+    if len(kids) != len({repr(kid) for kid in kids}):
+        return None
+    keys: dict[str, Ed25519PublicKey] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("kty") != "OKP" or entry.get("crv") != "Ed25519":
+            continue
+        kid, x = entry.get("kid"), entry.get("x")
+        if not isinstance(kid, str) or not isinstance(x, str):
+            continue
+        if "use" in entry and entry["use"] != "sig":
+            continue
+        if "key_ops" in entry and not (
+            isinstance(entry["key_ops"], list) and "verify" in entry["key_ops"]
+        ):
+            continue
+        if "alg" in entry and entry["alg"] != JWS_ALG:
+            continue
+        raw = _decoded_part(x)
+        if raw is None or len(raw) != 32:
+            continue
+        keys[kid] = Ed25519PublicKey.from_public_bytes(raw)
+    return keys or None
+
+
 def _nesting_exceeds(text: str, limit: int) -> bool:
     """True when `text` nests brackets deeper than `limit`.
 
@@ -177,31 +290,38 @@ def _now_seconds() -> int:
 def _usable_exp(claims: dict[str, Any]) -> int | None:
     """The ``exp`` claim if it is one this contract can compare, else ``None``.
 
-    An **absent** ``exp`` is malformed rather than unbounded. The token is
-    unsigned, so deleting a key is strictly cheaper than corrupting one —
-    reading a missing ``exp`` as "no expiry" would refuse the harder forgery and
-    admit the easier one.
+    An **absent** ``exp`` is malformed rather than unbounded. An unsigned
+    ticket's keys can be deleted, and deleting one is strictly cheaper than
+    corrupting it — reading a missing ``exp`` as "no expiry" would refuse the
+    harder forgery and admit the easier one.
 
     ``bool`` is excluded explicitly because ``isinstance(True, int)`` is true in
     Python. Without saying so, this implementation would read ``exp: true`` as
     the year 1970 while the other refuses it.
     """
-    exp = claims.get("exp")
-    if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+    return _usable_bound(claims.get("exp"))
+
+
+def _usable_bound(value: Any) -> int | None:
+    """A time claim — `exp`, or a signed ticket's `nbf` — as whole seconds,
+    or None where it is not a whole number within ±(2^53 − 1)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    if isinstance(exp, float):
+    if isinstance(value, float):
         # `is_integer` is false for both infinities and for NaN, so this covers
         # the non-finite cases without naming them.
-        if not exp.is_integer():
+        if not value.is_integer():
             return None
-        exp = int(exp)
-    if abs(exp) > MAX_SAFE_INTEGER:
+        value = int(value)
+    if abs(value) > MAX_SAFE_INTEGER:
         return None
-    return exp
+    return value
 
 
 def parse_rail_header(
-    value: str | list[str] | tuple[str, ...] | None, now: int | None = None
+    value: str | list[str] | tuple[str, ...] | None,
+    now: int | None = None,
+    verifier: TicketVerifier | None = None,
 ) -> ParseResult:
     """Decode and classify an ``x-rail`` header value.
 
@@ -222,6 +342,10 @@ def parse_rail_header(
 
     ``now`` is injectable so expiry is testable without waiting and without a
     restart, and so a caller can judge a whole request against one instant.
+
+    ``verifier`` is what a signed ticket is checked against. Without one, every
+    well-formed signed ticket is ``bad_signature`` — no key set is held — and an
+    unsigned one is read exactly as before.
     """
     if now is None:
         now = _now_seconds()
@@ -244,56 +368,23 @@ def parse_rail_header(
     if not value:
         return ParseResult("absent")
 
-    # `=` comes off the end and nowhere else: a leading or interior one is a
-    # corrupted body rather than a differently-padded one, and the alphabet
-    # check below is what refuses it.
-    body = value.rstrip("=")
+    # `.` is outside both base64 alphabets, so no unsigned header carries one
+    # and the test cannot misfire. It is also why a reader that predates
+    # signing refuses a signed ticket as `undecodable` rather than admitting it.
+    if "." in value:
+        return _read_signed(value, now, verifier)
 
-    # The modulo is measured on the body rather than the raw header, which is
-    # the half that bites: a header padded past what it needs measures 1 as a
-    # whole while its body measures 2, and refusing it would turn away a ticket
-    # that decodes. `binascii` refuses the other direction on its own, so the
-    # rule earns its place here for stating what a reimplementation must do
-    # rather than for what it changes on this runtime.
-    if not _BASE64_BODY.fullmatch(body) or len(body) % 4 == 1:
-        return ParseResult("undecodable")
+    # Before the payload is looked at: a reader still accepting both forms is
+    # one where an attacker refused on a signed ticket answers with an
+    # unsigned one, so signing protects nothing until this is on.
+    if verifier is not None and verifier.requires_signatures:
+        return ParseResult("bad_signature")
 
-    try:
-        # Padding restored rather than required: a mint that strips it produces
-        # a ticket the contract still calls decodable.
-        padded = body + "=" * (-len(body) % 4)
-        # `utf-8-sig` rather than `utf-8`: exactly one leading byte-order mark
-        # is dropped, which is the rule the contract standardises on because
-        # decoders split roughly evenly on it. A doubled mark leaves a U+FEFF
-        # behind, and that is not JSON — which is the intended answer.
-        decoded = base64.urlsafe_b64decode(padded.encode()).decode("utf-8-sig")
-    except (binascii.Error, UnicodeDecodeError, ValueError):
+    raw = _decoded_part(value)
+    if raw is None:
         return ParseResult("undecodable")
-
-    if _nesting_exceeds(decoded, MAX_NESTING_DEPTH):
-        return ParseResult("undecodable")
-
-    try:
-        parsed = json.loads(
-            decoded,
-            parse_constant=_reject_non_json_constant,
-            # Every number is a double, on both sides of every comparison.
-            # Python's ints are arbitrary-precision, so left alone this file
-            # would hold values `JSON.parse` cannot tell apart — 2^53 and
-            # 2^53 + 1 are one double and two ints — and a threshold rule would
-            # answer differently on the two sides. Narrowing here also puts
-            # CPython's 4300-digit conversion limit out of the way: the digits
-            # never become an int, so a long literal saturates to infinity
-            # exactly as it does in the reference instead of raising.
-            parse_int=float,
-        )
-    except (ValueError, TypeError):
-        return ParseResult("undecodable")
-    except RecursionError:
-        # A floor under the cap, not the answer to depth, and unreached while
-        # the cap holds. The state is the same either way, so it costs nothing
-        # and removes the one path by which this function could raise instead of
-        # answering.
+    parsed = _json_of(raw)
+    if parsed is _UNDECODABLE:
         return ParseResult("undecodable")
 
     if not isinstance(parsed, dict):
@@ -310,10 +401,154 @@ def parse_rail_header(
     if exp is None:
         return ParseResult("malformed")
 
+    return _unexpired(parsed, exp, now)
+
+
+def _unexpired(claims: dict[str, Any], exp: int, now: int) -> ParseResult:
+    """`valid` carrying `claims`, unless `now` has reached `exp`."""
     # Added, not subtracted: a tolerance is grace past the stated expiry, so a
     # larger value widens the window. Subtracting would expire tickets early,
     # which is the opposite of what every reader of the constant expects.
     if now >= exp + CLOCK_SKEW_TOLERANCE_SEC:
         return ParseResult("expired")
+    return ParseResult("valid", claims)
 
-    return ParseResult("valid", parsed)
+
+def _decoded_part(part: str) -> bytes | None:
+    """One base64 part's bytes, or None where the contract calls it
+    undecodable. The whole of an unsigned header is one part; a signed one has
+    three, each held to the same rules."""
+    # `=` comes off the end and nowhere else: a leading or interior one is a
+    # corrupted body rather than a differently-padded one, and the alphabet
+    # check below is what refuses it.
+    body = part.rstrip("=")
+
+    # The modulo is measured on the body rather than the raw header, which is
+    # the half that bites: a header padded past what it needs measures 1 as a
+    # whole while its body measures 2, and refusing it would turn away a ticket
+    # that decodes. `binascii` refuses the other direction on its own, so the
+    # rule earns its place here for stating what a reimplementation must do
+    # rather than for what it changes on this runtime.
+    if not _BASE64_BODY.fullmatch(body) or len(body) % 4 == 1:
+        return None
+
+    try:
+        # Padding restored rather than required: a mint that strips it produces
+        # a ticket the contract still calls decodable.
+        padded = body + "=" * (-len(body) % 4)
+        return base64.urlsafe_b64decode(padded.encode())
+    except (binascii.Error, ValueError):
+        return None
+
+
+#: What `_json_of` returns for bytes that are not a ticket's JSON. A sentinel
+#: rather than None, because `null` is JSON and parses to None.
+_UNDECODABLE = object()
+
+
+def _json_of(raw: bytes) -> Any:
+    """`raw` read as a ticket's JSON, header or payload: strict UTF-8, one
+    byte-order mark dropped, the nesting cap, no `NaN`, every number a double.
+    `_UNDECODABLE` where any of that fails."""
+    try:
+        # `utf-8-sig` rather than `utf-8`: exactly one leading byte-order mark
+        # is dropped, which is the rule the contract standardises on because
+        # decoders split roughly evenly on it. A doubled mark leaves a U+FEFF
+        # behind, and that is not JSON — which is the intended answer.
+        decoded = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return _UNDECODABLE
+
+    if _nesting_exceeds(decoded, MAX_NESTING_DEPTH):
+        return _UNDECODABLE
+
+    try:
+        return json.loads(
+            decoded,
+            parse_constant=_reject_non_json_constant,
+            # Every number is a double, on both sides of every comparison.
+            # Python's ints are arbitrary-precision, so left alone this file
+            # would hold values `JSON.parse` cannot tell apart — 2^53 and
+            # 2^53 + 1 are one double and two ints — and a threshold rule would
+            # answer differently on the two sides. Narrowing here also puts
+            # CPython's 4300-digit conversion limit out of the way: the digits
+            # never become an int, so a long literal saturates to infinity
+            # exactly as it does in the reference instead of raising.
+            parse_int=float,
+        )
+    except (ValueError, TypeError):
+        return _UNDECODABLE
+    except RecursionError:
+        # A floor under the cap, not the answer to depth, and unreached while
+        # the cap holds. The state is the same either way, so it costs nothing
+        # and removes the one path by which this function could raise instead of
+        # answering.
+        return _UNDECODABLE
+
+
+def _read_signed(value: str, now: int, verifier: TicketVerifier | None) -> ParseResult:
+    """A header containing `.`, read in the contract's order: structure,
+    header, signature, payload, shape, then `nbf`/`iss`/`aud`, then expiry."""
+    parts = value.split(".")
+    if len(parts) != 3 or not all(parts):
+        return ParseResult("undecodable")
+    decoded = [_decoded_part(part) for part in parts]
+    if any(part is None for part in decoded):
+        return ParseResult("undecodable")
+    header_bytes, payload_bytes, signature = decoded
+    header = _json_of(header_bytes)
+    if header is _UNDECODABLE or not isinstance(header, dict):
+        return ParseResult("undecodable")
+
+    # **Nothing in the header chooses how the ticket is verified.** `alg` is
+    # checked only to refuse a ticket claiming another algorithm, and Ed25519
+    # is used whatever it says: a reader that dispatches on `alg` is the one
+    # that accepts `none`. Every other member — `typ`, and `jku`, `x5u` and
+    # `jwk`, which would name a key — is ignored; keys come only from the set
+    # this gateway fetched.
+    kid = header.get("kid")
+    if header.get("alg") != JWS_ALG or not isinstance(kid, str) or "crit" in header:
+        return ParseResult("bad_signature")
+    if verifier is None or verifier.keys is None:
+        return ParseResult("bad_signature")
+    key = verifier.keys.get(kid)
+    if key is None:
+        return ParseResult("bad_signature")
+    try:
+        # Over the two parts exactly as they arrived, not re-encoded: the
+        # decoder above accepts spellings the signer did not use, and the
+        # signature is over what was sent. ASCII is safe: the alphabet check
+        # has already held both parts to it.
+        key.verify(signature, f"{parts[0]}.{parts[1]}".encode("ascii"))
+    except InvalidSignature:
+        return ParseResult("bad_signature")
+
+    # Only now is the payload read, so nothing in a forged one — its `id`
+    # included — reaches a rule or a denial report.
+    claims = _json_of(payload_bytes)
+    if claims is _UNDECODABLE:
+        return ParseResult("undecodable")
+    if not isinstance(claims, dict):
+        return ParseResult("malformed")
+    exp = _usable_exp(claims)
+    nbf = _usable_bound(claims.get("nbf"))
+    if exp is None or nbf is None:
+        return ParseResult("malformed")
+
+    # **Genuine, so `bad_signature` would misreport it; not for this reader, so
+    # not usable either.** A reader with nothing to compare against accepts
+    # nothing rather than skipping the check: a skipped `aud` check is how one
+    # tenant's ticket is admitted at another's gateway.
+    if verifier.issuer is None or verifier.audience is None:
+        return ParseResult("wrong_audience")
+    if now < nbf - NBF_ALLOWANCE_SEC:
+        return ParseResult("wrong_audience")
+    if claims.get("iss") != verifier.issuer:
+        return ParseResult("wrong_audience")
+    audience = claims.get("aud")
+    # A string, exactly: RFC 7519 allows a list, and membership in one is a
+    # second rule to implement that nothing Rail Center issues needs.
+    if not isinstance(audience, str) or audience != verifier.audience:
+        return ParseResult("wrong_audience")
+
+    return _unexpired(claims, exp, now)

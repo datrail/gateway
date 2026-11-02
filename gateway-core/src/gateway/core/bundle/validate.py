@@ -196,7 +196,8 @@ class UsableBundle:
     #: nothing matched.
     fallback: Fallback
     #: What happens to a call carrying no usable ticket — absent, undecodable,
-    #: malformed or expired — read from `ticket_fallback` at the root. Asked
+    #: malformed, bad_signature, wrong_audience or expired — read from
+    #: `ticket_fallback` at the root. Asked
     #: before the binding fallback and the chain, and acted on at `enforce`
     #: only, as `fallback` is. `pass` walks the chain with no ticket; `block`
     #: refuses it there.

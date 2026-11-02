@@ -9,8 +9,9 @@ this module answers for whatever arrives.
 The sources:
 
   * ``ticket`` — the decoded ``x-rail`` ticket, **only when it is usable**. A
-    ticket that is absent, undecodable, malformed or expired has no claims
-    here, so every ``ticket.*`` path reads absent. Such a request is normally
+    ticket that is absent, undecodable, malformed, bad_signature,
+    wrong_audience or expired has no claims here, so every ``ticket.*`` path
+    reads absent. Such a request is normally
     decided by the bundle's ``ticket_fallback`` before any condition runs.
   * ``request`` — ``{"endpoint_key": ..., "headers": {...}}``. The key is the
     resolved ``<path>#<method>#<call>``, absent for a message naming no tool.

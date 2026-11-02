@@ -265,7 +265,8 @@ def test_the_schemas_state_the_types_they_document() -> None:
     assert types(_schema("policy-bundle.schema.json")) == 19
     # 12 → 23 with RC-434's nested ticket: `id`, and the objects, arrays and
     # members of `posture` and `alignment`, less the three flat claims.
-    assert types(_schema("x-rail-ticket.schema.json")) == 23
+    # 23 → 27 with DR-263's signed-only `nbf`, `jti`, `iss` and `aud`.
+    assert types(_schema("x-rail-ticket.schema.json")) == 27
 
     bundle = _build_validator("policy-bundle.schema.json")
     base = {
@@ -389,6 +390,23 @@ def test_the_ticket_schema_refuses_what_its_descriptions_state() -> None:
     assert validator.is_valid({**good, "exp": 1785529162.0})
     for bad_exp in (1785529162.5, 2**53, -(2**53), "1785529162", True, None):
         assert not validator.is_valid({**good, "exp": bad_exp}), bad_exp
+    # The signed-only claims: optional, since an unsigned ticket carries none,
+    # and typed where present.
+    signed = {
+        "nbf": 1785528262,
+        "jti": "5c8f1e42-0000-4000-8000-0000000000f1",
+        "iss": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "aud": "00000000-0000-4000-8000-0000000000aa",
+    }
+    assert validator.is_valid({**good, **signed})
+    for claim, bad in (
+        ("nbf", 1785528262.5),
+        ("nbf", 2**53),
+        ("jti", "not-a-uuid"),
+        ("iss", 7),
+        ("aud", ["00000000-0000-4000-8000-0000000000aa"]),
+    ):
+        assert not validator.is_valid({**good, **signed, claim: bad}), (claim, bad)
     # Every field a stored ticket carries is required.
     for field in good:
         assert not validator.is_valid({k: v for k, v in good.items() if k != field}), (

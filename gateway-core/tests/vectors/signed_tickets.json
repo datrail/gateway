@@ -1,0 +1,722 @@
+{
+  "$schema_note": "Signed-ticket conformance vectors for docs/policy-evaluation-contract.md (A signed ticket), written by api/tests/signed_ticket_vectors_capture.py and run in api/tests/test_evaluator.py beside policy_evaluation.json, whose case shape these share. Every case is a raw_header literal, because a harness that signed its own tickets could only feed itself tickets it already accepts. Each case carries a reader: holds_keys says whether the reader holds the key set in signing.jwks (false is a reader that has never fetched one, or whose set is past its maximum key-set age); issuer and audience are what it is configured with, null meaning not configured; requires_signatures is whether it still accepts unsigned tickets. Fetching, refreshing and the key-set age are out of a vector's reach, as the contract's Conformance vectors section says. The keys sign nothing but these vectors, so their seeds are published in signing.",
+  "signing": {
+    "test_key_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "other_key_seed_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "jwks": {
+      "keys": [
+        {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "kid": "vector-key-1",
+          "x": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "use": "sig",
+          "alg": "EdDSA"
+        }
+      ]
+    },
+    "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+    "audience": "00000000-0000-4000-8000-0000000000aa"
+  },
+  "policy_sets": {
+    "deny_unusable": [
+      {
+        "id": "5160ed00-0000-4000-8000-000000000000",
+        "name": "Deny an unusable ticket",
+        "priority": 0,
+        "condition": {
+          "path": "ticket",
+          "op": "not_existing"
+        },
+        "action": "block",
+        "enabled": true
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "a ticket signed with a key the reader holds, for its tenant, is valid",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.oekHwuTX__xItEg4dDfIw5UKptq2KYVEx_-OMH8_7gwMm3j5-fslkZ2gKzxUTQ1ce6fFNjMYNxRjObjkDFHuAg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": [],
+        "ticket_state": "valid"
+      }
+    },
+    {
+      "name": "a payload changed after signing is bad_signature, whatever it now claims",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6MTAwLjAsImxldmVsIjoibG93In19LCJza2lsbHMiOlsiZmlucmV0YWlsLm9yZGVycyJdLCJleHAiOjE3ODUzMjY0MDAsIm5iZiI6MTc4NTI0MDAwMCwianRpIjoiZjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwiaXNzIjoiaHR0cHM6Ly9yYWlsLWNlbnRlci5leGFtcGxlL3RlbmFudHMvMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGFhIiwiYXVkIjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGFhIn0.oekHwuTX__xItEg4dDfIw5UKptq2KYVEx_-OMH8_7gwMm3j5-fslkZ2gKzxUTQ1ce6fFNjMYNxRjObjkDFHuAg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "a ticket naming a held kid but signed with another key is bad_signature",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.DC50OZ8Sr3O8B5VbCNTCk8VY1oIRricJSpe-pErVq7b0Xcm63m0OvK-bYvUJzZvImZ7gxlqwgZNzv17Vr-diAg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "a kid the reader holds no key for is bad_signature",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMiJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.uiK6wV_1K3ssCVyg5XidST6cZLmN0jj2L_Un9-URuT8AeyB38dnzXIG9qVvUgSTAGw5IKX2rfqbFLjmU4i9MAw",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "a reader holding no key set reads every signed ticket as bad_signature",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.oekHwuTX__xItEg4dDfIw5UKptq2KYVEx_-OMH8_7gwMm3j5-fslkZ2gKzxUTQ1ce6fFNjMYNxRjObjkDFHuAg",
+      "reader": {
+        "holds_keys": false,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "alg none is bad_signature, not an unsigned ticket",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJub25lIiwidHlwIjoiSldUIiwia2lkIjoidmVjdG9yLWtleS0xIn0.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.O7aKkc3ss1w0cdyCGjpeECpHuyY1ATp0gMXma2VKejD8-lK6DfqX5e3beGjDUNUa6QnaKpi-f9zMivMfs9mgCw",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "an alg other than EdDSA is bad_signature",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.xpNsFg1CfEjvRmuJqSj1Z1RGZmS22Wdd-rkN-BIMElDsHjcqL_XpWrkTMbXfS0_W4z4J1v7k4a5SQuG0UOQiCQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "alg is compared exactly: eddsa is not EdDSA",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJlZGRzYSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.zKVEV6wRpfne0T0FkfCYDdGjUGPSLEsoIbJUPtWeNmgCnT7jfOcV8IINPXxzhGcnOHBL_yOwVLVadzzo-uNbDQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "a header with no kid is bad_signature",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.-q7OCRO9IZL8uyzbbh_qOSa7boNIFrbKAc-0Xb2c-aA7UUOZjz3G60SVDFKAgnPqkeekF-3nT35j764I7Er-Dg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "a kid that is not a string is bad_signature",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6MX0.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.be4mnzp5An7DQbk6O2gM9sRjFp_fToTVZEfTYiCfzDCLFqPXAMchSnLRLXcsQhSrHKB5n3SaPeiojYSP3b8qBw",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "a header carrying crit is bad_signature",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSIsImNyaXQiOlsiZXhwIl19.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.fWgqFArDQApDZt0lpYgeh5kFjo40zf5v9pmc_HoIqhjU7z5wRUwgWK5-F0ecKtYsoe4P55lWGR6bgj5cPPnODg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "typ is ignored: a header with none is read like any other",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.Ie7g-HEBHYI-Zk0BAbz2ll9DuuU3doBOU9OkOpXSV4DBoQqs_esiFYJIkb7aWmky6IwEKoLSdUdGEn6XVzEWCA",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": [],
+        "ticket_state": "valid"
+      }
+    },
+    {
+      "name": "a jku in the header is ignored: the key comes from the reader's own set",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSIsImprdSI6Imh0dHBzOi8vYXR0YWNrZXIuZXhhbXBsZS9qd2tzLmpzb24ifQ.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.k8s9_cX-oeHeh9iCRyM4AwtSl5x1_NmF-eC8e_zlH5YGEFtyVkQy2100MJwYtgtG4ULPycCIqwqfVyM2ntPLAQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": [],
+        "ticket_state": "valid"
+      }
+    },
+    {
+      "name": "two parts are undecodable",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "undecodable"
+      }
+    },
+    {
+      "name": "four parts are undecodable",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.oekHwuTX__xItEg4dDfIw5UKptq2KYVEx_-OMH8_7gwMm3j5-fslkZ2gKzxUTQ1ce6fFNjMYNxRjObjkDFHuAg.AAAA",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "undecodable"
+      }
+    },
+    {
+      "name": "an empty signature part is undecodable",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "undecodable"
+      }
+    },
+    {
+      "name": "a part outside the base64url alphabet is undecodable",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.!!!!",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "undecodable"
+      }
+    },
+    {
+      "name": "a header that is not JSON is undecodable",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "bm90IGpzb24.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.oekHwuTX__xItEg4dDfIw5UKptq2KYVEx_-OMH8_7gwMm3j5-fslkZ2gKzxUTQ1ce6fFNjMYNxRjObjkDFHuAg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "undecodable"
+      }
+    },
+    {
+      "name": "a header that is a JSON array is undecodable",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "WyJFZERTQSJd.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.oekHwuTX__xItEg4dDfIw5UKptq2KYVEx_-OMH8_7gwMm3j5-fslkZ2gKzxUTQ1ce6fFNjMYNxRjObjkDFHuAg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "undecodable"
+      }
+    },
+    {
+      "name": "a payload that verifies but is not JSON is undecodable",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.bm90IGpzb24.rcBpnpeeSSXEsI-avyfujw94JEaOWc0QNrRemscnBmS0pGkjE3SJnPrSDU6HdLaVBxzCqY_JktOsF6nmsiyGCQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "undecodable"
+      }
+    },
+    {
+      "name": "an iss other than the reader's tenant's is wrong_audience",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYmIiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.yZjlgEWeNz56aXAYO3YqaGvD0ZwutiX6Z1t5qO-Br4y2vVejRVsxIIpCTQUBwvNIDrynyG9fNToPbci6Xx7uCQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "wrong_audience"
+      }
+    },
+    {
+      "name": "an aud other than the reader's tenant is wrong_audience",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYmIifQ.Ob5XNPKyycSYEaWtAWGDG_9WUDzHUNIzR5P-LmndL50839E9vxc5PjRjVnczDoApyRHsgnkznGqiwQEv27xQCg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "wrong_audience"
+      }
+    },
+    {
+      "name": "an aud given as a list is wrong_audience, even one holding the tenant",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOlsiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGFhIl19.RgRjbgY4ha-G31Mcb8INUZrR7qizR1TEGnRrq25yQKk1SBhZYcJUi0dURxKcow3ghiOE--jo0sfPIGFyJEXWBw",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "wrong_audience"
+      }
+    },
+    {
+      "name": "a ticket with no aud is wrong_audience",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ._FgBt2KqxkbxpJ8EcwUtOUD1CNlw0H1Yr1xG7naLnRUAVqSaVZbdzm4dk9UrRN5dpHYck3qsHvsUyXSDTZALBw",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "wrong_audience"
+      }
+    },
+    {
+      "name": "a reader configured with no issuer accepts no signed ticket",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.oekHwuTX__xItEg4dDfIw5UKptq2KYVEx_-OMH8_7gwMm3j5-fslkZ2gKzxUTQ1ce6fFNjMYNxRjObjkDFHuAg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": null,
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "wrong_audience"
+      }
+    },
+    {
+      "name": "a reader configured with no audience accepts no signed ticket",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.oekHwuTX__xItEg4dDfIw5UKptq2KYVEx_-OMH8_7gwMm3j5-fslkZ2gKzxUTQ1ce6fFNjMYNxRjObjkDFHuAg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": null,
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "wrong_audience"
+      }
+    },
+    {
+      "name": "a forged ticket at a reader with no issuer configured is bad_signature: the signature is checked first",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6MTAwLjAsImxldmVsIjoibG93In19LCJza2lsbHMiOlsiZmlucmV0YWlsLm9yZGVycyJdLCJleHAiOjE3ODUzMjY0MDAsIm5iZiI6MTc4NTI0MDAwMCwianRpIjoiZjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwiaXNzIjoiaHR0cHM6Ly9yYWlsLWNlbnRlci5leGFtcGxlL3RlbmFudHMvMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGFhIiwiYXVkIjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGFhIn0.oekHwuTX__xItEg4dDfIw5UKptq2KYVEx_-OMH8_7gwMm3j5-fslkZ2gKzxUTQ1ce6fFNjMYNxRjObjkDFHuAg",
+      "reader": {
+        "holds_keys": true,
+        "issuer": null,
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "an nbf 60 seconds ahead is within the allowance",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDYwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.0jmC08mmZIjvZ5aqJq30mcveLtiiIOXM4vxKlfOVIVKl6AGZkocBoX8HmueF9K0NMPC4FZBf_uSSe4rDGExTAQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": [],
+        "ticket_state": "valid"
+      }
+    },
+    {
+      "name": "an nbf 61 seconds ahead is wrong_audience",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDYxLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.r-f7BpqndtCfQ7KNbfijP4YMf-p7uEghV5me4AGyEwHEz_K_TqiYexOgvNqRtTMjuLpV4qWO_rhUxC030sHPAQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "wrong_audience"
+      }
+    },
+    {
+      "name": "a signed ticket with no nbf is malformed",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwianRpIjoiZjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwiaXNzIjoiaHR0cHM6Ly9yYWlsLWNlbnRlci5leGFtcGxlL3RlbmFudHMvMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGFhIiwiYXVkIjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGFhIn0.OVgIHdCx6Zo8GcHhuv8sFXBfHNsX8A-EhpbCqdll6r8-f0sHyr3pKDhH37I8KJcQE_MvGTCm5HVzp1DVcqQtBA",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "malformed"
+      }
+    },
+    {
+      "name": "a fractional nbf is malformed",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMCwibmJmIjoxNzg1MjQwMDAwLjUsImp0aSI6ImYwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsImlzcyI6Imh0dHBzOi8vcmFpbC1jZW50ZXIuZXhhbXBsZS90ZW5hbnRzLzAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhYSIsImF1ZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhYSJ9.lK3XUM4qMYvr_-uIIkDzTXjbWzo2zxH7uo-O_tx1JsUNGGZUZfeZLZV2_U8DxhPmfhnNpHREcQKh4GB1YcQLBA",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "malformed"
+      }
+    },
+    {
+      "name": "a signed ticket dead at exp is expired",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTI0MDAwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEifQ.JpDB1E5LAu2B6j0oCqOOjtjTiV-ixfhHlzIhbgEmAVIFvO7pwoTz_hgA0yXt4gWuYh7B64aqrZXeGS9UR0DqAQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "expired"
+      }
+    },
+    {
+      "name": "audience is checked before expiry: expired and for another tenant is wrong_audience",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTI0MDAwMCwibmJmIjoxNzg1MjQwMDAwLCJqdGkiOiJmMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJpc3MiOiJodHRwczovL3JhaWwtY2VudGVyLmV4YW1wbGUvdGVuYW50cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYWEiLCJhdWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwYmIifQ.lmL_iPFwHJJlbD5JL7tfTjEU6W5Y8dNfcziV8K3R3i5mgozJtaZ3zS_XrM5lBjMxsvT7jlY1Pa6p-Q61UgJhDQ",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "wrong_audience"
+      }
+    },
+    {
+      "name": "shape is checked before audience: no exp and for another tenant is malformed",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InZlY3Rvci1rZXktMSJ9.eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sIm5iZiI6MTc4NTI0MDAwMCwianRpIjoiZjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwiaXNzIjoiaHR0cHM6Ly9yYWlsLWNlbnRlci5leGFtcGxlL3RlbmFudHMvMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGFhIiwiYXVkIjoib3RoZXIifQ.KmDSLZQ0bZQl0vNBjo47Mwyt7wzPO15nlhYzGI2mafVRsvyPfUowTpGq2bq4kOg9uB-yCrXcQLWsLSxoGfhaCw",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "malformed"
+      }
+    },
+    {
+      "name": "an unsigned ticket at a reader requiring signatures is bad_signature",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMH0=",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": true
+      },
+      "expect": {
+        "allowed": false,
+        "denied_by": "Deny an unusable ticket",
+        "alerts": [],
+        "ticket_state": "bad_signature"
+      }
+    },
+    {
+      "name": "an unsigned ticket at a reader not yet requiring signatures is read as before",
+      "policy_set": "deny_unusable",
+      "endpoint_key": "finretail.orders",
+      "now": "2026-07-28T12:00:00Z",
+      "raw_header": "eyJhZ2VudF9pZCI6ImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBmMCIsInBvc3R1cmUiOnsib3ZlcmFsbCI6eyJzY29yZSI6OTIuMCwibGV2ZWwiOiJsb3cifX0sInNraWxscyI6WyJmaW5yZXRhaWwub3JkZXJzIl0sImV4cCI6MTc4NTMyNjQwMH0=",
+      "reader": {
+        "holds_keys": true,
+        "issuer": "https://rail-center.example/tenants/00000000-0000-4000-8000-0000000000aa",
+        "audience": "00000000-0000-4000-8000-0000000000aa",
+        "requires_signatures": false
+      },
+      "expect": {
+        "allowed": true,
+        "denied_by": null,
+        "alerts": [],
+        "ticket_state": "valid"
+      }
+    }
+  ]
+}

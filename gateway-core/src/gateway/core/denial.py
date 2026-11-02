@@ -173,10 +173,11 @@ def build_report(
         # Reported beside the key and never inside it, so a call that resolved
         # to nothing stays distinguishable from an endpoint with no rule.
         "endpoint_resolution": endpoint_status,
-        # This gateway's reading, under the key Rail Center reads. All four
+        # This gateway's reading, under the key Rail Center reads. All six
         # unusable ticket states fold into one decision, and an operator still
         # has to be able to tell an expired ticket — a correctly formed
-        # credential that is simply too old — from one that could not be read.
+        # credential that is simply too old — from one that could not be read,
+        # and a forged signature from a genuine ticket for another tenant.
         REPORTED_STATUS_KEY: ticket_state,
     }
     if claimed_status is not None:
