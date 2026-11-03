@@ -42,13 +42,21 @@ can't judge a call, and forward nothing to the upstream. So a callout outage
 is an MCP outage. Apigee's fault and analytics show the callout failed; the
 callout's own log shows nothing.
 
-A signed ticket naming a key the callout doesn't hold waits for one refetch of
-Rail Center's key set: up to 10 s, or about 20 s behind a refresh already
-running. Past `TimeoutMs` that call is this 503, not a `bad_signature` denial,
-and no denial is reported.
-
 An error inside a working callout is the other way round: it logs the
 traceback and allows the request, as standalone does when its walk raises.
+
+A signed ticket naming a key the callout doesn't hold waits for one refetch of
+Rail Center's key set: up to 10 s, or about 20 s behind a refresh already
+running. Past `TimeoutMs` that call gets the proxy's 503 above, not a
+`bad_signature` denial, and no denial is reported. That is deliberate. Such a ticket is almost always
+genuinely signed — the usual cause is a compromise withdrawal, whose replacement
+key signs the moment it is published — so recording it as `bad_signature` would
+point whoever reads the denial at a forgery that didn't happen. An invented `kid`
+takes the same path.
+
+The refetch carries on after the call is abandoned, so a retry once it has
+succeeded finds the key held. A refetch that fails brings no key, and a retry in
+the 30 s after it gets no second refetch: it is denied as `bad_signature`.
 
 ### At startup
 

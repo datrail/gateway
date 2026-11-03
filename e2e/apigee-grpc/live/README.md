@@ -25,7 +25,7 @@ twice, and the [stand-in](../apigee_standin.py) reads its policies.
 | `__PROXY_NAME__` | `rail-mcp.xml` | the name the proxy is imported under |
 | `__BASE_PATH__` | `proxies/default.xml` | the path agents call, such as `/mcp`; part of every endpoint key the callout judges |
 | `__TARGET_URL__` | `targets/default.xml` | the `upstream` stub's URL |
-| `__TIMEOUT_MS__` | `policies/EC-Rail.xml` | how long to wait for the callout, in milliseconds; past it, `RF-CalloutFailed` answers 503 — including a signed ticket whose key is waiting on a refetch of up to 10 s |
+| `__TIMEOUT_MS__` | `policies/EC-Rail.xml` | how long to wait for the callout, in milliseconds; past it, `RF-CalloutFailed` answers 503 — including a signed ticket whose key is waiting on a refetch of up to 10 s, which a retry recovers once that refetch succeeds |
 | `__CALLOUT_SERVER__` | `policies/EC-Rail.xml` | the TargetServer's name |
 | `__CALLOUT_AUDIENCE__` | `policies/EC-Rail.xml` | the callout's Cloud Run URL: the audience of the ID token Apigee sends it |
 
