@@ -1,0 +1,15 @@
+{
+  "name": "the signing key set \u2014 Rail Center's published test key, which signs no e2e ticket",
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/v1/jwks.json"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{\"keys\": [{\"kty\": \"OKP\", \"crv\": \"Ed25519\", \"kid\": \"vector-key-1\", \"x\": \"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\", \"use\": \"sig\", \"alg\": \"EdDSA\"}]}"
+  }
+}

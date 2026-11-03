@@ -31,6 +31,9 @@ from standalone_support import (
     unreachable,
 )
 
+# These gateways reach Rail Center over `http://`: see `unsigned_tickets`.
+pytestmark = pytest.mark.usefixtures("unsigned_tickets")
+
 
 class Seen:
     """What reached one upstream: the paths, and the headers that came with them."""

@@ -23,6 +23,15 @@ from standalone_support import (
 
 
 @pytest.fixture
+def unsigned_tickets(monkeypatch):
+    """Unsigned tickets, as for every e2e stack: a gateway with the plugin on
+    that reaches Rail Center over `http://` is refused at startup under the
+    signed-only default. Not autouse: with the plugin off the variable is Rail
+    Center configuration, and refused as such."""
+    monkeypatch.setenv("RAIL_UNSIGNED_TICKETS", "true")
+
+
+@pytest.fixture
 def seen_headers() -> list[dict[str, str]]:
     """Every header set the upstream was sent, in order."""
     return []
@@ -81,7 +90,7 @@ async def upstream(seen_headers):
 
 
 @pytest_asyncio.fixture
-async def gateway_url(upstream):
+async def gateway_url(upstream, unsigned_tickets):
     """The gateway, forwarding to the upstream fixture, holding no bundle.
 
     Unready on purpose, and every forwarding test below runs against it that

@@ -7,6 +7,7 @@ import pytest
 from gateway.core.errors import ConfigError
 from gateway.core.mode import (
     ENFORCEMENTS,
+    RAIL_CENTER_VARIABLES,
     describe_enforcement,
     describe_plugin,
     plugin_enabled,
@@ -280,7 +281,7 @@ def test_an_unset_plugin_flag_is_false(monkeypatch):
     below catches, because it is exactly the case with `RAIL_CENTER_URL` set.
     """
     monkeypatch.delenv("RAIL_PLUGIN_ENABLED", raising=False)
-    for name in ("RAIL_CENTER_URL", "RAIL_AUTH_MODE", "RAIL_AUTH_TOKEN"):
+    for name in RAIL_CENTER_VARIABLES:
         monkeypatch.delenv(name, raising=False)
     assert plugin_enabled() is False
 
@@ -288,7 +289,7 @@ def test_an_unset_plugin_flag_is_false(monkeypatch):
 @pytest.mark.parametrize("raw", ["", "   ", "\t\n"])
 def test_a_blank_plugin_flag_is_read_as_unset(monkeypatch, raw):
     monkeypatch.setenv("RAIL_PLUGIN_ENABLED", raw)
-    for name in ("RAIL_CENTER_URL", "RAIL_AUTH_MODE", "RAIL_AUTH_TOKEN"):
+    for name in RAIL_CENTER_VARIABLES:
         monkeypatch.delenv(name, raising=False)
     assert plugin_enabled() is False
 
@@ -316,7 +317,7 @@ def test_the_plugin_flag_is_read_case_insensitively(monkeypatch, raw, expected):
     monkeypatch.setenv("RAIL_PLUGIN_ENABLED", raw)
     # Cleared for the `false` half: Rail Center configuration beside a disabled
     # plugin is its own refusal, and it would fire before the value was read.
-    for name in ("RAIL_CENTER_URL", "RAIL_AUTH_MODE", "RAIL_AUTH_TOKEN"):
+    for name in RAIL_CENTER_VARIABLES:
         monkeypatch.delenv(name, raising=False)
     assert plugin_enabled() is expected
 
@@ -366,9 +367,7 @@ def test_a_leftover_ticket_mode_refuses_to_start_and_says_what_replaced_it(
         plugin_enabled()
 
 
-@pytest.mark.parametrize(
-    "name", ["RAIL_CENTER_URL", "RAIL_AUTH_MODE", "RAIL_AUTH_TOKEN"]
-)
+@pytest.mark.parametrize("name", RAIL_CENTER_VARIABLES)
 def test_rail_center_configuration_beside_a_disabled_plugin_refuses_to_start(
     monkeypatch, name
 ):
@@ -381,7 +380,7 @@ def test_rail_center_configuration_beside_a_disabled_plugin_refuses_to_start(
     plain gateway it is.
     """
     monkeypatch.delenv("RAIL_PLUGIN_ENABLED", raising=False)
-    for other in ("RAIL_CENTER_URL", "RAIL_AUTH_MODE", "RAIL_AUTH_TOKEN"):
+    for other in RAIL_CENTER_VARIABLES:
         monkeypatch.delenv(other, raising=False)
     monkeypatch.setenv(name, "set-to-something")
 
@@ -406,8 +405,8 @@ def test_an_auth_mode_of_none_beside_a_disabled_plugin_boots(monkeypatch, raw):
     `NONE` would refuse a value its own auth layer resolves.
     """
     monkeypatch.delenv("RAIL_PLUGIN_ENABLED", raising=False)
-    monkeypatch.delenv("RAIL_CENTER_URL", raising=False)
-    monkeypatch.delenv("RAIL_AUTH_TOKEN", raising=False)
+    for name in RAIL_CENTER_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("RAIL_AUTH_MODE", raw)
 
     assert plugin_enabled() is False
@@ -471,9 +470,7 @@ def _unenrolled(monkeypatch):
     for name in (
         "RAIL_PLUGIN_ENABLED",
         "RAIL_TICKET_MODE",
-        "RAIL_CENTER_URL",
-        "RAIL_AUTH_MODE",
-        "RAIL_AUTH_TOKEN",
+        *RAIL_CENTER_VARIABLES,
     ):
         monkeypatch.delenv(name, raising=False)
 

@@ -16,9 +16,9 @@ from gateway.core.keyset import KeySetHolder
 from gateway.core.lifecycle import is_ready
 from gateway.core.mode import plugin_enabled
 from gateway.core.settings import (
-    REQUIRE_SIGNED_TICKETS,
     TICKET_AUDIENCE,
     TICKET_ISSUER,
+    UNSIGNED_TICKETS,
     build_keyset,
     require_signed_tickets,
 )
@@ -33,7 +33,7 @@ def _unset(monkeypatch):
     for name in (
         TICKET_ISSUER,
         TICKET_AUDIENCE,
-        REQUIRE_SIGNED_TICKETS,
+        UNSIGNED_TICKETS,
         "RAIL_PLUGIN_ENABLED",
         "RAIL_CENTER_URL",
         "RAIL_AUTH_MODE",
@@ -45,27 +45,29 @@ def _unset(monkeypatch):
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [("", False), ("  ", False), ("false", False), ("true", True), (" TRUE ", True)],
+    [("", True), ("  ", True), ("false", True), ("true", False), (" TRUE ", False)],
 )
-def test_requiring_signatures_is_true_or_false_and_off_by_default(
+def test_unsigned_tickets_are_true_or_false_and_refused_by_default(
     monkeypatch, raw, expected
 ):
-    monkeypatch.setenv(REQUIRE_SIGNED_TICKETS, raw)
+    monkeypatch.setenv(UNSIGNED_TICKETS, raw)
 
     assert require_signed_tickets() is expected
 
 
 @pytest.mark.parametrize("raw", ["yes", "1", "on", "ture"])
-def test_any_other_spelling_of_requiring_signatures_is_refused(monkeypatch, raw):
-    """A typo read as `false` would accept unsigned tickets on a gateway whose
-    operator meant to refuse them, which is the direction nobody notices."""
-    monkeypatch.setenv(REQUIRE_SIGNED_TICKETS, raw)
+def test_any_other_spelling_of_unsigned_tickets_is_refused(monkeypatch, raw):
+    """A typo read as `true` would accept unsigned tickets on a gateway whose
+    operator meant to refuse them, which is the direction nobody notices, and
+    one read as the default would refuse a deployment's every ticket."""
+    monkeypatch.setenv(UNSIGNED_TICKETS, raw)
 
-    with pytest.raises(ConfigError, match=REQUIRE_SIGNED_TICKETS):
+    with pytest.raises(ConfigError, match=UNSIGNED_TICKETS):
         require_signed_tickets()
 
 
 def test_the_issuer_and_audience_reach_the_verifier_exactly(monkeypatch):
+    monkeypatch.setenv(UNSIGNED_TICKETS, "true")
     monkeypatch.setenv(TICKET_ISSUER, f"  {ISSUER} ")
     monkeypatch.setenv(TICKET_AUDIENCE, AUDIENCE)
 
@@ -78,6 +80,7 @@ def test_the_issuer_and_audience_reach_the_verifier_exactly(monkeypatch):
 def test_a_blank_issuer_or_audience_is_unset_and_not_the_empty_string(monkeypatch, raw):
     """The reader compares against whatever it is given. An empty issuer would
     match a ticket carrying `iss: ""`, where an unset one accepts nothing."""
+    monkeypatch.setenv(UNSIGNED_TICKETS, "true")
     monkeypatch.setenv(TICKET_ISSUER, raw)
     monkeypatch.setenv(TICKET_AUDIENCE, raw)
 
@@ -88,15 +91,52 @@ def test_a_blank_issuer_or_audience_is_unset_and_not_the_empty_string(monkeypatc
 
 def test_requiring_signatures_over_plain_http_is_refused(monkeypatch):
     """No key set is ever fetched over anything but HTTPS, so that gateway
-    would start cleanly and refuse every call."""
-    monkeypatch.setenv(REQUIRE_SIGNED_TICKETS, "true")
+    would start cleanly and refuse every call carrying a ticket. The default
+    requires them, so this is what a gateway left unconfigured does."""
 
-    with pytest.raises(ConfigError, match="https"):
+    with pytest.raises(ConfigError, match="https") as refused:
         build_keyset("http://rail-center.example", {})
+    # Unset is the default, so the message names the state and the way out
+    # rather than a value this operator never wrote.
+    assert "is unset or false" in str(refused.value)
+    assert f"{UNSIGNED_TICKETS}=true" in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    ("issuer", "audience", "named"),
+    [
+        (None, AUDIENCE, TICKET_ISSUER),
+        (ISSUER, None, TICKET_AUDIENCE),
+        ("  ", AUDIENCE, TICKET_ISSUER),
+        (None, None, f"{TICKET_ISSUER} and {TICKET_AUDIENCE}"),
+    ],
+)
+def test_requiring_signatures_without_an_issuer_and_audience_is_refused(
+    monkeypatch, issuer, audience, named
+):
+    """Every signed ticket would read `wrong_audience` and every unsigned one
+    `bad_signature`, so that gateway would start cleanly and refuse every call
+    carrying a ticket."""
+    monkeypatch.setenv(UNSIGNED_TICKETS, "false")
+    for name, value in ((TICKET_ISSUER, issuer), (TICKET_AUDIENCE, audience)):
+        if value is not None:
+            monkeypatch.setenv(name, value)
+
+    with pytest.raises(ConfigError, match=named):
+        build_keyset(HTTPS, {})
+
+
+def test_requiring_signatures_with_an_issuer_and_audience_starts(monkeypatch):
+    monkeypatch.setenv(UNSIGNED_TICKETS, "false")
+    monkeypatch.setenv(TICKET_ISSUER, ISSUER)
+    monkeypatch.setenv(TICKET_AUDIENCE, AUDIENCE)
+
+    assert build_keyset(HTTPS, {}).verifier().requires_signatures is True
 
 
 def test_not_requiring_signatures_over_plain_http_starts(monkeypatch):
     """Unsigned tickets read as they always have, which is every e2e stack."""
+    monkeypatch.setenv(UNSIGNED_TICKETS, "true")
     keys = build_keyset("http://rail-center.example", {})
 
     assert keys.verifier().requires_signatures is False
@@ -107,7 +147,7 @@ def test_not_requiring_signatures_over_plain_http_starts(monkeypatch):
     [
         (TICKET_ISSUER, ISSUER),
         (TICKET_AUDIENCE, AUDIENCE),
-        (REQUIRE_SIGNED_TICKETS, "true"),
+        (UNSIGNED_TICKETS, "true"),
     ],
 )
 def test_signed_ticket_settings_beside_a_plugin_that_is_off_are_refused(
@@ -121,9 +161,9 @@ def test_signed_ticket_settings_beside_a_plugin_that_is_off_are_refused(
         plugin_enabled()
 
 
-def test_requiring_signatures_set_to_false_asserts_nothing(monkeypatch):
+def test_unsigned_tickets_set_to_false_asserts_nothing(monkeypatch):
     """`false` is the default spelled out, as `RAIL_AUTH_MODE=none` is."""
-    monkeypatch.setenv(REQUIRE_SIGNED_TICKETS, " False ")
+    monkeypatch.setenv(UNSIGNED_TICKETS, " False ")
 
     assert plugin_enabled() is False
 

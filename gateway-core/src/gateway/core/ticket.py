@@ -188,9 +188,9 @@ class TicketVerifier:
     keys: Mapping[str, Ed25519PublicKey] | None = None
     issuer: str | None = None
     audience: str | None = None
-    #: Read an unsigned ticket as `bad_signature`. Turned on once every agent
-    #: this gateway fronts is served signed tickets, and not before: until then
-    #: it refuses all of them.
+    #: Read an unsigned ticket as `bad_signature`. A gateway sets it unless
+    #: `RAIL_UNSIGNED_TICKETS=true`, which is for agents still served unsigned
+    #: tickets: with it set, every one of theirs is refused.
     requires_signatures: bool = False
 
 
@@ -376,7 +376,7 @@ def parse_rail_header(
 
     # Before the payload is looked at: a reader still accepting both forms is
     # one where an attacker refused on a signed ticket answers with an
-    # unsigned one, so signing protects nothing until this is on.
+    # unsigned one, so signing protects nothing until this is set.
     if verifier is not None and verifier.requires_signatures:
         return ParseResult("bad_signature")
 

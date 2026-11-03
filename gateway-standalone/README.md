@@ -30,8 +30,8 @@ forwards it through its own MCP client:
 - **`X-Forwarded-Prefix`** goes to the gateway's own sub-app for that route,
   not to the upstream. One sent by the agent is removed.
 - **Startup waits up to 5 s for the first bundle**, before the port is bound,
-  and for the first signing key set in the same 5 s where
-  `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=true`. A failed fetch doesn't stop it.
+  and for the first signing key set in the same 5 s unless
+  `RAIL_UNSIGNED_TICKETS=true`. A failed fetch doesn't stop it.
 - **With no bundle held, calls are forwarded**, and `/ready` answers `503` —
   as it does, where signatures are required, until a key set is held.
 
@@ -44,6 +44,8 @@ docker run --rm -p 8080:8080 \
   -e RAIL_PLUGIN_ENABLED=true \
   -e RAIL_CENTER_URL=https://rail-center.example.com \
   -e RAIL_GATEWAY_SLUG=edge \
+  -e RAIL_TICKET_ISSUER="https://rail-center.example.com/tenants/$TENANT_ID" \
+  -e RAIL_TICKET_AUDIENCE="$TENANT_ID" \
   -v "$PWD/routes.yaml:/etc/rail/routes.yaml:ro" \
   ghcr.io/datrail/gateway:latest
 ```
@@ -110,8 +112,8 @@ places on which upstreams can share one gateway, is in
 - `POST <prefix>/mcp`: the proxied MCP endpoint, one per route.
 - `GET /health`: liveness, `200` once the process is up and its configuration
   parsed. It says nothing about the bundle.
-- `GET /ready`: `200` once a policy bundle is held — and, where
-  `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=true`, a signing key set — `503` until
+- `GET /ready`: `200` once a policy bundle is held — and, unless
+  `RAIL_UNSIGNED_TICKETS=true`, a signing key set — `503` until
   then. With the plugin off, always `200`. Both stay at the root whatever the prefixes.
 
 ## From source

@@ -23,11 +23,12 @@ log = logging.getLogger(__name__)
 #: (Rail Center's `RAIL_CENTER_BASE_URL` followed by `/tenants/<tenant id>`) and
 #: the tenant id. Never derived from `RAIL_CENTER_URL`, which may be an internal
 #: address, and compared exactly.
-TICKET_ISSUER: str = "RAIL_GATEWAY_TICKET_ISSUER"
-TICKET_AUDIENCE: str = "RAIL_GATEWAY_TICKET_AUDIENCE"
+TICKET_ISSUER: str = "RAIL_TICKET_ISSUER"
+TICKET_AUDIENCE: str = "RAIL_TICKET_AUDIENCE"
 
-#: Whether an unsigned ticket is refused as `bad_signature`.
-REQUIRE_SIGNED_TICKETS: str = "RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS"
+#: Whether an unsigned ticket is still read; `false` refuses it as
+#: `bad_signature`.
+UNSIGNED_TICKETS: str = "RAIL_UNSIGNED_TICKETS"
 
 
 def _required(name: str) -> str:
@@ -139,39 +140,61 @@ def _optional(name: str) -> str | None:
 
 
 def require_signed_tickets() -> bool:
-    """`RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS`: `true` or `false`, default `false`.
+    """Whether signatures are required: unless `RAIL_UNSIGNED_TICKETS=true`.
+    The variable is `true` or `false` and defaults to `false`, signed only.
 
-    Turned on once every agent this gateway fronts is served signed tickets,
-    and not before: until then it refuses all of their tickets. Until it is on,
-    an attacker refused on a signed ticket can send an unsigned one instead, so
-    signing protects nothing at a gateway still accepting both. Anything but the
-    two spellings is refused, case folded, as `RAIL_PLUGIN_ENABLED` is.
+    The default is what a deployment is meant to run: while an attacker
+    refused on a signed ticket can send an unsigned one instead, signing
+    protects nothing. `true` is for a deployment whose agents are still served
+    unsigned tickets, and every unsigned ticket is refused without it. Anything
+    but the two spellings is refused, case folded, as `RAIL_PLUGIN_ENABLED` is.
     """
-    raw = (os.environ.get(REQUIRE_SIGNED_TICKETS) or "").strip()
+    raw = (os.environ.get(UNSIGNED_TICKETS) or "").strip()
     if not raw:
-        return False
+        return True
     folded = raw.lower()
     if folded not in ("true", "false"):
         raise ConfigError(
-            f"{REQUIRE_SIGNED_TICKETS} must be true or false, got: {safe_value(raw)}"
+            f"{UNSIGNED_TICKETS} must be true or false, got: {safe_value(raw)}"
         )
-    return folded == "true"
+    return folded == "false"
 
 
 def build_keyset(url: str, headers: dict[str, str]) -> KeySetHolder:
     """The key-set holder, from the same Rail Center and credential the bundle
     holder uses, and the settings above.
 
-    **Requiring signatures over a Rail Center that is not `https://` is
-    refused**: no key set is ever fetched over anything else, so that gateway
-    would refuse every call while starting cleanly.
+    **Requiring signatures is refused where nothing could pass**, since that
+    gateway would start cleanly and refuse every call carrying a ticket: over a
+    Rail Center that is not `https://`, where no key set is ever fetched, and
+    without both an issuer and an audience, where every signed ticket reads
+    `wrong_audience`.
     """
     requires = require_signed_tickets()
+    # Said as the state, not as a value the operator may never have set: the
+    # default requires signatures, so an upgrade that sets nothing lands here.
+    required = f"signed tickets are required ({UNSIGNED_TICKETS} is unset or false)"
+    keep_unsigned = f"set {UNSIGNED_TICKETS}=true to keep reading unsigned tickets"
     if requires and urlsplit(url).scheme != "https":
         raise ConfigError(
-            f"{REQUIRE_SIGNED_TICKETS} is true, but RAIL_CENTER_URL is not "
-            "https:// and no signing key set is fetched over anything else, so "
-            "every call would be refused"
+            f"{required}, but RAIL_CENTER_URL is not https:// and no signing "
+            "key set is fetched over anything else, so every call carrying a "
+            f"ticket would be refused; {keep_unsigned}"
+        )
+    issuer = _optional(TICKET_ISSUER)
+    audience = _optional(TICKET_AUDIENCE)
+    missing = [
+        name
+        for name, value in ((TICKET_ISSUER, issuer), (TICKET_AUDIENCE, audience))
+        if value is None
+    ]
+    if requires and missing:
+        raise ConfigError(
+            f"{required}, but {' and '.join(missing)} "
+            f"{'is' if len(missing) == 1 else 'are'} not set, so every signed "
+            "ticket would read wrong_audience and every call carrying a ticket "
+            f"would be refused; set {'it' if len(missing) == 1 else 'them'}, "
+            f"or {keep_unsigned}"
         )
     clock, counts_suspend = boottime_clock()
     if not counts_suspend:
@@ -182,8 +205,8 @@ def build_keyset(url: str, headers: dict[str, str]) -> KeySetHolder:
     return KeySetHolder(
         url,
         headers,
-        issuer=_optional(TICKET_ISSUER),
-        audience=_optional(TICKET_AUDIENCE),
+        issuer=issuer,
+        audience=audience,
         requires_signatures=requires,
         clock=clock,
     )

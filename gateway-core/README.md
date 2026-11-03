@@ -143,10 +143,9 @@ it needs no redeploy. The proxy reads the same variable, so one value
 configures a whole zone.
 
 Off beside Rail Center configuration — `RAIL_CENTER_URL`, `RAIL_AUTH_TOKEN`,
-`RAIL_AUTH_MODE` other than `none`, `RAIL_GATEWAY_TICKET_ISSUER`,
-`RAIL_GATEWAY_TICKET_AUDIENCE`, or `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS` other
-than `false` — is refused, naming each one found, so the default can't silently
-unenrol a gateway that was enforcing.
+`RAIL_AUTH_MODE` other than `none`, `RAIL_TICKET_ISSUER`, `RAIL_TICKET_AUDIENCE`,
+or `RAIL_UNSIGNED_TICKETS` other than `false` — is refused, naming each one
+found, so the default can't silently unenrol a gateway that was enforcing.
 
 #### `RAIL_CENTER_URL`
 
@@ -179,7 +178,7 @@ How often to fetch the bundle again, in seconds. Defaults to `60`. Not an
 integer is refused; below `5` is raised to `5` with a warning, since an eager
 interval isn't worth refusing to start over.
 
-#### `RAIL_GATEWAY_TICKET_ISSUER`
+#### `RAIL_TICKET_ISSUER`
 
 The issuer a signed ticket must name, compared exactly: this gateway's
 tenant's, which is Rail Center's `RAIL_CENTER_BASE_URL` followed by
@@ -187,20 +186,22 @@ tenant's, which is Rail Center's `RAIL_CENTER_BASE_URL` followed by
 internal address. Unset or blank, every signed ticket whose signature verifies
 reads `wrong_audience`.
 
-#### `RAIL_GATEWAY_TICKET_AUDIENCE`
+#### `RAIL_TICKET_AUDIENCE`
 
 The audience a signed ticket must name, compared exactly: this gateway's
 tenant id. Unset or blank, every signed ticket whose signature verifies reads
 `wrong_audience`.
 
-#### `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS`
+#### `RAIL_UNSIGNED_TICKETS`
 
 `true` or `false`, case folded; defaults to `false`; anything else is refused.
-`true` reads every unsigned ticket as `bad_signature`: turn it on once every
-agent this gateway fronts is served signed tickets, and not before. `true` with
-a `RAIL_CENTER_URL` that is not `https://` is refused, since no key set is
-fetched over anything else. While it is `true`, `/ready` also waits for a key
-set.
+`false` reads every unsigned ticket as `bad_signature`, so with the plugin on
+the default needs a `RAIL_CENTER_URL` that is `https://` and both
+`RAIL_TICKET_ISSUER` and `RAIL_TICKET_AUDIENCE`, and refuses to start without
+them: no key set is fetched over anything else, and without both every signed
+ticket would read `wrong_audience`. While it is `false`, `/ready` also waits
+for a key set. `true` reads unsigned tickets as before, for a deployment whose
+agents are still served them.
 
 The keys come from `RAIL_CENTER_URL` + `/v1/jwks.json`, fetched with the same
 credential as the bundle: over HTTPS with the certificate checked and no
@@ -210,7 +211,7 @@ seconds after the last fetch that succeeded, counted on a clock that keeps
 running through suspend; past that every signed ticket reads `bad_signature`
 until a fetch succeeds. These three variables count as Rail Center
 configuration, so setting them with `RAIL_PLUGIN_ENABLED` off is refused
-(`RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=false` asserts nothing).
+(`RAIL_UNSIGNED_TICKETS=false` asserts nothing).
 
 #### `RAIL_GATEWAY_PORT`
 

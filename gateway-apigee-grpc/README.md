@@ -55,14 +55,15 @@ point whoever reads the denial at a forgery that didn't happen. An invented `kid
 takes the same path.
 
 The refetch carries on after the call is abandoned, so a retry once it has
-succeeded finds the key held. A refetch that fails brings no key, and a retry in
-the 30 s after it gets no second refetch: it is denied as `bad_signature`.
+succeeded finds the key held. A refetch that fails brings no key, and a retry
+within 30 s of that refetch starting gets no second one: it is denied as
+`bad_signature`.
 
 ### At startup
 
 The callout waits up to 5 s for the first bundle, then serves whether or not
 it holds one. With no bundle held, calls are allowed, and readiness is
-`NOT_SERVING` until one arrives. Where `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=true`
+`NOT_SERVING` until one arrives. Unless `RAIL_UNSIGNED_TICKETS=true`
 it waits on the first signing key set in the same 5 s, and readiness is also
 `NOT_SERVING` until a key set is held. A failed fetch doesn't stop it.
 
@@ -168,7 +169,8 @@ Or run it with uv:
 ```bash
 make init
 RAIL_PLUGIN_ENABLED=true RAIL_CENTER_URL=https://rail-center.example.com \
-  RAIL_GATEWAY_SLUG=edge uv run python -m gateway.apigee_grpc
+  RAIL_GATEWAY_SLUG=edge RAIL_UNSIGNED_TICKETS=true \
+  uv run python -m gateway.apigee_grpc
 ```
 
 The generated gRPC code is committed: `make proto` regenerates it from the

@@ -41,6 +41,9 @@ says it happened.
 
 - `rc-mappings/` serves the policy bundle and accepts denials. Each bundle
   matches one credential's `Authorization`; the table below gives its posture.
+  It also serves a signing key set, Rail Center's published test key, for a
+  gateway that reaches it over `https://` and so fetches one: the live Apigee
+  session. Every e2e ticket is unsigned, so nothing is verified against it.
 - `mcp-mappings/` answers as an MCP server.
 - `tickets.env` holds two `x-rail` tickets: unsigned base64url JSON, in the
   nested shape Rail Center stores — an `id`, `posture.overall` and `alignment`.

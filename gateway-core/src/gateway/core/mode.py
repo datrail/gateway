@@ -95,13 +95,13 @@ RAIL_CENTER_VARIABLES: Final[tuple[str, ...]] = (
     "RAIL_CENTER_URL",
     "RAIL_AUTH_MODE",
     "RAIL_AUTH_TOKEN",
-    "RAIL_GATEWAY_TICKET_ISSUER",
-    "RAIL_GATEWAY_TICKET_AUDIENCE",
-    "RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS",
+    "RAIL_TICKET_ISSUER",
+    "RAIL_TICKET_AUDIENCE",
+    "RAIL_UNSIGNED_TICKETS",
 )
 
 #: One of the two values among those variables that assert no enrolment; the
-#: other is `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=false`, that variable's default
+#: other is `RAIL_UNSIGNED_TICKETS=false`, that variable's default
 #: spelled out (see `_asserts_enrolment`). `none` is `RAIL_AUTH_MODE`'s own
 #: default and names *no credential*, which is exactly what a gateway with no
 #: control plane has — so a platform template that spells the default out, or a
@@ -142,8 +142,8 @@ def _asserts_enrolment(name: str) -> bool:
 
     Blank and unset say nothing, and so do `RAIL_AUTH_MODE=none` — the value
     means *no credential*, which is the state of every gateway that reaches no
-    control plane at all — and `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=false`, that
-    variable's own default spelled out. Admitting it costs no protection:
+    control plane at all — and `RAIL_UNSIGNED_TICKETS=false`, that variable's
+    own default spelled out. Admitting it costs no protection:
     `RAIL_CENTER_URL` is the decisive variable and every deployment that really
     polls a Rail Center has it, so the dangerous case — a dropped flag on a
     gateway that was enforcing an hour ago — is still refused.
@@ -157,7 +157,7 @@ def _asserts_enrolment(name: str) -> bool:
         return False
     if name == "RAIL_AUTH_MODE":
         return value.lower() != UNENROLLING_AUTH_MODE
-    if name == "RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS":
+    if name == "RAIL_UNSIGNED_TICKETS":
         # `false` is the default spelled out, which asserts nothing, as
         # `RAIL_AUTH_MODE=none` does not.
         return value.lower() != "false"
@@ -186,8 +186,8 @@ def plugin_enabled() -> bool:
     ago — is exactly the case with `RAIL_CENTER_URL` set, so it is refused
     rather than silently unenrolled. A deployment with no Rail Center
     configuration is a plain gateway and boots without the variable, and
-    neither `RAIL_AUTH_MODE=none` nor `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS=false`
-    is any of it: see `_asserts_enrolment`.
+    neither `RAIL_AUTH_MODE=none` nor `RAIL_UNSIGNED_TICKETS=false` is any of
+    it: see `_asserts_enrolment`.
 
     Case is folded for the reason it always was: the proxy in front reads its
     own flag through `.strip().lower()`, and a gateway matching exactly would

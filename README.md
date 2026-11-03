@@ -80,7 +80,7 @@ gRPC.
 An unsigned `x-rail` ticket's agent identity and posture are claims, not
 cryptographically established identity. A signed ticket is verified against
 Rail Center's published keys and its tenant's issuer and audience; it protects
-nothing until `RAIL_GATEWAY_REQUIRE_SIGNED_TICKETS` is on, since a caller
+nothing while `RAIL_UNSIGNED_TICKETS` is `true`, since a caller
 refused on a signed ticket can otherwise send an unsigned one. Keep the gateway
 behind the intended network boundary, use TLS for non-local control-plane and
 upstream connections, and read [SECURITY.md](SECURITY.md) before production

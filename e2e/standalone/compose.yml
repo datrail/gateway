@@ -25,6 +25,9 @@ x-enrolled: &enrolled
   RAIL_CENTER_URL: http://rail-center:8080
   RAIL_GATEWAY_SLUG: edge
   RAIL_PLUGIN_ENABLED: "true"
+  # The stand-in serves unsigned tickets over http://, where no key set is
+  # fetched.
+  RAIL_UNSIGNED_TICKETS: "true"
   RAIL_AUTH_MODE: bearer
   # No refresh during a run, so the startup fetch count can't race one.
   RAIL_GATEWAY_BUNDLE_REFRESH_SECONDS: "3600"
@@ -79,6 +82,7 @@ services:
       RAIL_CENTER_URL: http://rail-center.invalid
       RAIL_GATEWAY_SLUG: edge
       RAIL_PLUGIN_ENABLED: "true"
+      RAIL_UNSIGNED_TICKETS: "true"
       RAIL_GATEWAY_PORT: "9100"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:9100/health').read()"]
