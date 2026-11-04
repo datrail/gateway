@@ -16,14 +16,14 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "description": "The shape of this document, so a reader can tell an unsupported bundle from a malformed one and refuse it whole rather than half-read it. At the root beside `content_hash` because it describes the document: a reader must find it before parsing, so it cannot live inside a sub-object whose own shape it explains. Named `schema_version` rather than `version` because a content hash sits beside it and only one of the two is a version. **`MAJOR.MINOR`, and a reader compares the major alone.** A matching major with any minor is read; a different major is refused whole; anything that is not two runs of ASCII digits separated by one dot is refused, a version a reader cannot parse being one it cannot claim to support. The minor is not compared because a minor bump adds a field, and an unrecognised root field is already read rather than refused — refusing the number that announces it would make adding an optional field a breaking change after all. The ASCII restriction is not pedantry: `str.isdigit` in Python is true of Arabic-Indic and fullwidth digits and `int` parses them, so a reader written that way accepts versions a Go or TypeScript implementation refuses. This reader understands majors `1` and `2`: the major picks the condition grammar, and a `1.x` bundle with no `ticket_fallback` is read as `pass`, its chain carrying the rule about a missing ticket itself.",
+      "description": "The shape of this document, so a reader can tell an unsupported bundle from a malformed one and refuse it whole rather than half-read it. At the root beside `content_hash` because it describes the document: a reader must find it before parsing, so it cannot live inside a sub-object whose own shape it explains. Named `schema_version` rather than `version` because a content hash sits beside it and only one of the two is a version. **`MAJOR.MINOR`, and a reader compares the major alone.** A matching major with any minor is read; a different major is refused whole; anything that is not two runs of ASCII digits separated by one dot is refused, a version a reader cannot parse being one it cannot claim to support. The minor is not compared because a minor bump adds a field, and an unrecognised root field is already read rather than refused — refusing the number that announces it would make adding an optional field a breaking change after all. The ASCII restriction is not pedantry: `str.isdigit` in Python is true of Arabic-Indic and fullwidth digits and `int` parses them, so a reader written that way accepts versions a Go or TypeScript implementation refuses. A `2.1` bundle adds `ticket_issuer` and `ticket_audience`, which a `2.0` reader leaves unread and so holds no issuer or audience. This reader understands majors `1` and `2`: the major picks the condition grammar, and a `1.x` bundle with no `ticket_fallback` is read as `pass`, its chain carrying the rule about a missing ticket itself.",
       "pattern": "^[0-9]+\\.[0-9]+$"
     },
     "content_hash": {
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "description": "A content hash of the `schema_version`, the `enforcement`, the `binding_fallback`, the `ticket_fallback`, the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy; `binding_fallback` is covered because it decides every unmatched call; `schema_version` is covered because a reader that must refuse an unsupported shape has to discover the bump. **It is a hash and not a version**: two builds of the same inputs produce the same value, nothing stores it, and it orders nothing."
+      "description": "A content hash of every field except itself and `generated_at`: the `schema_version`, the `enforcement`, the `binding_fallback`, the `ticket_fallback`, the `ticket_issuer` and `ticket_audience`, the policies *and* the bindings. A reader re-fetching on a timer compares it and re-parses only when it changes. Bindings are covered because attaching a policy to an endpoint changes which requests are denied without changing any policy; `binding_fallback` is covered because it decides every unmatched call; `schema_version` is covered because a reader that must refuse an unsupported shape has to discover the bump. **It is a hash and not a version**: two builds of the same inputs produce the same value, nothing stores it, and it orders nothing."
     },
     "generated_at": {
       "type": "string",
@@ -78,6 +78,20 @@
         "block"
       ],
       "description": "What happens to a call carrying no usable ticket — absent, undecodable, malformed, bad_signature, wrong_audience or expired. Asked before `binding_fallback` and before the chain. `block` refuses without consulting the chain, and the refusal is reported with no `policy_id` and `metadata.fallback: \"ticket\"`; `pass` walks the chain with the `ticket` source absent, so every `ticket.*` path reads absent. Absent is `block`. Evaluated wherever the chain is walked and acted on only at `enforce`, as `binding_fallback` is."
+    },
+    "ticket_issuer": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The `iss` a signed ticket for this gateway's tenant carries — Rail Center's base URL followed by `/tenants/<tenant id>` — which a signed ticket's is compared with exactly (`2.1`). `null`, blank or absent names none: a bundle from before `2.1`, or from a Rail Center that signs no tickets. A value that is not a string is held as none, with a warning, rather than refusing the bundle: the field decides only whether a signed ticket is accepted, and holding none fails closed. While either this or `ticket_audience` is not held, every signed ticket that verifies reads `wrong_audience`."
+    },
+    "ticket_audience": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The `aud` a signed ticket for this gateway's tenant carries — the tenant's id — compared exactly, and read as `ticket_issuer` is."
     }
   },
   "$defs": {

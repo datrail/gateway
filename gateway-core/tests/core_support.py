@@ -47,9 +47,12 @@ def build_bundle(
     fallback: str = "pass",
     ticket_fallback: str | None = "pass",
     schema_version: str = "2.0",
+    names_tenant: bool = True,
 ):
     """A validated bundle, at `enforce` and both fallbacks `pass` unless asked
-    otherwise; `ticket_fallback=None` leaves the field out.
+    otherwise; `ticket_fallback=None` leaves the field out. It names `TENANT`'s
+    issuer and audience, as a Rail Center that signs does, unless
+    `names_tenant=False` leaves both out.
 
     The fallbacks default to `pass`, unlike Rail Center's `block`: most cases
     call an unbound endpoint, or carry no ticket, and `block` would refuse them
@@ -66,6 +69,11 @@ def build_bundle(
             **(
                 {"ticket_fallback": ticket_fallback}
                 if ticket_fallback is not None
+                else {}
+            ),
+            **(
+                {"ticket_issuer": ISSUER, "ticket_audience": TENANT}
+                if names_tenant
                 else {}
             ),
         }
@@ -283,9 +291,11 @@ class EnforcementCase:
     # Where a row's whole effect is a warning, the warning is the row.
     logged: tuple[str, ...] = ()
     not_for: Mapping[str, str] = field(default_factory=dict)
-    # What signed tickets are checked against; None is a gateway holding no
-    # key set, configured with no issuer or audience.
+    # The keys signed tickets are checked against; None is a gateway holding
+    # no key set. The issuer and audience come from the case's bundle.
     verifier: TicketVerifier | None = None
+    # Whether the case's bundle names `TENANT`'s issuer and audience.
+    names_tenant: bool = True
 
     def get_keyset(self) -> FixedKeys | None:
         return FixedKeys(self.verifier) if self.verifier is not None else None
@@ -300,6 +310,7 @@ class EnforcementCase:
             fallback=self.fallback,
             ticket_fallback=self.ticket_fallback,
             schema_version=self.schema_version,
+            names_tenant=self.names_tenant,
         )
 
 
@@ -613,6 +624,19 @@ ENFORCEMENT_CASES = [
         ticket_fallback="block",
         x_rail=(encode_signed_ticket(aud="00000000-0000-4000-8000-0000000000bb"),),
         verifier=TENANT_VERIFIER,
+        status=403,
+        report=build_report(
+            policy_id=None, ticket_state="wrong_audience", fallback="ticket"
+        ),
+    ),
+    # Genuine and for this tenant, but the bundle names no issuer or audience —
+    # one from before `2.1`, or from a Rail Center that signs nothing.
+    EnforcementCase(
+        "no usable ticket, block (a bundle naming no issuer or audience)",
+        ticket_fallback="block",
+        x_rail=(encode_signed_ticket(),),
+        verifier=TENANT_VERIFIER,
+        names_tenant=False,
         status=403,
         report=build_report(
             policy_id=None, ticket_state="wrong_audience", fallback="ticket"

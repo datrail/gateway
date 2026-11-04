@@ -300,12 +300,11 @@ async def test_content_that_is_not_utf8_fails_before_the_servicer_runs():
 
 
 @pytest.mark.asyncio
-async def test_a_key_published_a_moment_ago_verifies_its_first_ticket():
+async def test_a_key_published_a_moment_ago_admits_its_first_ticket():
     """The callout asks the key set for the ticket's `kid` before reading it,
     as standalone does: a key Rail Center published a moment ago is fetched
-    once, and the ticket it signed verifies. No issuer or audience reaches a
-    gateway, so a verified ticket reads `wrong_audience`; a key the refetch had
-    not brought would read `bad_signature`."""
+    once, and the call it signed — for the tenant the bundle names — is
+    admitted rather than refused."""
     stale = {"keys": [{**TENANT_JWKS["keys"][0], "kid": "vector-key-2"}]}
     answers = [httpx.Response(200, json=stale), httpx.Response(200, json=TENANT_JWKS)]
     keyset = KeySetHolder(
@@ -325,6 +324,6 @@ async def test_a_key_published_a_moment_ago_verifies_its_first_ticket():
         build_bundle(DENIES_EVERYTHING, ticket_fallback="block"), context, keyset
     )
 
-    assert _read_flow(answer)[DECISION] == "refuse"
-    assert [body["metadata"]["x-rail-status"] for body in sent] == ["wrong_audience"]
+    assert _read_flow(answer) == {DECISION: "allow"}
+    assert sent == []
     assert answers == []

@@ -79,7 +79,8 @@ from gateway.core.json_wire import MAX_SAFE_INTEGER
 #:                   signatures
 #: - ``wrong_audience`` signed and verified — Rail Center issued it — but not
 #:                   for this reader: an ``iss`` or ``aud`` other than the ones
-#:                   configured, none configured, or an ``nbf`` more than
+#:                   it holds (a gateway's are its bundle's), either one not
+#:                   held, or an ``nbf`` more than
 #:                   ``NBF_ALLOWANCE_SEC`` ahead
 #: - ``valid``       everything else
 TicketState = Literal[
@@ -183,8 +184,9 @@ class TicketVerifier:
     No verifier at all is a reader that holds no keys, is configured with no
     issuer or audience, and still accepts unsigned tickets: every reader before
     signing existed. A gateway's own, `KeySetHolder.verifier()`, carries keys
-    alone: nothing gives a gateway its issuer or audience, so a signed ticket
-    that verifies there reads `wrong_audience`.
+    alone; `judge` gives it the issuer and audience of the bundle it holds, and
+    a bundle not naming both leaves every signed ticket that verifies
+    `wrong_audience`.
     """
 
     keys: Mapping[str, Ed25519PublicKey] | None = None

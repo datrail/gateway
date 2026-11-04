@@ -475,7 +475,8 @@ async def test_the_loop_refreshes_on_its_interval_and_stops() -> None:
 
 @pytest.mark.asyncio
 async def test_the_verifier_carries_keys_alone() -> None:
-    """Nothing gives a gateway its issuer or audience, and it reads both forms."""
+    """The issuer and audience are the held bundle's, which `judge` adds; the
+    key set's verifier carries none, and reads both forms."""
     keys = holder(responder(ok()))
     await keys.refresh()
 

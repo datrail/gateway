@@ -262,7 +262,8 @@ def test_the_schemas_state_the_types_they_document() -> None:
     # fallback leaves `enforcement` and returns at the root as
     # `binding_fallback`, and `schema_version` arrives beside `content_hash`.
     # 18 → 19 with RC-434's `ticket_fallback`.
-    assert types(_schema("policy-bundle.schema.json")) == 19
+    # 19 → 21 with RC-492's `ticket_issuer` and `ticket_audience`.
+    assert types(_schema("policy-bundle.schema.json")) == 21
     # 12 → 23 with RC-434's nested ticket: `id`, and the objects, arrays and
     # members of `posture` and `alignment`, less the three flat claims.
     # 23 → 27 with DR-263's signed-only `nbf`, `jti`, `iss` and `aud`.
@@ -280,6 +281,10 @@ def test_the_schemas_state_the_types_they_document() -> None:
     assert not bundle.is_valid({**base, "policies": "not a list"})
     assert not bundle.is_valid({**base, "bindings": {"a": 1}})
     assert not bundle.is_valid({**base, "generated_at": 42})
+    for name in ("ticket_issuer", "ticket_audience"):
+        assert not bundle.is_valid({**base, name: 17})
+        assert bundle.is_valid({**base, name: None})
+        assert bundle.is_valid({**base, name: "a"})
     assert not bundle.is_valid({**base, "policies": ["just a string"]})
     assert not bundle.is_valid(
         {**base, "policies": [{"id": one, "priority": 1, "enabled": "false"}]}

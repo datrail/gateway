@@ -8,7 +8,7 @@ are the same in all of them, so they live here.
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import httpx
@@ -77,6 +77,20 @@ class Verdict:
 PASS = Verdict()
 
 
+def _for_tenant(
+    verifier: TicketVerifier | None, bundle: UsableBundle
+) -> TicketVerifier | None:
+    """`verifier`'s keys, compared against the issuer and audience `bundle`
+    names. Both are always taken from the bundle, never kept from `verifier`,
+    so a bundle not naming both — from before `2.1`, or from a Rail Center that
+    signs nothing — leaves every signed ticket that verifies `wrong_audience`."""
+    if verifier is None:
+        return None
+    return replace(
+        verifier, issuer=bundle.ticket_issuer, audience=bundle.ticket_audience
+    )
+
+
 def judge(
     holder: BundleHolder,
     path: str,
@@ -89,8 +103,10 @@ def judge(
     """What to do with one call: `body` as received, `path` as the upstream
     serves it, every `x-rail` and `x-rail-status` value the caller sent, and
     every header as a `(name, value)` pair — what a condition's
-    `request.headers` reads. `verifier` is what a signed ticket is checked
-    against; without one every well-formed signed ticket is `bad_signature`.
+    `request.headers` reads. `verifier` holds the keys a signed ticket is
+    checked against; without one every well-formed signed ticket is
+    `bad_signature`. The issuer and audience it is compared with are the held
+    bundle's, and come from nowhere else.
 
     Never raises. A defect in the walk must not take the forward path down:
     an unforeseen exception is logged with its traceback and the request
@@ -109,7 +125,6 @@ def judge(
         # window was.
         log.info("pass %s (session message, not judged)", named)
         return PASS
-    ticket = parse_rail_header(x_rail, verifier=verifier)
 
     bundle = holder.current()
     if bundle is None:
@@ -128,6 +143,11 @@ def judge(
             named,
         )
         return PASS
+
+    # Read once a bundle is held, because the issuer and audience a signed
+    # ticket is compared with are that bundle's: a ticket read before it would
+    # be read against none, and every genuine one would be `wrong_audience`.
+    ticket = parse_rail_header(x_rail, verifier=_for_tenant(verifier, bundle))
 
     # Read here rather than at start-up, which is the whole of RC-312 on this
     # side: an operator moving a gateway to `none` during an incident, and
