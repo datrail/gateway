@@ -45,6 +45,21 @@ callout's own log shows nothing.
 An error inside a working callout is the other way round: it logs the
 traceback and allows the request, as standalone does when its walk raises.
 
+A signed ticket naming a key the callout doesn't hold waits for one refetch of
+Rail Center's key set: up to 10 s, or about 20 s behind a refresh already
+running. Past `TimeoutMs` that call gets the proxy's 503 above, not a
+`bad_signature` denial, and no denial is reported. That is deliberate. Such a ticket is almost always
+genuinely signed — the usual cause is a compromise withdrawal, whose replacement
+key signs the moment it is published — so recording it as `bad_signature` would
+point whoever reads the denial at a forgery that didn't happen. An invented `kid`
+takes the same path.
+
+The refetch carries on after the call is abandoned, so a retry once it has
+succeeded finds the key held and is read against it, rather than waiting
+again. The callout holds no issuer or audience, so a genuine ticket then reads
+`wrong_audience`. A refetch that fails brings no key, and a retry within 30 s
+of that refetch starting gets no second one: it is denied as `bad_signature`.
+
 ### At startup
 
 The callout waits up to 5 s for the first bundle, then serves whether or not

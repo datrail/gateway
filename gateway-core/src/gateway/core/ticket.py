@@ -182,15 +182,16 @@ class TicketVerifier:
 
     No verifier at all is a reader that holds no keys, is configured with no
     issuer or audience, and still accepts unsigned tickets: every reader before
-    signing existed.
+    signing existed. A gateway's own, `KeySetHolder.verifier()`, carries keys
+    alone: nothing gives a gateway its issuer or audience, so a signed ticket
+    that verifies there reads `wrong_audience`.
     """
 
     keys: Mapping[str, Ed25519PublicKey] | None = None
     issuer: str | None = None
     audience: str | None = None
-    #: Read an unsigned ticket as `bad_signature`. Turned on once every agent
-    #: this gateway fronts is served signed tickets, and not before: until then
-    #: it refuses all of them.
+    #: Read an unsigned ticket as `bad_signature`. No gateway sets it: one
+    #: reads both forms, since its agents may still be served unsigned tickets.
     requires_signatures: bool = False
 
 
@@ -376,7 +377,7 @@ def parse_rail_header(
 
     # Before the payload is looked at: a reader still accepting both forms is
     # one where an attacker refused on a signed ticket answers with an
-    # unsigned one, so signing protects nothing until this is on.
+    # unsigned one, so signing protects nothing until this is set.
     if verifier is not None and verifier.requires_signatures:
         return ParseResult("bad_signature")
 
@@ -484,6 +485,31 @@ def _json_of(raw: bytes) -> Any:
         # and removes the one path by which this function could raise instead of
         # answering.
         return _UNDECODABLE
+
+
+def signed_kid(value: str | list[str] | tuple[str, ...] | None) -> str | None:
+    """The `kid` a signed header names, or None for anything that is not a
+    readable signed header with a string `kid`.
+
+    Reads the JOSE header and nothing else, so the key-set holder can tell
+    whether a request names a key it does not hold before the ticket is read.
+    The answer decides only whether to refetch: the reading itself is
+    `parse_rail_header`'s, against whatever set is then held.
+    """
+    if isinstance(value, (list, tuple)):
+        if len(value) != 1:
+            return None
+        value = value[0]
+    if not isinstance(value, str) or value.count(".") != 2:
+        return None
+    raw = _decoded_part(value.split(".", 1)[0])
+    if raw is None:
+        return None
+    header = _json_of(raw)
+    if not isinstance(header, dict):
+        return None
+    kid = header.get("kid")
+    return kid if isinstance(kid, str) else None
 
 
 def _read_signed(value: str, now: int, verifier: TicketVerifier | None) -> ParseResult:

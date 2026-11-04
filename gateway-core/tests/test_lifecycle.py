@@ -241,3 +241,130 @@ async def test_a_first_fetch_that_raises_past_the_grace_is_still_said_out_loud(
     written = "\n".join(caplog.messages)
     assert "the first policy bundle fetch raised" in written, written
     assert "a defect the grace had already elapsed on" in caplog.text
+
+
+class _KeySet:
+    """A key-set holder whose first fetch does what a case says, and records
+    whether it was stopped."""
+
+    def __init__(self, start) -> None:
+        self._start = start
+        self.stopped = False
+
+    async def start(self):
+        return await self._start()
+
+    async def stop(self) -> None:
+        self.stopped = True
+
+
+@pytest.mark.asyncio
+async def test_a_slow_key_set_does_not_hold_the_start(monkeypatch):
+    """Readiness does not wait on the key set, so neither does the start: every
+    second in the grace is a second `/health` refuses."""
+    monkeypatch.setattr(lifecycle, "STARTUP_FETCH_GRACE_SECONDS", 30.0)
+
+    async def never():
+        await asyncio.sleep(3600)
+
+    keyset = _KeySet(never)
+
+    async with asyncio.timeout(5):
+        async with running(holder_serving(serving_a_bundle), keyset):
+            pass
+    assert keyset.stopped
+
+
+@pytest.mark.asyncio
+async def test_a_key_set_first_fetch_that_raises_refuses_the_start():
+    """A raise is a defect, as for the bundle: `start()` creates the refresh
+    loop only after the first fetch returns, so a gateway that served on would
+    never refresh its keys."""
+
+    async def broken():
+        raise RuntimeError("defect")
+
+    keyset = _KeySet(broken)
+
+    with pytest.raises(RuntimeError, match="defect"):
+        async with running(holder_serving(serving_a_bundle), keyset):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_a_start_the_key_set_refuses_still_retires_the_bundle_loop():
+    """A refused start is an exit like any other: the bundle holder that did
+    start must not be left refreshing in a process that is going away."""
+    fetches = 0
+    resume = asyncio.Event()
+
+    def answer() -> httpx.Response:
+        nonlocal fetches
+        fetches += 1
+        return unreachable()
+
+    async def sleep(_seconds: float) -> None:
+        await resume.wait()
+        resume.clear()
+
+    async def broken():
+        raise RuntimeError("defect")
+
+    holder = holder_serving(answer, sleep=sleep)
+    keyset = _KeySet(broken)
+
+    with pytest.raises(RuntimeError, match="defect"):
+        async with running(holder, keyset):
+            pass
+
+    resume.set()
+    await _settle()
+    assert fetches == 1, "the bundle's refresh loop outlived the refused start"
+    assert keyset.stopped
+
+
+@pytest.mark.asyncio
+async def test_a_start_the_bundle_refuses_still_stops_the_key_set(monkeypatch):
+    async def broken():
+        raise RuntimeError("defect")
+
+    async def fetched():
+        return None
+
+    holder = holder_serving(serving_a_bundle)
+    monkeypatch.setattr(holder, "start", broken)
+    keyset = _KeySet(fetched)
+
+    with pytest.raises(RuntimeError, match="defect"):
+        async with running(holder, keyset):
+            pass
+
+    assert keyset.stopped
+
+
+@pytest.mark.asyncio
+async def test_a_second_first_fetch_that_raised_is_still_said(monkeypatch, caplog):
+    """The key set's raise is read first and refuses the start, which stops the
+    bundle's being read: unsaid, that defect would surface only as asyncio's
+    unretrieved-exception noise, if at all."""
+
+    async def bundle_broken():
+        raise RuntimeError("bundle defect")
+
+    async def keys_broken():
+        raise RuntimeError("key set defect")
+
+    holder = holder_serving(serving_a_bundle)
+    monkeypatch.setattr(holder, "start", bundle_broken)
+    keyset = _KeySet(keys_broken)
+
+    with (
+        caplog.at_level(logging.ERROR, logger="gateway.core.lifecycle"),
+        pytest.raises(RuntimeError, match="key set defect"),
+    ):
+        async with running(holder, keyset):
+            pass
+
+    assert "the first policy bundle fetch raised" in caplog.text
+    assert "bundle defect" in caplog.text
+    assert "the first signing key set fetch raised" not in caplog.text

@@ -6,14 +6,18 @@ whichever interface reads it. What an interface serves stays in that interface.
 """
 
 import base64
+import logging
 import os
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from gateway.core.auth import auth_headers
 from gateway.core.bundle.client import BundleHolder, refresh_seconds
 from gateway.core.errors import ConfigError
+from gateway.core.keyset import KeySetHolder, boottime_clock
 
 DEFAULT_PORT = 8080
+
+log = logging.getLogger(__name__)
 
 
 def _required(name: str) -> str:
@@ -76,11 +80,11 @@ def port() -> int:
 def rail_center_from_environment() -> tuple[str, dict[str, str]]:
     """Where Rail Center is, and what this gateway presents to it.
 
-    One pair, resolved once, for both callers that reach the control plane: the
-    bundle holder and the denial reporter. Resolving it twice would let the two
-    disagree — a gateway fetching policy as one identity and reporting denials
-    as another is a state nothing would report and an operator could not read
-    off either side.
+    One pair, resolved once, for every caller that reaches the control plane:
+    the bundle holder, the denial reporter and the key-set holder. Resolving it
+    more than once would let them disagree — a gateway fetching policy as one
+    identity and reporting denials as another is a state nothing would report
+    and an operator could not read off either side.
 
     `RAIL_CENTER_URL` goes through `_split_credential` for the reason the
     upstream URL does and one more: httpx derives `BasicAuth` from a URL's
@@ -112,6 +116,23 @@ def build_holder() -> BundleHolder:
     return BundleHolder(
         url, headers, gateway_slug(), interval_seconds=refresh_seconds()
     )
+
+
+def build_keyset(url: str, headers: dict[str, str]) -> KeySetHolder:
+    """The key-set holder, from the same Rail Center and credential the bundle
+    holder uses.
+
+    No setting of its own: a ticket with a `.` in its header is verified against
+    this set and any other is read as unsigned, so nothing here can be
+    misconfigured but the clock it ages on.
+    """
+    clock, counts_suspend = boottime_clock()
+    if not counts_suspend:
+        log.warning(
+            "this host has no CLOCK_BOOTTIME; the signing key set's maximum age "
+            "is counted on a clock that stops while the host is suspended"
+        )
+    return KeySetHolder(url, headers, clock=clock)
 
 
 def gateway_slug() -> str:

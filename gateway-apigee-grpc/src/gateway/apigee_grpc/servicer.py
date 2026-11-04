@@ -19,6 +19,7 @@ from gateway.apigee_grpc._proto.external_callout_pb2_grpc import (
 )
 from gateway.core.bundle.client import BundleHolder
 from gateway.core.enforcement import PASS, DenialReporter, Verdict, judge, refusal_body
+from gateway.core.keyset import KeySetHolder
 
 log = logging.getLogger(__name__)
 
@@ -34,15 +35,24 @@ class RailCallout(ExternalCalloutServiceServicer):
     """The ExternalCallout service. `holder` is None with the plugin off."""
 
     def __init__(
-        self, holder: BundleHolder | None, reporter: DenialReporter | None
+        self,
+        holder: BundleHolder | None,
+        reporter: DenialReporter | None,
+        keyset: KeySetHolder | None = None,
     ) -> None:
         self._holder = holder
         self._reporter = reporter
+        self._keyset = keyset
 
     async def ProcessMessage(self, request: MessageContext, context) -> MessageContext:
         # Any defect here forwards the request, as standalone does when its walk
         # raises. Escaping would be a gRPC error, which the bundle turns into 503.
         try:
+            if self._keyset is not None and self._holder is not None:
+                # Before the ticket is read: a `kid` not held is worth one
+                # refetch, and the call waits for it rather than being refused
+                # for a key that was published a moment ago.
+                await self._keyset.ensure(_read_header_values(request, "x-rail"))
             return _build_answer(request, self._judge_request(request))
         except Exception as exc:  # noqa: BLE001 - logged below, without its message
             # The type and the frames only: the message could quote a header.
@@ -67,6 +77,7 @@ class RailCallout(ExternalCalloutServiceServicer):
                 for header, values in request.request.headers.items()
                 for value in values.strings
             ],
+            verifier=self._keyset.verifier() if self._keyset is not None else None,
         )
         if verdict.report is not None and self._reporter is not None:
             self._reporter.send(verdict.report)

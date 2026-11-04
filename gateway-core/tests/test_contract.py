@@ -47,6 +47,7 @@ async def test_the_verdict_matches_every_row_of_the_contract(case, caplog):
         [("x-rail", v) for v in case.x_rail]
         + [("x-rail-status", v) for v in case.x_rail_status]
         + list(case.headers),
+        verifier=case.verifier,
     )
 
     assert verdict.status == case.status

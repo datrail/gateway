@@ -121,7 +121,8 @@ def test_no_verifier_reads_every_signed_ticket_as_bad_signature() -> None:
 
 
 def test_an_unsigned_ticket_is_read_as_before_with_no_verifier() -> None:
-    """Every caller today passes none, and must see no change."""
+    """A reader given no verifier reads an unsigned ticket as it always has:
+    the gateway passes one wherever the plugin is on."""
     unsigned = _part({"agent_id": "a", "exp": NOW + 900})
 
     assert parse_rail_header(unsigned, NOW).state == "valid"

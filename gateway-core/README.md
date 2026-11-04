@@ -177,6 +177,21 @@ How often to fetch the bundle again, in seconds. Defaults to `60`. Not an
 integer is refused; below `5` is raised to `5` with a warning, since an eager
 interval isn't worth refusing to start over.
 
+#### Signed tickets
+
+Nothing to set. A ticket whose header contains a `.` is verified as signed,
+and any other is read as unsigned, as before. The keys come from
+`RAIL_CENTER_URL` + `/v1/jwks.json`, fetched with the same credential as the
+bundle: over HTTPS with the certificate checked and no redirect followed,
+every 300 seconds, and once more — at most every 30 seconds — when a ticket
+names a key not held. A set is used for at most 900 seconds after the last
+fetch that succeeded, counted on a clock that keeps running through suspend;
+past that every signed ticket reads `bad_signature` until a fetch succeeds.
+An `http://` Rail Center is never fetched from, so every signed ticket reads
+`bad_signature` there. Nothing gives the gateway its tenant's issuer and
+audience, so a signed ticket whose signature verifies reads `wrong_audience`.
+Readiness doesn't wait for a key set.
+
 #### `RAIL_GATEWAY_PORT`
 
 The port to listen on. Defaults to `8080`; blank is the default. Not an

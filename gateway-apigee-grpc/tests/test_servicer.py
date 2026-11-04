@@ -13,9 +13,11 @@ from core_support import (
     DENIES_ANY_TICKET,
     DENIES_EVERYTHING,
     REASONS,
+    TENANT_JWKS,
     Holder,
     build_bundle,
     build_call,
+    encode_signed_ticket,
     encode_ticket,
     get_enforcement_params,
 )
@@ -32,6 +34,7 @@ from gateway.apigee_grpc._proto.external_callout_pb2_grpc import (
 )
 from gateway.apigee_grpc.servicer import BODY, DECISION, STATUS, RailCallout
 from gateway.core.enforcement import DenialReporter, refusal_body
+from gateway.core.keyset import KeySetHolder
 
 
 class _Reports:
@@ -94,11 +97,11 @@ def _read_headers(answer: MessageContext) -> dict[str, list[str]]:
     return {k: list(v.strings) for k, v in answer.request.headers.items()}
 
 
-async def _call_once(held, context: MessageContext):
+async def _call_once(held, context: MessageContext, keyset=None):
     """One `ProcessMessage`, and the reports it sent."""
     reports = _Reports()
     reporter = reports.create_reporter()
-    async with _serve(RailCallout(Holder(held), reporter)) as channel:
+    async with _serve(RailCallout(Holder(held), reporter, keyset)) as channel:
         answer = await ExternalCalloutServiceStub(channel).ProcessMessage(context)
     await _settle(reporter)
     return answer, reports.bodies
@@ -122,7 +125,7 @@ async def test_the_answer_and_the_report_match_every_row_of_the_contract(case, c
         verb=case.method, uri=case.path, content=case.body, headers=headers
     )
 
-    answer, sent = await _call_once(case.get_bundle(), context)
+    answer, sent = await _call_once(case.get_bundle(), context, case.get_keyset())
 
     flow = _read_flow(answer)
     if case.status is None:
@@ -294,3 +297,34 @@ async def test_content_that_is_not_utf8_fails_before_the_servicer_runs():
     assert failed.value.code() == grpc.StatusCode.UNKNOWN
     assert "bad UTF-8" in failed.value.details()
     assert judged == []
+
+
+@pytest.mark.asyncio
+async def test_a_key_published_a_moment_ago_verifies_its_first_ticket():
+    """The callout asks the key set for the ticket's `kid` before reading it,
+    as standalone does: a key Rail Center published a moment ago is fetched
+    once, and the ticket it signed verifies. No issuer or audience reaches a
+    gateway, so a verified ticket reads `wrong_audience`; a key the refetch had
+    not brought would read `bad_signature`."""
+    stale = {"keys": [{**TENANT_JWKS["keys"][0], "kid": "vector-key-2"}]}
+    answers = [httpx.Response(200, json=stale), httpx.Response(200, json=TENANT_JWKS)]
+    keyset = KeySetHolder(
+        "https://rail-center.example",
+        {},
+        transport=httpx.MockTransport(lambda _request: answers.pop(0)),
+    )
+    await keyset.refresh()
+    context = _build_context(
+        verb="POST",
+        uri="/mcp",
+        content=build_call(),
+        headers={"x-rail": [encode_signed_ticket()]},
+    )
+
+    answer, sent = await _call_once(
+        build_bundle(DENIES_EVERYTHING, ticket_fallback="block"), context, keyset
+    )
+
+    assert _read_flow(answer)[DECISION] == "refuse"
+    assert [body["metadata"]["x-rail-status"] for body in sent] == ["wrong_audience"]
+    assert answers == []
