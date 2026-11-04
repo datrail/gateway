@@ -19,17 +19,6 @@ DEFAULT_PORT = 8080
 
 log = logging.getLogger(__name__)
 
-#: The issuer and audience a signed ticket must name: its tenant's issuer
-#: (Rail Center's `RAIL_CENTER_BASE_URL` followed by `/tenants/<tenant id>`) and
-#: the tenant id. Never derived from `RAIL_CENTER_URL`, which may be an internal
-#: address, and compared exactly.
-TICKET_ISSUER: str = "RAIL_TICKET_ISSUER"
-TICKET_AUDIENCE: str = "RAIL_TICKET_AUDIENCE"
-
-#: Whether an unsigned ticket is still read; `false` refuses it as
-#: `bad_signature`.
-UNSIGNED_TICKETS: str = "RAIL_UNSIGNED_TICKETS"
-
 
 def _required(name: str) -> str:
     """Read a variable that has no sensible default.
@@ -91,11 +80,11 @@ def port() -> int:
 def rail_center_from_environment() -> tuple[str, dict[str, str]]:
     """Where Rail Center is, and what this gateway presents to it.
 
-    One pair, resolved once, for both callers that reach the control plane: the
-    bundle holder and the denial reporter. Resolving it twice would let the two
-    disagree — a gateway fetching policy as one identity and reporting denials
-    as another is a state nothing would report and an operator could not read
-    off either side.
+    One pair, resolved once, for every caller that reaches the control plane:
+    the bundle holder, the denial reporter and the key-set holder. Resolving it
+    more than once would let them disagree — a gateway fetching policy as one
+    identity and reporting denials as another is a state nothing would report
+    and an operator could not read off either side.
 
     `RAIL_CENTER_URL` goes through `_split_credential` for the reason the
     upstream URL does and one more: httpx derives `BasicAuth` from a URL's
@@ -129,93 +118,21 @@ def build_holder() -> BundleHolder:
     )
 
 
-def _optional(name: str) -> str | None:
-    """A variable that may be left unset; blank is unset.
-
-    Blank is read as unset rather than as the empty string, because the reader
-    takes a configured issuer or audience to be one it compares against: an
-    empty one would match a ticket carrying `iss: ""`.
-    """
-    return (os.environ.get(name) or "").strip() or None
-
-
-def require_signed_tickets() -> bool:
-    """Whether signatures are required: unless `RAIL_UNSIGNED_TICKETS=true`.
-    The variable is `true` or `false` and defaults to `false`, signed only.
-
-    The default is what a deployment is meant to run: while an attacker
-    refused on a signed ticket can send an unsigned one instead, signing
-    protects nothing. `true` is for a deployment whose agents are still served
-    unsigned tickets, and every unsigned ticket is refused without it. Anything
-    but the two spellings is refused, case folded, as `RAIL_PLUGIN_ENABLED` is.
-    """
-    raw = (os.environ.get(UNSIGNED_TICKETS) or "").strip()
-    if not raw:
-        return True
-    folded = raw.lower()
-    if folded not in ("true", "false"):
-        raise ConfigError(
-            f"{UNSIGNED_TICKETS} must be true or false, got: {safe_value(raw)}"
-        )
-    return folded == "false"
-
-
 def build_keyset(url: str, headers: dict[str, str]) -> KeySetHolder:
     """The key-set holder, from the same Rail Center and credential the bundle
-    holder uses, and the settings above.
+    holder uses.
 
-    **Requiring signatures is refused where nothing could pass**, since that
-    gateway would start cleanly and refuse every call carrying a ticket: over a
-    Rail Center that is not `https://`, where no key set is ever fetched, and
-    without both an issuer and an audience, where every signed ticket reads
-    `wrong_audience`.
+    No setting of its own: a ticket with a `.` in its header is verified against
+    this set and any other is read as unsigned, so nothing here can be
+    misconfigured but the clock it ages on.
     """
-    requires = require_signed_tickets()
-    # Said as the state, not as a value the operator may never have set: the
-    # default requires signatures, so an upgrade that sets nothing lands here.
-    required = f"signed tickets are required ({UNSIGNED_TICKETS} is unset or false)"
-    keep_unsigned = f"set {UNSIGNED_TICKETS}=true to keep reading unsigned tickets"
-    if requires and urlsplit(url).scheme != "https":
-        raise ConfigError(
-            f"{required}, but RAIL_CENTER_URL is not https:// and no signing "
-            "key set is fetched over anything else, so every call carrying a "
-            f"ticket would be refused; {keep_unsigned}"
-        )
-    issuer = _optional(TICKET_ISSUER)
-    audience = _optional(TICKET_AUDIENCE)
-    missing = [
-        name
-        for name, value in ((TICKET_ISSUER, issuer), (TICKET_AUDIENCE, audience))
-        if value is None
-    ]
-    if requires and missing:
-        raise ConfigError(
-            f"{required}, but {' and '.join(missing)} "
-            f"{'is' if len(missing) == 1 else 'are'} not set, so every signed "
-            "ticket would read wrong_audience and every call carrying a ticket "
-            f"would be refused; set {'it' if len(missing) == 1 else 'them'}, "
-            f"or {keep_unsigned}"
-        )
     clock, counts_suspend = boottime_clock()
     if not counts_suspend:
         log.warning(
             "this host has no CLOCK_BOOTTIME; the signing key set's maximum age "
             "is counted on a clock that stops while the host is suspended"
         )
-    return KeySetHolder(
-        url,
-        headers,
-        issuer=issuer,
-        audience=audience,
-        requires_signatures=requires,
-        clock=clock,
-    )
-
-
-def safe_value(raw: str) -> str:
-    """`raw` for an error message: these variables carry no secret, but a
-    value pasted with a control character in it should not write one to a log."""
-    return raw.encode("unicode_escape").decode("ascii")
+    return KeySetHolder(url, headers, clock=clock)
 
 
 def gateway_slug() -> str:

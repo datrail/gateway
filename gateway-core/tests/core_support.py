@@ -185,13 +185,9 @@ class FixedKeys:
 
     def __init__(self, verifier: TicketVerifier) -> None:
         self._verifier = verifier
-        self.requires_signatures = verifier.requires_signatures
 
     def verifier(self) -> TicketVerifier:
         return self._verifier
-
-    def holds_keys(self) -> bool:
-        return self._verifier.keys is not None
 
     async def ensure(self, _value: Any) -> None:
         return None

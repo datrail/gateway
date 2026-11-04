@@ -103,9 +103,6 @@ class KeySetHolder:
         rail_center_url: str,
         headers: dict[str, str],
         *,
-        issuer: str | None,
-        audience: str | None,
-        requires_signatures: bool = False,
         deadline_seconds: float = FETCH_DEADLINE_SECONDS,
         max_bytes: int = MAX_JWKS_BYTES,
         # Injected so the tests need neither a network, a wait nor a clock.
@@ -125,9 +122,6 @@ class KeySetHolder:
             "Cache-Control": "no-cache",
             "Accept-Encoding": "identity",
         }
-        self._issuer = issuer
-        self._audience = audience
-        self._requires_signatures = requires_signatures
         self._deadline = deadline_seconds
         self._max_bytes = max_bytes
         self._transport = transport
@@ -141,10 +135,6 @@ class KeySetHolder:
         self._forced_at: float | None = None
         self._task: asyncio.Task[None] | None = None
         self._epoch = 0
-
-    @property
-    def requires_signatures(self) -> bool:
-        return self._requires_signatures
 
     def holds_keys(self) -> bool:
         """Whether a set is held that has not passed its maximum age."""
@@ -161,12 +151,7 @@ class KeySetHolder:
         a loop that cleared the set on its own schedule would leave a set one
         tick past its age still verifying until the tick came round.
         """
-        return TicketVerifier(
-            keys=self._keys if self.holds_keys() else None,
-            issuer=self._issuer,
-            audience=self._audience,
-            requires_signatures=self._requires_signatures,
-        )
+        return TicketVerifier(keys=self._keys if self.holds_keys() else None)
 
     async def ensure(self, value: str | list[str] | tuple[str, ...] | None) -> None:
         """Refetch first when `value` is a signed header naming a `kid` not held.
@@ -196,7 +181,7 @@ class KeySetHolder:
         if self.holds_keys() and kid in (self._keys or {}):
             return
         if self._forced is not None and not self._forced.done():
-            await asyncio.shield(self._forced)
+            await self._wait_for(self._forced)
             return
         now = self._clock()
         if (
@@ -206,9 +191,23 @@ class KeySetHolder:
             return
         self._forced_at = now
         self._forced = asyncio.create_task(self._refresh_for(kid))
-        # Shielded, so a request cancelled while waiting does not take the fetch
-        # other requests are waiting on with it.
-        await asyncio.shield(self._forced)
+        await self._wait_for(self._forced)
+
+    @staticmethod
+    async def _wait_for(refetch: asyncio.Task[KeySetOutcome | None]) -> None:
+        """Wait on a refetch other requests may share.
+
+        Shielded, so a request cancelled while waiting does not take the fetch
+        other requests are waiting on with it. A refetch that `stop()` retired
+        ends the wait instead of cancelling the request: the ticket is read
+        against the set held, as after any refetch that brought nothing.
+        """
+        try:
+            await asyncio.shield(refetch)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if not refetch.cancelled() or (current and current.cancelling()):
+                raise
 
     async def refresh(self) -> KeySetOutcome:
         """One fetch, whatever the outcome."""
@@ -244,16 +243,30 @@ class KeySetHolder:
         return outcome
 
     async def stop(self) -> None:
-        """Stop refreshing. Safe to call twice, and safe with a fetch in flight."""
+        """Stop refreshing. Safe to call twice, and safe with a fetch in flight.
+
+        The refetch an unknown `kid` started is retired with the loop: left
+        running, it would hold a fetch open for up to its deadline after the
+        holder stopped, or two behind a refresh already running, and replace the
+        set of a holder nothing reads any more.
+
+        **Nothing raises out of here**, as out of `ensure()`: after this, teardown
+        says a refused start's second raise and cancels a first fetch not yet
+        read, so a refetch that ended on a defect is logged here rather than
+        raised into that teardown.
+        """
         self._epoch += 1
-        task, self._task = self._task, None
-        if task is None:
-            return
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        tasks = [task for task in (self._task, self._forced) if task is not None]
+        self._task = self._forced = None
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                log.exception("a signing key set fetch raised before it was stopped")
 
     async def _loop(self, epoch: int) -> None:
         # Ended by the epoch `stop()` retires, as `BundleHolder._loop` is: a

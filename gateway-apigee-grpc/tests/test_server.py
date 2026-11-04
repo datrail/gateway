@@ -204,14 +204,6 @@ async def _wait_until_live(port: int) -> None:
         ),
         ({"RAIL_GATEWAY_PORT": "0x50"}, "RAIL_GATEWAY_PORT must be an integer"),
         ({"RAIL_PLUGIN_ENABLED": "true"}, "RAIL_CENTER_URL is required"),
-        (
-            {
-                "RAIL_PLUGIN_ENABLED": "true",
-                "RAIL_CENTER_URL": "https://rail-center.example",
-                "RAIL_GATEWAY_SLUG": "edge",
-            },
-            "RAIL_TICKET_ISSUER and RAIL_TICKET_AUDIENCE are not set",
-        ),
         # Before logging is configured.
         ({"RAIL_GATEWAY_LOG_LEVEL": "LOUD"}, "RAIL_GATEWAY_LOG_LEVEL must be one of"),
     ],
@@ -219,7 +211,6 @@ async def _wait_until_live(port: int) -> None:
         "message limit",
         "port",
         "plugin on with no Rail Center",
-        "signed only with no issuer or audience",
         "log level",
     ],
 )
@@ -258,7 +249,6 @@ async def test_sigterm_stops_it_cleanly(plugin):
             "RAIL_PLUGIN_ENABLED": "true",
             "RAIL_CENTER_URL": f"http://127.0.0.1:{_find_free_port()}",
             "RAIL_GATEWAY_SLUG": "edge",
-            "RAIL_UNSIGNED_TICKETS": "true",
         }
     callout = _start_callout(_create_environment(**settings))
     try:

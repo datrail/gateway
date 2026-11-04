@@ -34,9 +34,6 @@ from standalone_support import (
     unreachable,
 )
 
-# These gateways reach Rail Center over `http://`: see `unsigned_tickets`.
-pytestmark = pytest.mark.usefixtures("unsigned_tickets")
-
 #: A chain with one rule of each action, so a single bundle exercises deny,
 #: alert and allow depending on the ticket presented.
 DENY_ID = "5c8f1e42-0000-4000-8000-0000000000d1"

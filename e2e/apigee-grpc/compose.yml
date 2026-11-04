@@ -31,9 +31,6 @@ services:
       RAIL_CENTER_URL: http://rail-center:8080
       RAIL_GATEWAY_SLUG: edge
       RAIL_PLUGIN_ENABLED: "true"
-      # The stand-in serves unsigned tickets over http://, where no key set is
-      # fetched.
-      RAIL_UNSIGNED_TICKETS: "true"
       RAIL_AUTH_MODE: bearer
       # Selects the enforce bundle from the stub.
       RAIL_AUTH_TOKEN: e2e-enforce
@@ -49,7 +46,6 @@ services:
       RAIL_CENTER_URL: http://rail-center.invalid
       RAIL_GATEWAY_SLUG: edge
       RAIL_PLUGIN_ENABLED: "true"
-      RAIL_UNSIGNED_TICKETS: "true"
       RAIL_GATEWAY_PORT: "9100"
 
   # Two proxies, as on the live harness: /mcp judged by the callout, and

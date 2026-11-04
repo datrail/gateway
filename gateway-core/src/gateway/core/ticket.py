@@ -182,15 +182,16 @@ class TicketVerifier:
 
     No verifier at all is a reader that holds no keys, is configured with no
     issuer or audience, and still accepts unsigned tickets: every reader before
-    signing existed.
+    signing existed. A gateway's own, `KeySetHolder.verifier()`, carries keys
+    alone: nothing gives a gateway its issuer or audience, so a signed ticket
+    that verifies there reads `wrong_audience`.
     """
 
     keys: Mapping[str, Ed25519PublicKey] | None = None
     issuer: str | None = None
     audience: str | None = None
-    #: Read an unsigned ticket as `bad_signature`. A gateway sets it unless
-    #: `RAIL_UNSIGNED_TICKETS=true`, which is for agents still served unsigned
-    #: tickets: with it set, every one of theirs is refused.
+    #: Read an unsigned ticket as `bad_signature`. No gateway sets it: one
+    #: reads both forms, since its agents may still be served unsigned tickets.
     requires_signatures: bool = False
 
 

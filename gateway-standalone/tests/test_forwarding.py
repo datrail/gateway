@@ -9,9 +9,6 @@ from fastmcp.exceptions import ToolError
 from gateway.standalone.server import build_app
 from standalone_support import one_route
 
-# These gateways reach Rail Center over `http://`: see `unsigned_tickets`.
-pytestmark = pytest.mark.usefixtures("unsigned_tickets")
-
 
 @pytest.mark.asyncio
 async def test_a_call_reaches_the_upstream_and_its_answer_comes_back(gateway_url):

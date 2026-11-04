@@ -247,9 +247,8 @@ class _KeySet:
     """A key-set holder whose first fetch does what a case says, and records
     whether it was stopped."""
 
-    def __init__(self, start, *, requires_signatures: bool) -> None:
+    def __init__(self, start) -> None:
         self._start = start
-        self.requires_signatures = requires_signatures
         self.stopped = False
 
     async def start(self):
@@ -260,17 +259,15 @@ class _KeySet:
 
 
 @pytest.mark.asyncio
-async def test_a_slow_key_set_does_not_hold_the_start_where_signatures_are_optional(
-    monkeypatch,
-):
-    """Readiness does not wait on the key set there, so neither does the
-    start: every second in the grace is a second `/health` refuses."""
+async def test_a_slow_key_set_does_not_hold_the_start(monkeypatch):
+    """Readiness does not wait on the key set, so neither does the start: every
+    second in the grace is a second `/health` refuses."""
     monkeypatch.setattr(lifecycle, "STARTUP_FETCH_GRACE_SECONDS", 30.0)
 
     async def never():
         await asyncio.sleep(3600)
 
-    keyset = _KeySet(never, requires_signatures=False)
+    keyset = _KeySet(never)
 
     async with asyncio.timeout(5):
         async with running(holder_serving(serving_a_bundle), keyset):
@@ -279,28 +276,7 @@ async def test_a_slow_key_set_does_not_hold_the_start_where_signatures_are_optio
 
 
 @pytest.mark.asyncio
-async def test_a_key_set_is_waited_on_where_signatures_are_required(monkeypatch):
-    monkeypatch.setattr(lifecycle, "STARTUP_FETCH_GRACE_SECONDS", 0.2)
-    started = asyncio.Event()
-
-    async def slow():
-        started.set()
-        await asyncio.sleep(3600)
-
-    keyset = _KeySet(slow, requires_signatures=True)
-    loop = asyncio.get_running_loop()
-    began = loop.time()
-
-    async with running(holder_serving(serving_a_bundle), keyset):
-        waited = loop.time() - began
-
-    assert started.is_set()
-    assert waited >= 0.2
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("required", [True, False])
-async def test_a_key_set_first_fetch_that_raises_refuses_the_start(required):
+async def test_a_key_set_first_fetch_that_raises_refuses_the_start():
     """A raise is a defect, as for the bundle: `start()` creates the refresh
     loop only after the first fetch returns, so a gateway that served on would
     never refresh its keys."""
@@ -308,7 +284,7 @@ async def test_a_key_set_first_fetch_that_raises_refuses_the_start(required):
     async def broken():
         raise RuntimeError("defect")
 
-    keyset = _KeySet(broken, requires_signatures=required)
+    keyset = _KeySet(broken)
 
     with pytest.raises(RuntimeError, match="defect"):
         async with running(holder_serving(serving_a_bundle), keyset):
@@ -316,8 +292,7 @@ async def test_a_key_set_first_fetch_that_raises_refuses_the_start(required):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("required", [True, False])
-async def test_a_start_the_key_set_refuses_still_retires_the_bundle_loop(required):
+async def test_a_start_the_key_set_refuses_still_retires_the_bundle_loop():
     """A refused start is an exit like any other: the bundle holder that did
     start must not be left refreshing in a process that is going away."""
     fetches = 0
@@ -336,7 +311,7 @@ async def test_a_start_the_key_set_refuses_still_retires_the_bundle_loop(require
         raise RuntimeError("defect")
 
     holder = holder_serving(answer, sleep=sleep)
-    keyset = _KeySet(broken, requires_signatures=required)
+    keyset = _KeySet(broken)
 
     with pytest.raises(RuntimeError, match="defect"):
         async with running(holder, keyset):
@@ -358,7 +333,7 @@ async def test_a_start_the_bundle_refuses_still_stops_the_key_set(monkeypatch):
 
     holder = holder_serving(serving_a_bundle)
     monkeypatch.setattr(holder, "start", broken)
-    keyset = _KeySet(fetched, requires_signatures=True)
+    keyset = _KeySet(fetched)
 
     with pytest.raises(RuntimeError, match="defect"):
         async with running(holder, keyset):
@@ -381,7 +356,7 @@ async def test_a_second_first_fetch_that_raised_is_still_said(monkeypatch, caplo
 
     holder = holder_serving(serving_a_bundle)
     monkeypatch.setattr(holder, "start", bundle_broken)
-    keyset = _KeySet(keys_broken, requires_signatures=True)
+    keyset = _KeySet(keys_broken)
 
     with (
         caplog.at_level(logging.ERROR, logger="gateway.core.lifecycle"),

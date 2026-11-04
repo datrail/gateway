@@ -47,11 +47,9 @@ from core_support import (
     DENIES_NO_KEY,
     DENY_ID,
     FULL_KEY,
-    ISSUER,
     KEY,
     REASONS,
     SKILL_ID,
-    TENANT,
     TENANT_JWKS,
     UNREADABLE,
     Holder,
@@ -911,23 +909,23 @@ async def test_observe_says_what_block_would_refuse_and_still_walks(caplog) -> N
 
 
 @pytest.mark.asyncio
-async def test_a_key_published_a_moment_ago_admits_its_first_ticket():
+async def test_a_key_published_a_moment_ago_verifies_its_first_ticket():
     """The layer asks the key set for its `kid` before reading the ticket. A
     key that signs at once — a compromise withdrawal's replacement — reaches a
     gateway holding only the key before it, and the call waits for one refetch
-    rather than being refused for a key Rail Center has already published."""
+    rather than reading the ticket against a set that lacks its key. No issuer
+    or audience reaches a gateway, so the verified ticket reads
+    `wrong_audience`; without the refetch it would read `bad_signature`."""
     jwks = TENANT_JWKS
     stale = {"keys": [{**jwks["keys"][0], "kid": "vector-key-2"}]}
     answers = [httpx.Response(200, json=stale), httpx.Response(200, json=jwks)]
     keyset = KeySetHolder(
         "https://rail-center.example",
         {},
-        issuer=ISSUER,
-        audience=TENANT,
         transport=httpx.MockTransport(lambda _request: answers.pop(0)),
     )
     await keyset.refresh()
-    enforcement, downstream, _ = layer(
+    enforcement, downstream, reports = layer(
         build_bundle(DENIES_EVERYTHING, ticket_fallback="block"), keyset=keyset
     )
 
@@ -936,7 +934,9 @@ async def test_a_key_published_a_moment_ago_admits_its_first_ticket():
         build_call(),
         headers=[(b"x-rail", encode_signed_ticket().encode("latin-1"))],
     )
+    await settled(reports, expecting=1)
 
-    assert answer.status == 200
-    assert downstream.calls == 1
+    assert answer.status == 403
+    assert downstream.calls == 0
+    assert reports.only()["metadata"]["x-rail-status"] == "wrong_audience"
     assert answers == []

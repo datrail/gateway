@@ -25,14 +25,13 @@ async def running(
     """Run `holder`, and `keyset` beside it, for the life of the block, and
     stop both after.
 
-    The key set's first fetch starts beside the bundle's. It is waited on, in
-    the same grace and never past it, only where signatures are required:
-    there readiness waits on it too, and elsewhere it decides nothing a first
-    request needs, so waiting would only keep `/health` refusing connections. A
+    The key set's first fetch starts beside the bundle's and is not waited on:
+    it decides nothing a first request needs, since an unsigned ticket is read
+    without it, so waiting would only keep `/health` refusing connections. A
     gateway holding no key set still serves, and reads every signed ticket as
-    `bad_signature` until one arrives. A first fetch that has raised by the
-    time the wait ends refuses the start, whether it was waited on or simply
-    finished first, and both holders are stopped before the raise goes on.
+    `bad_signature` until one arrives. A key-set first fetch that has raised by
+    the time the bundle's wait ends refuses the start like the bundle's, and
+    both holders are stopped before the raise goes on.
 
     A None holder has nothing to start, and the block is entered at once.
 
@@ -71,10 +70,7 @@ async def running(
     # with it — `start()` creates the loop after the first fetch returns.
     first = asyncio.create_task(holder.start())
     keys_first = asyncio.create_task(keyset.start()) if keyset is not None else None
-    awaited = {first}
-    if keys_first is not None and keyset is not None and keyset.requires_signatures:
-        awaited.add(keys_first)
-    await asyncio.wait(awaited, timeout=STARTUP_FETCH_GRACE_SECONDS)
+    await asyncio.wait({first}, timeout=STARTUP_FETCH_GRACE_SECONDS)
     # Every task done by now is read below rather than cancelled at teardown.
     # A raise from one read is what refuses the start, and the read after it
     # is then never reached: teardown says that second raise, if there is one.
@@ -143,21 +139,13 @@ async def running(
             except Exception:
                 # Only reachable for a fetch still running when the wait ended
                 # — a bundle fetch past the grace, or a key-set fetch that had
-                # not finished, waited on or not — where the raise this
-                # function does not catch can no longer refuse the start. It is
-                # still a defect, so it is still said out loud.
+                # not finished — where the raise this function does not catch
+                # can no longer refuse the start. It is still a defect, so it is
+                # still said out loud.
                 log.exception("the first %s fetch raised", what)
 
 
-def is_ready(holder: BundleHolder | None, keyset: KeySetHolder | None = None) -> bool:
-    """Whether there is a ruleset to decide with — a bundle held, or no holder
-    to hold one — and, where signed tickets are required, a key set.
-
-    A gateway that requires signed tickets also needs a key set, because without
-    one it refuses every call; one that does not require them reads an unsigned
-    ticket as it always has, so its readiness is the bundle's alone.
-    """
-    bundle_ready = holder is None or holder.current() is not None
-    if keyset is None or not keyset.requires_signatures:
-        return bundle_ready
-    return bundle_ready and keyset.holds_keys()
+def is_ready(holder: BundleHolder | None) -> bool:
+    """Whether there is a ruleset to decide with: always without a holder,
+    and once a bundle is held with one."""
+    return holder is None or holder.current() is not None

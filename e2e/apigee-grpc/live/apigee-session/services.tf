@@ -81,11 +81,6 @@ resource "google_cloud_run_v2_service" "callout" {
         name  = "RAIL_PLUGIN_ENABLED"
         value = "true"
       }
-      # The stand-in serves unsigned tickets and names no issuer or audience.
-      env {
-        name  = "RAIL_UNSIGNED_TICKETS"
-        value = "true"
-      }
       env {
         name  = "RAIL_AUTH_MODE"
         value = "bearer"

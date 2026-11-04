@@ -55,17 +55,16 @@ point whoever reads the denial at a forgery that didn't happen. An invented `kid
 takes the same path.
 
 The refetch carries on after the call is abandoned, so a retry once it has
-succeeded finds the key held. A refetch that fails brings no key, and a retry
-within 30 s of that refetch starting gets no second one: it is denied as
-`bad_signature`.
+succeeded finds the key held and is read against it, rather than waiting
+again. The callout holds no issuer or audience, so a genuine ticket then reads
+`wrong_audience`. A refetch that fails brings no key, and a retry within 30 s
+of that refetch starting gets no second one: it is denied as `bad_signature`.
 
 ### At startup
 
 The callout waits up to 5 s for the first bundle, then serves whether or not
 it holds one. With no bundle held, calls are allowed, and readiness is
-`NOT_SERVING` until one arrives. Unless `RAIL_UNSIGNED_TICKETS=true`
-it waits on the first signing key set in the same 5 s, and readiness is also
-`NOT_SERVING` until a key set is held. A failed fetch doesn't stop it.
+`NOT_SERVING` until one arrives. A failed fetch doesn't stop it.
 
 ## Run it beside Apigee
 
@@ -95,7 +94,7 @@ it waits on the first signing key set in the same 5 s, and readiness is also
     apply, and until then the proxy answers 503;
   - `--min-instances=1`: a cold start longer than `TimeoutMs` is a 503;
   - a startup probe on gRPC service `datrail.gateway.Ready` holds traffic
-    back until a bundle is held, and a key set where signatures are required.
+    back until a bundle is held.
 - **Elsewhere**, the ExternalCallout sends no ID token and nothing checks
   who calls the callout: keep it reachable only from Apigee.
 
@@ -130,7 +129,7 @@ gRPC health (`grpc.health.v1`), on the serving port:
 
 - the empty service name is liveness: `SERVING` once the port is bound;
 - `datrail.gateway.Ready` is readiness: `NOT_SERVING` until a bundle is held,
-  and a key set where signatures are required; `SERVING` with the plugin off.
+  and `SERVING` with the plugin off.
 
 `python -m gateway.apigee_grpc.probe_health [--ready]` asks either on this
 host, and exits 0 on `SERVING`: use it as an exec probe where a gRPC probe
@@ -169,8 +168,7 @@ Or run it with uv:
 ```bash
 make init
 RAIL_PLUGIN_ENABLED=true RAIL_CENTER_URL=https://rail-center.example.com \
-  RAIL_GATEWAY_SLUG=edge RAIL_UNSIGNED_TICKETS=true \
-  uv run python -m gateway.apigee_grpc
+  RAIL_GATEWAY_SLUG=edge uv run python -m gateway.apigee_grpc
 ```
 
 The generated gRPC code is committed: `make proto` regenerates it from the

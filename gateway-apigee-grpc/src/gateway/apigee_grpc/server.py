@@ -45,12 +45,9 @@ _NOT_SERVING = health_pb2.HealthCheckResponse.NOT_SERVING
 class _Health(health.aio.HealthServicer):
     """gRPC health, with readiness read from the holder on every check."""
 
-    def __init__(
-        self, holder: BundleHolder | None, keyset: KeySetHolder | None = None
-    ) -> None:
+    def __init__(self, holder: BundleHolder | None) -> None:
         super().__init__()
         self._holder = holder
-        self._keyset = keyset
 
     async def Check(self, request, context):
         if request.service == READY_SERVICE:
@@ -60,8 +57,7 @@ class _Health(health.aio.HealthServicer):
     async def _update_readiness(self) -> None:
         # `set` also tells anyone watching.
         await self.set(
-            READY_SERVICE,
-            _SERVING if is_ready(self._holder, self._keyset) else _NOT_SERVING,
+            READY_SERVICE, _SERVING if is_ready(self._holder) else _NOT_SERVING
         )
 
 
@@ -90,7 +86,7 @@ async def serving(
         add_ExternalCalloutServiceServicer_to_server(
             RailCallout(holder, reporter, keyset), server
         )
-        health = _Health(holder, keyset)
+        health = _Health(holder)
         health_pb2_grpc.add_HealthServicer_to_server(health, server)
         try:
             bound = server.add_insecure_port(f"0.0.0.0:{listen_port}")

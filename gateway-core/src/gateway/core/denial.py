@@ -178,7 +178,8 @@ def build_report(
         # unusable ticket states fold into one decision, and an operator still
         # has to be able to tell an expired ticket — a correctly formed
         # credential that is simply too old — from one that could not be read,
-        # and a forged signature from a genuine ticket for another tenant.
+        # and a forged signature from a genuine ticket it cannot accept: one for
+        # another tenant, or any while it holds no issuer or audience.
         REPORTED_STATUS_KEY: ticket_state,
     }
     if claimed_status is not None:

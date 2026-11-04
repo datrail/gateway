@@ -251,9 +251,7 @@ def build_gateway(
 
     @gateway.custom_route("/ready", methods=["GET"])
     async def ready(_request):  # pragma: no cover - exercised over HTTP
-        """Whether there is a ruleset to decide with: a policy bundle held, and
-        a signing key set where signatures are required. Asked fresh, answered
-        honestly.
+        """Whether a policy bundle is held. Asked fresh, answered honestly.
 
         `None` from `current()` is *no ruleset*, never *an empty one* — an
         empty chain allows — so the only thing this can truthfully report while
@@ -266,8 +264,7 @@ def build_gateway(
         component with no control plane has no bundle to wait for and never will
         have, so waiting would leave it permanently unready.
 
-        **Under `plugin` it is 503 until a bundle arrives — and, where
-        signatures are required, a key set — at every posture.**
+        **Under `plugin` it is 503 until a bundle arrives, at every posture.**
         Not only the ones that act: a gateway holding a bundle has a ruleset to
         decide with whatever posture that bundle names, while a gateway holding
         nothing has none, and those are different states even though both
@@ -292,7 +289,7 @@ def build_gateway(
         for an operator convenience the `holding policy bundle …` log line
         already covers.
         """
-        if not is_ready(bundle_holder, keyset if bundle_holder is not None else None):
+        if not is_ready(bundle_holder):
             return JSONResponse({"status": "not ready"}, status_code=503)
         return JSONResponse({"status": "ready"})
 

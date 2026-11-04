@@ -41,9 +41,6 @@ from standalone_support import (
     unreachable,
 )
 
-# These gateways reach Rail Center over `http://`: see `unsigned_tickets`.
-pytestmark = pytest.mark.usefixtures("unsigned_tickets")
-
 #: Never reached — `build_gateway` validates this and nothing here forwards.
 UPSTREAM = "http://upstream.invalid/mcp"
 

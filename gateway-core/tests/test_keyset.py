@@ -16,12 +16,14 @@ set, or kept a stale one past its age, is the bug this file exists to catch.
 import asyncio
 import json
 import logging
+from dataclasses import replace
 from typing import Any
 
 import httpx
 import pytest
 from test_signed_ticket import AUDIENCE, ISSUER, KID, NOW, SIGNING, _claims, _signed
 
+import gateway.core.keyset as keyset_module
 from gateway.core.keyset import (
     FETCH_DEADLINE_SECONDS,
     JWKS_PATH,
@@ -76,8 +78,6 @@ def ok(body: Any = JWKS) -> httpx.Response:
 def holder(
     transport, clock: Clock | None = None, url: str = URL, **kwargs
 ) -> KeySetHolder:
-    kwargs.setdefault("issuer", ISSUER)
-    kwargs.setdefault("audience", AUDIENCE)
     return KeySetHolder(
         url,
         {"Authorization": "Bearer t0ken"},
@@ -92,7 +92,11 @@ def valid_ticket() -> str:
 
 
 def reads(keys: KeySetHolder, header: str) -> str:
-    return parse_rail_header(header, NOW, keys.verifier()).state
+    # The holder supplies keys alone. The issuer and audience are the vectors'
+    # tenant's, as a reader holding them would compare against, so what these
+    # tests tell apart is the key set: `valid` against `bad_signature`.
+    verifier = replace(keys.verifier(), issuer=ISSUER, audience=AUDIENCE)
+    return parse_rail_header(header, NOW, verifier).state
 
 
 @pytest.mark.asyncio
@@ -358,6 +362,55 @@ async def test_concurrent_requests_naming_an_unknown_kid_share_one_fetch() -> No
 
 
 @pytest.mark.asyncio
+async def test_stop_retires_a_refetch_in_flight() -> None:
+    """A refetch an unknown `kid` started ends with the holder: `stop()` does not
+    wait on it, it does not replace the set afterwards, and the request waiting
+    on it returns, to read its ticket against the set held, rather than being
+    cancelled."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Held(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            started.set()
+            await release.wait()
+            return ok()
+
+    keys = holder(Held())
+    waiting = asyncio.create_task(keys.ensure(valid_ticket()))
+    await asyncio.wait_for(started.wait(), 5)
+
+    await asyncio.wait_for(keys.stop(), 5)
+    release.set()
+    await asyncio.wait_for(waiting, 5)
+    await asyncio.sleep(0)
+
+    assert keys.verifier().keys is None
+    assert reads(keys, valid_ticket()) == "bad_signature"
+
+
+@pytest.mark.asyncio
+async def test_stop_does_not_raise_a_refetch_that_ended_on_a_defect(
+    monkeypatch, caplog
+) -> None:
+    """After this, teardown says a refused start's second raise and cancels a
+    first fetch not yet read, so a defect the refetch ended on is logged here
+    rather than raised into it."""
+
+    def broken(_body):
+        raise RuntimeError("defect")
+
+    monkeypatch.setattr(keyset_module, "usable_keys", broken)
+    keys = holder(responder(ok()))
+    await keys.ensure(valid_ticket())
+
+    with caplog.at_level(logging.ERROR, logger="gateway.core.keyset"):
+        await keys.stop()
+
+    assert "a signing key set fetch raised before it was stopped" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_a_held_kid_or_an_unsigned_ticket_fetches_nothing() -> None:
     keys = holder(responder(ok()))
     await keys.refresh()
@@ -421,15 +474,18 @@ async def test_the_loop_refreshes_on_its_interval_and_stops() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_verifier_carries_the_configuration() -> None:
-    keys = holder(responder(), requires_signatures=True)
+async def test_the_verifier_carries_keys_alone() -> None:
+    """Nothing gives a gateway its issuer or audience, and it reads both forms."""
+    keys = holder(responder(ok()))
+    await keys.refresh()
 
     verifier = keys.verifier()
 
+    assert set(verifier.keys or {}) == {KID}
     assert (verifier.issuer, verifier.audience, verifier.requires_signatures) == (
-        ISSUER,
-        AUDIENCE,
-        True,
+        None,
+        None,
+        False,
     )
     assert KID == "vector-key-1"
 
