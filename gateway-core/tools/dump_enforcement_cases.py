@@ -55,11 +55,20 @@ def _format_bundle(case) -> dict:
     """The held bundle's fields, each prefixed `bun_`."""
     if case.enforcement is None:
         return dict.fromkeys(
-            ("bun_posture", "bun_fallback", "bun_policies", "bun_bindings")
+            (
+                "bun_posture",
+                "bun_fallback",
+                "bun_names_tenant",
+                "bun_policies",
+                "bun_bindings",
+            )
         )
     return {
         "bun_posture": case.enforcement,
         "bun_fallback": case.fallback,
+        # Whether the bundle names the tenant's `ticket_issuer` and
+        # `ticket_audience`: without both, a signed ticket reads `wrong_audience`.
+        "bun_names_tenant": case.names_tenant,
         "bun_policies": [_format_policy(p) for p in case.policies],
         "bun_bindings": [
             {

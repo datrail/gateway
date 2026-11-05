@@ -162,10 +162,11 @@ ISSUER = f"https://rail-center.example/tenants/{TENANT}"
 #: The published key set those tickets verify against.
 TENANT_JWKS = _SIGNING["jwks"]
 
-#: A gateway enforcing for `TENANT`, holding the key the test key signs with.
-TENANT_VERIFIER = TicketVerifier(
-    keys=usable_keys(_SIGNING["jwks"]), issuer=ISSUER, audience=TENANT
-)
+#: A gateway's verifier holding the key the test key signs with, and nothing
+#: else, as `KeySetHolder.verifier()` holds: `judge` gives it the issuer and
+#: audience of the bundle, so an `EnforcementCase` gets `TENANT`'s, or none
+#: with `names_tenant=False`.
+TENANT_VERIFIER = TicketVerifier(keys=usable_keys(_SIGNING["jwks"]))
 
 
 def encode_signed_ticket(**claims: Any) -> str:
@@ -618,7 +619,10 @@ ENFORCEMENT_CASES = [
         x_rail=(encode_signed_ticket(),),
         verifier=TENANT_VERIFIER,
     ),
-    # Genuine — Rail Center signed it — but for another tenant's gateway.
+    # Genuine — signed with a key this gateway holds — but naming another
+    # tenant: what only a key shared between tenants lets past the signature.
+    # Under per-tenant keys another tenant's ticket names a key not held, and
+    # is `bad_signature` before `iss` or `aud` is read.
     EnforcementCase(
         "no usable ticket, block (wrong_audience)",
         ticket_fallback="block",

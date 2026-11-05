@@ -181,9 +181,9 @@ class TicketVerifier:
     out of here so that a reading stays a function of the header, the time and
     these values.
 
-    No verifier at all is a reader that holds no keys, is configured with no
-    issuer or audience, and still accepts unsigned tickets: every reader before
-    signing existed. A gateway's own, `KeySetHolder.verifier()`, carries keys
+    No verifier at all is a reader that holds no keys and no issuer or
+    audience, and still accepts unsigned tickets: every reader before signing
+    existed. A gateway's own, `KeySetHolder.verifier()`, carries keys
     alone; `judge` gives it the issuer and audience of the bundle it holds, and
     a bundle not naming both leaves every signed ticket that verifies
     `wrong_audience`.
@@ -564,9 +564,12 @@ def _read_signed(value: str, now: int, verifier: TicketVerifier | None) -> Parse
         return ParseResult("malformed")
 
     # **Genuine, so `bad_signature` would misreport it; not for this reader, so
-    # not usable either.** A reader with nothing to compare against accepts
-    # nothing rather than skipping the check: a skipped `aud` check is how one
-    # tenant's ticket is admitted at another's gateway.
+    # not usable either.** `iss` and `aud` assert the ticket is the tenant's
+    # whose bundle the reader holds: a tenant-boundary check behind the
+    # per-tenant keys, which refuse another tenant's ticket first, as
+    # `bad_signature`, and the one that still refuses it where a key is shared.
+    # A reader with nothing to compare against accepts nothing rather than
+    # skipping the check.
     if verifier.issuer is None or verifier.audience is None:
         return ParseResult("wrong_audience")
     if now < nbf - NBF_ALLOWANCE_SEC:

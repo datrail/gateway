@@ -924,7 +924,7 @@ async def test_a_key_published_a_moment_ago_admits_its_first_ticket():
         transport=httpx.MockTransport(lambda _request: answers.pop(0)),
     )
     await keyset.refresh()
-    enforcement, downstream, _ = layer(
+    enforcement, downstream, reports = layer(
         build_bundle(DENIES_EVERYTHING, ticket_fallback="block"), keyset=keyset
     )
 
@@ -937,3 +937,5 @@ async def test_a_key_published_a_moment_ago_admits_its_first_ticket():
     assert answer.status == 200
     assert downstream.calls == 1
     assert answers == []
+    await settled(reports, expecting=0)
+    assert reports.bodies == []

@@ -2,8 +2,9 @@
 with (`ticket_issuer` and `ticket_audience`, `schema_version` `2.1`).
 
 What a gateway then reads a signed ticket as, against them, is the shared
-enforcement table's: a ticket for the tenant the bundle names is judged, one for
-another tenant and one under a bundle not naming both are `wrong_audience`.
+enforcement table's: a ticket for the tenant the bundle names is judged; one
+naming another tenant under a key the gateway holds, and one under a bundle not
+naming both, are `wrong_audience`.
 """
 
 import logging
@@ -53,6 +54,22 @@ def test_null_or_blank_is_unset(value, caplog):
 
     assert (held.ticket_issuer, held.ticket_audience) == (None, None)
     assert caplog.text == ""
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_each_field_is_read_on_its_own(value):
+    """One field unset leaves the other as sent: neither is read through the
+    other. That a reader holding either alone accepts no signed ticket is the
+    signed-ticket vectors' (`a reader configured with no issuer`, `… no
+    audience`)."""
+    issuer_only = _bundle(ticket_issuer=ISSUER, ticket_audience=value)
+    audience_only = _bundle(ticket_issuer=value, ticket_audience=AUDIENCE)
+
+    assert (issuer_only.ticket_issuer, issuer_only.ticket_audience) == (ISSUER, None)
+    assert (audience_only.ticket_issuer, audience_only.ticket_audience) == (
+        None,
+        AUDIENCE,
+    )
 
 
 @pytest.mark.parametrize("value", [42, ["a"], {"a": 1}, True])

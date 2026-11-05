@@ -475,10 +475,9 @@ def _ticket_claim(body: Mapping[str, object], name: str) -> str | None:
     bundle instead would keep the one held before — freezing every policy
     change for as long as the responder kept sending the bad field — and leave
     a gateway starting in that window holding nothing, forwarding every call
-    unjudged. Absent, `null` and
-    blank are None without a warning: a `2.0` bundle predates the fields, a
-    Rail Center that signs no tickets sends `null`, and blank names nothing a
-    ticket could match.
+    unjudged. Absent, `null` and blank are None without a warning: a `2.0`
+    bundle predates the fields, a Rail Center that signs no tickets sends
+    `null`, and blank names nothing a ticket could match.
     """
     value = body.get(name)
     if value is None:
