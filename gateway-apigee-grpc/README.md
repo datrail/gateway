@@ -56,9 +56,9 @@ takes the same path.
 
 The refetch carries on after the call is abandoned, so a retry once it has
 succeeded finds the key held and is read against it, rather than waiting
-again. The callout holds no issuer or audience, so a genuine ticket then reads
-`wrong_audience`. A refetch that fails brings no key, and a retry within 30 s
-of that refetch starting gets no second one: it is denied as `bad_signature`.
+again, and a genuine ticket for the tenant the bundle names is admitted. A
+refetch that fails brings no key, and a retry within 30 s of that refetch
+starting gets no second one: it is denied as `bad_signature`.
 
 ### At startup
 

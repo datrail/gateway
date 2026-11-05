@@ -15,8 +15,8 @@ HTTPS = "https://rail-center.example"
 
 
 def test_the_key_set_carries_no_issuer_audience_or_requirement():
-    """Nothing gives a gateway its issuer or audience, so a signed ticket that
-    verifies reads `wrong_audience`; and it reads an unsigned ticket as before."""
+    """The issuer and audience come from the held bundle, not from the key set
+    or any setting; and it reads an unsigned ticket as before."""
     verifier = build_keyset(HTTPS, {}).verifier()
 
     assert (verifier.issuer, verifier.audience) == (None, None)

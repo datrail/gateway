@@ -215,6 +215,13 @@ class UsableBundle:
     #: a safe universal reading of it, so a line reporting that silence as a
     #: decision attributes to Rail Center a posture it never stated.
     posture_told: bool
+    #: The `iss` and `aud` a signed ticket for this gateway's tenant carries,
+    #: from `ticket_issuer` and `ticket_audience` at the root (`2.1`). The only
+    #: place a gateway learns them: none is configured, so a bundle not naming
+    #: both — one from before `2.1`, or one from a Rail Center that signs no
+    #: tickets — leaves every signed ticket that verifies `wrong_audience`.
+    ticket_issuer: str | None = None
+    ticket_audience: str | None = None
 
 
 def _usable_priority(value: object) -> bool:
@@ -458,6 +465,34 @@ def _posture(value: object) -> tuple[Enforcement, bool]:
     return mode, True  # type: ignore[return-value]
 
 
+def _ticket_claim(body: Mapping[str, object], name: str) -> str | None:
+    """`ticket_issuer` or `ticket_audience`, or None where the bundle names none.
+
+    **A value that is not a string is warned about and held as None, not
+    refused.** The two decide only whether a signed ticket is accepted, and
+    holding either as None fails closed: every signed ticket that verifies
+    reads `wrong_audience`, as at a gateway never told them. Refusing the
+    bundle instead would keep the one held before — freezing every policy
+    change for as long as the responder kept sending the bad field — and leave
+    a gateway starting in that window holding nothing, forwarding every call
+    unjudged. Absent, `null` and blank are None without a warning: a `2.0`
+    bundle predates the fields, a Rail Center that signs no tickets sends
+    `null`, and blank names nothing a ticket could match.
+    """
+    value = body.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        log.warning(
+            "policy bundle's %s is a value of type %s rather than a string; held "
+            "as unset, so every signed ticket that verifies reads wrong_audience",
+            name,
+            _safe(type(value).__name__),
+        )
+        return None
+    return value if value.strip() else None
+
+
 def _fallback(value: object) -> Fallback:
     """What a call no binding matches, or one carrying no usable ticket, is
     judged to be — `binding_fallback` and `ticket_fallback` read alike.
@@ -624,4 +659,6 @@ def validate_bundle(body: object) -> UsableBundle:
         fallback=fallback,
         ticket_fallback=ticket_fallback,
         posture_told=posture_told,
+        ticket_issuer=_ticket_claim(body, "ticket_issuer"),
+        ticket_audience=_ticket_claim(body, "ticket_audience"),
     )

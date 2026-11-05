@@ -188,8 +188,11 @@ names a key not held. A set is used for at most 900 seconds after the last
 fetch that succeeded, counted on a clock that keeps running through suspend;
 past that every signed ticket reads `bad_signature` until a fetch succeeds.
 An `http://` Rail Center is never fetched from, so every signed ticket reads
-`bad_signature` there. Nothing gives the gateway its tenant's issuer and
-audience, so a signed ticket whose signature verifies reads `wrong_audience`.
+`bad_signature` there. The issuer and audience a ticket must name are its
+tenant's, from the policy bundle's `ticket_issuer` and `ticket_audience`;
+while the bundle does not name both — one from before `2.1`, or from a Rail
+Center that signs no tickets — a signed ticket whose signature verifies reads
+`wrong_audience`.
 Readiness doesn't wait for a key set.
 
 #### `RAIL_GATEWAY_PORT`

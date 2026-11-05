@@ -91,7 +91,7 @@
             "expired",
             "valid"
           ],
-          "description": "**The enforcement point's own reading of the `x-rail` header**, under the exact key the control plane reads. All six unusable states fold into one decision, and an operator still has to tell an expired ticket — a correctly formed credential that is simply too old — from one that could not be read at all, and a forged or mis-keyed signed ticket — or any unsigned ticket at a reader requiring signatures — (`bad_signature`) from a genuine one the reader cannot accept (`wrong_audience`): issued for another tenant, or any at a reader holding no issuer or audience. Never the caller's claimed status: anyone can set a request header, and this is the field an operator reads as the decision."
+          "description": "**The enforcement point's own reading of the `x-rail` header**, under the exact key the control plane reads. All six unusable states fold into one decision, and an operator still has to tell an expired ticket — a correctly formed credential that is simply too old — from one that could not be read at all, and a forged or mis-keyed signed ticket — or any unsigned ticket at a reader requiring signatures — (`bad_signature`) from a genuine one the reader cannot accept (`wrong_audience`): one naming another tenant, which per-tenant keys refuse first as `bad_signature` unless a key is shared, or any at a reader holding no issuer or audience. Never the caller's claimed status: anyone can set a request header, and this is the field an operator reads as the decision."
         },
         "claimed-x-rail-status": {
           "type": "string",
