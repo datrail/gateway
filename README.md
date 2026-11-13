@@ -1,12 +1,12 @@
 # DatRail Gateway
 
 > This repository is replaced by
-> [datrail/railguard](https://github.com/datrail/railguard), is no longer
-> developed and will be archived. `gateway-apigee-grpc` is replaced by
-> `railguard-apigee` (`ghcr.io/datrail/railguard-apigee`), the Apigee
-> ExternalCallout gateway; railguard also runs the gateway behind Envoy or GCP's
-> Application Load Balancer, in `railguard-envoy` (`rail gateway`).
-> `gateway-standalone` is retired with this repository, with no replacement.
+> [datrail/railguard](https://github.com/datrail/railguard) and is no longer
+> developed. `gateway-apigee-grpc` is replaced by `railguard-apigee`
+> (`ghcr.io/datrail/railguard-apigee`), the Apigee ExternalCallout gateway;
+> railguard also runs the gateway behind Envoy or GCP's Application Load
+> Balancer, in `railguard-envoy` (`rail gateway`). `gateway-standalone` is
+> retired with this repository, with no replacement.
 
 DatRail Gateway is the enforcement point in the open-source DatRail request
 path. It sits in front of an MCP server, reads the `x-rail` ticket attached by
